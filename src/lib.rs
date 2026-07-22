@@ -8,8 +8,13 @@
 //! axutils = { version = "0.1", default-features = false, features = ["regex"] }
 //! ```
 
-#[cfg(feature = "regex")]
-pub mod reg_utils;
+pub mod utils;
 
 #[cfg(feature = "regex")]
-pub use reg_utils::RegUtils;
+pub use utils::reg_utils;
+
+#[cfg(feature = "regex")]
+pub use utils::RegUtils;
+
+pub use utils::time_utils;
+pub use utils::TimeUtils;

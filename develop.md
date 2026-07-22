@@ -14,7 +14,10 @@
 ├── AGENTS.md        # 项目协作规则，不随包发布
 └── src/
     ├── lib.rs       # crate 入口和公共导出
-    └── reg_utils.rs # RegUtils 实现与单元测试
+    └── utils/
+        ├── mod.rs        # 通用工具模块和公共导出
+        ├── reg_utils.rs  # RegUtils 实现与单元测试
+        └── time_utils.rs # TimeUtils 实现与单元测试
 ```
 
 ## 本地开发

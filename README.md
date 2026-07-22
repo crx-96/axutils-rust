@@ -2,7 +2,8 @@
 
 `axutils` 是一个按 feature 组织的 Rust 常用工具库。
 
-当前提供 `RegUtils`，用于校验电子邮箱地址和中国大陆手机号码。
+当前提供 `RegUtils` 和 `TimeUtils`：前者用于校验电子邮箱地址和中国大陆手机号码，
+后者用于获取当前 Unix 时间戳。
 
 ## 安装
 
@@ -24,12 +25,18 @@ axutils = { version = "0.1", default-features = false, features = ["regex"] }
 
 ```rust
 use axutils::RegUtils;
+use axutils::TimeUtils;
 
 assert!(RegUtils::is_email("user@example.com"));
 assert!(!RegUtils::is_email("user@example"));
 
 assert!(RegUtils::is_phone_cn("13812345678"));
 assert!(!RegUtils::is_phone_cn("12812345678"));
+
+assert!(TimeUtils::timestamp_seconds() > 0);
+assert!(TimeUtils::timestamp_milliseconds() > 0);
+assert!(TimeUtils::timestamp_microseconds() > 0);
+assert!(TimeUtils::timestamp_nanoseconds() > 0);
 ```
 
 ### `RegUtils::is_email`
@@ -51,6 +58,30 @@ assert!(!RegUtils::is_phone_cn("12812345678"));
 ```
 
 方法要求输入为 11 位数字，且号段以 `13` 至 `19` 开头。
+
+### `TimeUtils`
+
+`TimeUtils` 提供四个获取当前 Unix 时间戳的方法：
+
+- `timestamp_seconds()`：秒，返回 `u64`；
+- `timestamp_milliseconds()`：毫秒，返回 `u128`；
+- `timestamp_microseconds()`：微秒，返回 `u128`；
+- `timestamp_nanoseconds()`：纳秒，返回 `u128`。
+
+```rust
+use axutils::TimeUtils;
+
+let seconds = TimeUtils::timestamp_seconds();
+let milliseconds = TimeUtils::timestamp_milliseconds();
+let microseconds = TimeUtils::timestamp_microseconds();
+let nanoseconds = TimeUtils::timestamp_nanoseconds();
+
+assert!(milliseconds / 1_000 >= seconds as u128);
+assert!(microseconds / 1_000 >= milliseconds);
+assert!(nanoseconds / 1_000 >= microseconds);
+```
+
+如果系统时间早于 Unix 纪元，这些方法会 panic。
 
 ## API 文档
 
