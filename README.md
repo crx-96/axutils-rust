@@ -61,8 +61,9 @@ assert!(TimeUtils::timestamp_nanoseconds() > 0);
 
 ### `TimeUtils`
 
-`TimeUtils` 提供四个获取当前 Unix 时间戳的方法：
+`TimeUtils` 提供五个获取当前 Unix 时间戳的方法：
 
+- `timestamp()`：按秒、毫秒、微秒、纳秒顺序返回 `(u64, u128, u128, u128)`；
 - `timestamp_seconds()`：秒，返回 `u64`；
 - `timestamp_milliseconds()`：毫秒，返回 `u128`；
 - `timestamp_microseconds()`：微秒，返回 `u128`；
@@ -71,10 +72,7 @@ assert!(TimeUtils::timestamp_nanoseconds() > 0);
 ```rust
 use axutils::TimeUtils;
 
-let seconds = TimeUtils::timestamp_seconds();
-let milliseconds = TimeUtils::timestamp_milliseconds();
-let microseconds = TimeUtils::timestamp_microseconds();
-let nanoseconds = TimeUtils::timestamp_nanoseconds();
+let (seconds, milliseconds, microseconds, nanoseconds) = TimeUtils::timestamp();
 
 assert!(milliseconds / 1_000 >= seconds as u128);
 assert!(microseconds / 1_000 >= milliseconds);
