@@ -2,7 +2,7 @@
 
 本文档面向项目维护者和贡献者，不属于 crates.io 发布包。`Cargo.toml` 使用
 `package.include` 白名单，仅将源码、`README.md`、`LICENSE` 和 Cargo 配置打入发布包，
-因此 `develop.md`、`AGENTS.md` 以及 `docs/skills/` 不会随包发布。
+因此 `develop.md`、`AGENTS.md` 以及 `docs/` 不会随包发布。
 
 ## 项目结构
 
@@ -12,6 +12,8 @@
 ├── README.md        # 面向使用者，随包发布
 ├── develop.md       # 面向开发者，不随包发布
 ├── AGENTS.md        # 项目协作规则，不随包发布
+├── docs/
+│   └── module-map.md # 工具类和公共模块定位，不随包发布
 └── src/
     ├── lib.rs       # crate 入口和公共导出
     └── utils/
@@ -38,6 +40,9 @@ cargo test --no-default-features
 1. API doc，说明行为、输入范围和限制；
 2. `# Examples` doctest，确保 README/API 示例可编译运行；
 3. 覆盖正常输入和边界输入的单元测试。
+
+新增方法时优先评估性能和安全边界；新增、删除或重命名工具类/公共模块时，必须同步维护
+`docs/module-map.md` 中的职责、导出、依赖和使用场景定位。
 
 新增 feature 时，应同步更新 `Cargo.toml`、`README.md` 和本文件，并至少验证默认
 feature、`--no-default-features` 和 `--all-features` 三种配置。
