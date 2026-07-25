@@ -4,10 +4,10 @@
 
 当前项目最低支持 Rust 1.76。
 
-当前提供 `TimeUtils` 和 `RegUtils`：前者不依赖第三方包，默认可用，用于获取当前 Unix
-时间戳；后者的基础能力依赖第三方 `regex` crate，需要显式启用 `regex` feature，用于校验
-电子邮箱地址和中国大陆手机号码。`RegUtils::is_phone` 还需要同时启用独立的
-`libphonenumber` feature。
+当前提供 `PathUtils`、`TimeUtils` 和 `RegUtils`：前两者不依赖第三方包，默认可用，分别用于
+路径处理和获取当前 Unix 时间戳；后者的基础能力依赖第三方 `regex` crate，需要显式启用
+`regex` feature，用于校验电子邮箱地址和中国大陆手机号码。`RegUtils::is_phone` 还需要同时
+启用独立的 `libphonenumber` feature。
 
 ## 安装
 
@@ -18,8 +18,8 @@
 axutils = "0.1"
 ```
 
-上面的依赖声明默认提供 `TimeUtils`。如果需要使用 `RegUtils`，请显式启用 `regex`
-feature：
+上面的依赖声明默认提供 `PathUtils` 和 `TimeUtils`。如果需要使用 `RegUtils`，请显式启用
+`regex` feature：
 
 ```toml
 [dependencies]
@@ -43,6 +43,33 @@ assert!(TimeUtils::timestamp_seconds() > 0);
 assert!(TimeUtils::timestamp_milliseconds() > 0);
 assert!(TimeUtils::timestamp_microseconds() > 0);
 assert!(TimeUtils::timestamp_nanoseconds() > 0);
+```
+
+### `PathUtils`
+
+`PathUtils` 提供路径判断、当前进程路径获取和多路径拼接：
+
+- `is_absolute(path)`：按当前平台的路径语法判断是否为绝对路径，不检查路径是否存在；
+- `current_dir()`：获取当前进程的工作目录，返回 `std::io::Result<PathBuf>`；
+- `executable_path()`：获取当前进程可执行文件的路径，返回 `std::io::Result<PathBuf>`；
+- `join(paths)`：按顺序拼接多个路径，并在词法层面处理 `.` 和 `..`；输入为空时返回当前目录的词法表示
+  `.`。
+
+`join` 不访问文件系统，不解析符号链接；如果后续路径片段是绝对路径，会按照
+`PathBuf::push` 的平台规则替换此前的拼接结果。
+
+```rust
+use axutils::PathUtils;
+
+let workspace = PathUtils::current_dir().expect("current directory should be available");
+assert!(PathUtils::is_absolute(&workspace));
+
+let source_file = PathUtils::join(["project", "src", "..", "README.md"]);
+assert!(source_file.ends_with("README.md"));
+
+let executable =
+    PathUtils::executable_path().expect("the current executable should be available");
+assert!(!executable.as_os_str().is_empty());
 ```
 
 ### `RegUtils::is_email`
@@ -138,5 +165,5 @@ assert!(!RegUtils::is_phone_cn("12812345678"));
 发布后可在 [docs.rs/axutils](https://docs.rs/axutils) 查看完整 API 文档。
 
 默认 feature 为空，当前 crate 默认不会启用第三方 `regex` 或 `phonenumber` 依赖；
-`TimeUtils` 直接从 crate 根模块导出，`RegUtils` 仅在启用 `regex` feature 后导出。
+`PathUtils` 和 `TimeUtils` 直接从 crate 根模块导出，`RegUtils` 仅在启用 `regex` feature 后导出。
 `RegUtils::is_phone` 必须显式同时启用 `regex` 和 `libphonenumber` features。
