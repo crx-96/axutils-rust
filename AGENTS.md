@@ -4,7 +4,8 @@
 
 这是一个 Rust library crate，包名和 crate 名均为 `axutils`。公共 API 位于
 `src/lib.rs` 及其 feature 模块中。当前 `TimeUtils` 仅依赖标准库，属于默认能力；
-`RegUtils` 依赖第三方 `regex` crate，仅通过显式启用的 `regex` feature 提供。
+`RegUtils` 模块及基础校验能力依赖第三方 `regex` crate，仅通过显式启用的 `regex` feature 提供；
+国际手机号校验能力还需要显式同时启用独立的 `libphonenumber` feature。
 工具类的职责边界、公共导出、依赖和适用范围维护在
 [工具类定位文档](docs/module-map.md) 中。
 
@@ -19,6 +20,9 @@
 - 新增需要第三方包的能力时，依赖必须标记为 `optional = true`，并优先使用与依赖名一致的 feature，通过 `dep:<dependency-name>` 映射。
 - 不依赖第三方包的方法属于默认能力，不添加 feature 守卫，直接从 crate 根模块默认导出。
 - feature 守卫、模块路径、README 示例和开发者文档必须保持一致；默认 feature 只包含不依赖第三方包的能力，当前正则能力统一使用 `regex` feature。
+- 模块、类型和方法的 feature 守卫应按其直接能力和依赖分别控制：模块或类型只由自身所属能力的 feature 导出，不因其他可选依赖 feature 单独启用而扩大公共 API。
+- 一个 API 同时依赖多个可选能力时，使用 `#[cfg(all(feature = "...", feature = "..."))]` 精确限制实现、导入、测试和文档示例；不要用更宽的模块级守卫替代方法级约束。
+- 可选依赖对应的 feature 应保持独立，除非 API 契约明确要求，否则不得隐式启用其他 feature；多 feature 组合及其公共 API 矩阵必须同步记录在工具类定位文档、README 和 API doc 中。
 
 ## 验证命令
 

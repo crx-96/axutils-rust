@@ -2,7 +2,7 @@
 name = "axutils"
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.70"
+rust-version = "1.76"
 description = "Rust utility library with opt-in feature modules"
 license = "MIT"
 readme = "README.md"
@@ -21,6 +21,8 @@ crate-type = ["lib"]
 [features]
 default = []
 regex = ["dep:regex"]
+libphonenumber = ["dep:libphonenumber"]
 
 [dependencies]
 regex = { version = "1", optional = true }
+libphonenumber = { package = "phonenumber", version = "0.3", optional = true }

@@ -8,7 +8,7 @@
 | 工具类 | 源文件 | crate 根模块导出 | 可用条件与依赖 | 职责与主要使用场景 |
 | --- | --- | --- | --- | --- |
 | `TimeUtils` | `src/utils/time_utils.rs` | `axutils::TimeUtils`；模块为 `axutils::time_utils` | 默认可用；仅依赖 Rust 标准库 | 获取当前 Unix 时间戳，支持秒、毫秒、微秒和纳秒；不负责日期格式化、时区转换或日历计算 |
-| `RegUtils` | `src/utils/reg_utils.rs` | 启用 `regex` feature 后提供 `axutils::RegUtils`；模块为 `axutils::reg_utils` | `regex` feature；可选的第三方 `regex` crate | 校验常见电子邮箱地址和中国大陆手机号码格式；只做格式校验，不验证地址或号码是否真实存在 |
+| `RegUtils` | `src/utils/reg_utils.rs` | 启用 `regex` feature 后提供 `axutils::RegUtils`；模块为 `axutils::reg_utils` | `regex` feature 提供模块、常见/严格邮箱和中国大陆手机号校验；可选的第三方 `regex` crate。`is_phone` 还要求独立的 `libphonenumber` feature，并通过依赖别名 `libphonenumber` 使用 crates.io 的 `phonenumber` crate | 校验常见和严格电子邮箱格式、中国大陆手机号码格式，以及启用两个 feature 后的国际 E.164 手机号码格式；只做本地格式、号段和号码类型校验，不验证地址或号码是否真实存在 |
 
 ## 新增工具类时的定位要求
 
