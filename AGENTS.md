@@ -3,7 +3,8 @@
 ## 项目定位
 
 这是一个 Rust library crate，包名和 crate 名均为 `axutils`。公共 API 位于
-`src/lib.rs` 及其 feature 模块中，当前通过默认启用的 `regex` feature 提供 `RegUtils`。
+`src/lib.rs` 及其 feature 模块中。当前 `TimeUtils` 仅依赖标准库，属于默认能力；
+`RegUtils` 依赖第三方 `regex` crate，仅通过显式启用的 `regex` feature 提供。
 
 ## 修改约定
 
@@ -12,7 +13,7 @@
 - 新增公共方法时，必须同时添加 API doc、`# Examples` doctest 和覆盖正常/边界情况的测试。
 - 新增需要第三方包的能力时，依赖必须标记为 `optional = true`，并优先使用与依赖名一致的 feature，通过 `dep:<dependency-name>` 映射。
 - 不依赖第三方包的方法属于默认能力，不添加 feature 守卫，直接从 crate 根模块默认导出。
-- feature 守卫、模块路径、README 示例和开发者文档必须保持一致；当前正则能力统一使用 `regex` feature。
+- feature 守卫、模块路径、README 示例和开发者文档必须保持一致；默认 feature 只包含不依赖第三方包的能力，当前正则能力统一使用 `regex` feature。
 
 ## 验证命令
 

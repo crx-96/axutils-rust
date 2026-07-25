@@ -2,8 +2,9 @@
 
 `axutils` 是一个按 feature 组织的 Rust 常用工具库。
 
-当前提供 `RegUtils` 和 `TimeUtils`：前者用于校验电子邮箱地址和中国大陆手机号码，
-后者用于获取当前 Unix 时间戳。
+当前提供 `TimeUtils` 和 `RegUtils`：前者不依赖第三方包，默认可用，用于获取当前 Unix
+时间戳；后者依赖第三方 `regex` crate，需要显式启用 `regex` feature，用于校验电子邮箱
+地址和中国大陆手机号码。
 
 ## 安装
 
@@ -14,24 +15,18 @@
 axutils = "0.1"
 ```
 
-`regex` 是默认 feature，用于启用依赖第三方 `regex` crate 的正则工具。如果需要显式声明 feature，或关闭默认 feature 后按需启用，可以写成：
+上面的依赖声明默认提供 `TimeUtils`。如果需要使用 `RegUtils`，请显式启用 `regex`
+feature：
 
 ```toml
 [dependencies]
-axutils = { version = "0.1", default-features = false, features = ["regex"] }
+axutils = { version = "0.1", features = ["regex"] }
 ```
 
-## 使用
+## 使用 `TimeUtils`
 
 ```rust
-use axutils::RegUtils;
 use axutils::TimeUtils;
-
-assert!(RegUtils::is_email("user@example.com"));
-assert!(!RegUtils::is_email("user@example"));
-
-assert!(RegUtils::is_phone_cn("13812345678"));
-assert!(!RegUtils::is_phone_cn("12812345678"));
 
 assert!(TimeUtils::timestamp_seconds() > 0);
 assert!(TimeUtils::timestamp_milliseconds() > 0);
@@ -81,9 +76,23 @@ assert!(nanoseconds / 1_000 >= microseconds);
 
 如果系统时间早于 Unix 纪元，这些方法会 panic。
 
+## 使用 `RegUtils`
+
+启用 `regex` feature 后，可以使用正则校验工具：
+
+```rust
+use axutils::RegUtils;
+
+assert!(RegUtils::is_email("user@example.com"));
+assert!(!RegUtils::is_email("user@example"));
+
+assert!(RegUtils::is_phone_cn("13812345678"));
+assert!(!RegUtils::is_phone_cn("12812345678"));
+```
+
 ## API 文档
 
 发布后可在 [docs.rs/axutils](https://docs.rs/axutils) 查看完整 API 文档。
 
-关闭 `regex` feature 后，当前 crate 不会启用第三方 `regex` 依赖，`RegUtils` 也不会导出。
-未来不依赖第三方包的方法将直接属于默认能力，不添加 feature 守卫，并从 crate 根模块默认导出。
+默认 feature 为空，当前 crate 默认不会启用第三方 `regex` 依赖；`TimeUtils` 直接从 crate
+根模块导出，`RegUtils` 仅在启用 `regex` feature 后导出。

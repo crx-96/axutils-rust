@@ -19,7 +19,7 @@ path = "src/lib.rs"
 crate-type = ["lib"]
 
 [features]
-default = ["regex"]
+default = []
 regex = ["dep:regex"]
 
 [dependencies]

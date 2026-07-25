@@ -30,6 +30,7 @@ cargo test --all-features
 cargo test --doc --all-features
 cargo clippy --all-targets --all-features -- -D warnings
 cargo doc --no-deps --all-features
+cargo test --no-default-features
 ```
 
 每个公开方法都应同时具备：
@@ -82,18 +83,19 @@ feature、`--no-default-features` 和 `--all-features` 三种配置。
 
 ## Feature 约定
 
-当前 `regex` 是默认 feature，并启用可选的第三方依赖 `regex`：
+默认 feature 为空；不依赖第三方包的能力直接可用。当前 `regex` 是显式启用的 feature，
+用于启用可选的第三方依赖 `regex`：
 
 ```toml
 [features]
-default = ["regex"]
+default = []
 regex = ["dep:regex"]
 ```
 
-调用方可以直接依赖 `axutils = "0.1"`，也可以关闭默认 feature 后显式选择：
+调用方直接依赖 `axutils = "0.1"` 即可使用 `TimeUtils`；需要 `RegUtils` 时显式选择：
 
 ```toml
-axutils = { version = "0.1", default-features = false, features = ["regex"] }
+axutils = { version = "0.1", features = ["regex"] }
 ```
 
 需要第三方包的模块，应使用与依赖包容易识别的 feature 名，并将依赖声明为

@@ -1,11 +1,11 @@
 //! `axutils` 是一个按 feature 组织的 Rust 常用工具库。
 //!
-//! 默认启用 `regex` feature。关闭默认 feature 后，可以通过
-//! `features = ["regex"]` 按需启用正则校验工具：
+//! 默认不启用第三方依赖，因此 `TimeUtils` 可以直接使用。需要正则校验工具时，
+//! 通过 `regex` feature 显式启用 `RegUtils`：
 //!
 //! ```toml
 //! [dependencies]
-//! axutils = { version = "0.1", default-features = false, features = ["regex"] }
+//! axutils = { version = "0.1", features = ["regex"] }
 //! ```
 
 pub mod utils;
