@@ -4,11 +4,12 @@
 
 当前项目最低支持 Rust 1.76。
 
-当前提供 `PathUtils`、`TimeUtils`、`RegUtils` 和 `RandomUtils`：`PathUtils` 与 `TimeUtils`
-不依赖第三方包，默认可用，分别用于路径处理和获取当前 Unix 时间戳；`RegUtils` 的基础
-能力依赖第三方 `regex` crate，需要显式启用 `regex` feature，用于校验电子邮箱地址和
-中国大陆手机号码；`RandomUtils` 依赖第三方 `rand` crate，需要显式启用 `rand` feature。
-`RegUtils::is_phone` 还需要同时启用独立的 `libphonenumber` feature。
+当前提供 `PathUtils`、`TimeUtils`、`FormatUtils`、`RegUtils` 和 `RandomUtils`：`PathUtils`、
+`TimeUtils` 与 `FormatUtils` 不依赖第三方包，默认可用，分别用于路径处理、获取当前 Unix
+时间戳和将秒数格式化为中文持续时间字符串；`RegUtils` 的基础能力依赖第三方 `regex` crate，
+需要显式启用 `regex` feature，用于校验电子邮箱地址和中国大陆手机号码；`RandomUtils` 依赖
+第三方 `rand` crate，需要显式启用 `rand` feature。`RegUtils::is_phone` 还需要同时启用独立的
+`libphonenumber` feature。
 
 ## 安装
 
@@ -19,8 +20,8 @@
 axutils = "0.1"
 ```
 
-上面的依赖声明默认提供 `PathUtils` 和 `TimeUtils`。如果需要使用 `RegUtils`，请显式启用
-`regex` feature：
+上面的依赖声明默认提供 `PathUtils`、`TimeUtils` 和 `FormatUtils`。如果需要使用 `RegUtils`，
+请显式启用 `regex` feature：
 
 ```toml
 [dependencies]
@@ -157,6 +158,25 @@ assert!(nanoseconds / 1_000 >= microseconds);
 
 如果系统时间早于 Unix 纪元，这些方法会 panic。
 
+## 使用 `FormatUtils`
+
+`FormatUtils` 提供 `seconds_to_human(seconds: u64) -> String`，将秒数格式化为中文
+持续时间字符串，最大单位为天：
+
+- 按天、小时、分钟、秒从高到低拆分，从最高的非零单位开始显示，直到秒；
+- 更高位为零的单位（例如不足一天时的“天”）会被省略；
+- 一旦某个单位非零，其后所有更低位单位即使为零也会显示；
+- 不处理周、月、年等更大单位，也不处理小于一秒的部分；输入为 `0` 时返回 `"0秒"`。
+
+```rust
+use axutils::FormatUtils;
+
+assert_eq!(FormatUtils::seconds_to_human(0), "0秒");
+assert_eq!(FormatUtils::seconds_to_human(90), "1分钟30秒");
+assert_eq!(FormatUtils::seconds_to_human(3600), "1小时0分钟0秒");
+assert_eq!(FormatUtils::seconds_to_human(90_061), "1天1小时1分钟1秒");
+```
+
 ## 使用 `RandomUtils`
 
 启用 `rand` feature 后，`RandomUtils` 可以生成普通 ASCII 随机字符串，以及从闭区间中
@@ -201,6 +221,6 @@ assert!((0.0..=1.0).contains(&float));
 发布后可在 [docs.rs/axutils](https://docs.rs/axutils) 查看完整 API 文档。
 
 默认 feature 为空，当前 crate 默认不会启用第三方 `rand`、`regex` 或 `phonenumber` 依赖；
-`PathUtils` 和 `TimeUtils` 直接从 crate 根模块导出，`RandomUtils` 及其相关类型仅在启用
+`PathUtils`、`TimeUtils` 和 `FormatUtils` 直接从 crate 根模块导出，`RandomUtils` 及其相关类型仅在启用
 `rand` feature 后导出，`RegUtils` 仅在启用 `regex` feature 后导出。`RegUtils::is_phone`
 必须显式同时启用 `regex` 和 `libphonenumber` features。
