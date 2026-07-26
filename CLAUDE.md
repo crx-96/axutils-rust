@@ -53,6 +53,6 @@ cargo test --no-default-features
 
 ## 规则文件同步
 
-本文件是本项目跨 Agent 工具共用的规则基线，与项目根目录的 [CLAUDE.md](CLAUDE.md)
-内容保持一致（Claude Code 读取 `CLAUDE.md`，其他工具读取本文件）。修改本文件后必须
-同步更新 `CLAUDE.md`（反之亦然），避免不同工具读取到不一致的项目约定。
+本文件是 [AGENTS.md](AGENTS.md) 在 Claude Code 中读取的同步副本，两者项目约定必须保持
+一致（Claude Code 读取本文件，其他工具读取 `AGENTS.md`）。修改本文件后必须同步更新
+`AGENTS.md`（反之亦然），避免不同工具读取到不一致的项目约定。

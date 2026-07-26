@@ -2,7 +2,7 @@
 
 本文档面向项目维护者和贡献者，不属于 crates.io 发布包。`Cargo.toml` 使用
 `package.include` 白名单，仅将源码、`README.md`、`LICENSE` 和 Cargo 配置打入发布包，
-因此 `develop.md`、`AGENTS.md` 以及 `docs/` 不会随包发布。
+因此 `develop.md`、`AGENTS.md`、`CLAUDE.md` 以及 `docs/` 不会随包发布。
 
 ## 项目结构
 
@@ -12,6 +12,7 @@
 ├── README.md        # 面向使用者，随包发布
 ├── develop.md       # 面向开发者，不随包发布
 ├── AGENTS.md        # 项目协作规则，不随包发布
+├── CLAUDE.md        # 项目协作规则（Claude Code 同步副本），不随包发布
 ├── docs/
 │   └── module-map.md # 工具类和公共模块定位，不随包发布
 └── src/
@@ -70,7 +71,7 @@ feature、`--no-default-features` 和 `--all-features` 三种配置。
    cargo package --allow-dirty --list
    ```
 
-   输出应包含 `README.md` 和 `src/`，不应包含 `develop.md`、`AGENTS.md` 或
+   输出应包含 `README.md` 和 `src/`，不应包含 `develop.md`、`AGENTS.md`、`CLAUDE.md` 或
    `docs/skills/`。
 
 5. 先执行发布 dry-run：
