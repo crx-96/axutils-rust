@@ -18,6 +18,8 @@
     ├── lib.rs       # crate 入口和公共导出
     └── utils/
         ├── mod.rs        # 通用工具模块和公共导出
+        ├── path_utils.rs  # PathUtils 实现与单元测试
+        ├── random_utils.rs # RandomUtils 实现与单元测试（需要 rand feature）
         ├── reg_utils.rs  # RegUtils 实现与单元测试
         └── time_utils.rs # TimeUtils 实现与单元测试
 ```
@@ -89,18 +91,26 @@ feature、`--no-default-features` 和 `--all-features` 三种配置。
 
 ## Feature 约定
 
-默认 feature 为空；不依赖第三方包的能力直接可用。当前 `regex` 和
-`libphonenumber` 都是显式启用的 feature，分别用于启用可选的第三方依赖 `regex` 和
-crates.io 上的 `phonenumber`：
+默认 feature 为空；不依赖第三方包的能力直接可用。当前 `rand`、`regex` 和
+`libphonenumber` 都是显式启用的 feature，分别用于启用可选的第三方依赖 `rand`、`regex`
+和 crates.io 上的 `phonenumber`：
 
 ```toml
 [features]
 default = []
+rand = ["dep:rand"]
 regex = ["dep:regex"]
 libphonenumber = ["dep:libphonenumber"]
 ```
 
-调用方直接依赖 `axutils = "0.1"` 即可使用 `TimeUtils`；需要 `RegUtils` 时显式选择：
+调用方直接依赖 `axutils = "0.1"` 即可使用 `PathUtils` 和 `TimeUtils`；需要
+`RandomUtils` 时显式选择：
+
+```toml
+axutils = { version = "0.1", features = ["rand"] }
+```
+
+需要 `RegUtils` 时显式选择：
 
 ```toml
 axutils = { version = "0.1", features = ["regex"] }
@@ -114,8 +124,9 @@ axutils = { version = "0.1", features = ["regex", "libphonenumber"] }
 
 需要第三方包的模块，应使用与依赖包容易识别的 feature 名，并将依赖声明为
 `optional = true`，再通过 `dep:<dependency-name>` 绑定。例如本项目使用
-`regex = ["dep:regex"]` 和 `libphonenumber = ["dep:libphonenumber"]`，并用对应的
-`cfg(feature = "...")` 守卫模块、导出和方法。
+`rand = ["dep:rand"]`、`regex = ["dep:regex"]` 和
+`libphonenumber = ["dep:libphonenumber"]`，并用对应的 `cfg(feature = "...")` 守卫模块、
+导出和方法。
 
 不依赖第三方包的方法属于默认能力，不添加 feature 守卫，也不额外声明可选依赖；
 这类方法应直接从 crate 根模块导出。新增 feature 或公共方法时，要同步更新

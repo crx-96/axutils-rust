@@ -4,10 +4,11 @@
 
 当前项目最低支持 Rust 1.76。
 
-当前提供 `PathUtils`、`TimeUtils` 和 `RegUtils`：前两者不依赖第三方包，默认可用，分别用于
-路径处理和获取当前 Unix 时间戳；后者的基础能力依赖第三方 `regex` crate，需要显式启用
-`regex` feature，用于校验电子邮箱地址和中国大陆手机号码。`RegUtils::is_phone` 还需要同时
-启用独立的 `libphonenumber` feature。
+当前提供 `PathUtils`、`TimeUtils`、`RegUtils` 和 `RandomUtils`：`PathUtils` 与 `TimeUtils`
+不依赖第三方包，默认可用，分别用于路径处理和获取当前 Unix 时间戳；`RegUtils` 的基础
+能力依赖第三方 `regex` crate，需要显式启用 `regex` feature，用于校验电子邮箱地址和
+中国大陆手机号码；`RandomUtils` 依赖第三方 `rand` crate，需要显式启用 `rand` feature。
+`RegUtils::is_phone` 还需要同时启用独立的 `libphonenumber` feature。
 
 ## 安装
 
@@ -26,6 +27,13 @@ axutils = "0.1"
 axutils = { version = "0.1", features = ["regex"] }
 ```
 
+如果需要使用 `RandomUtils`，请显式启用 `rand` feature：
+
+```toml
+[dependencies]
+axutils = { version = "0.1", features = ["rand"] }
+```
+
 如果需要校验带国家/地区前缀的国际手机号码，同时启用 `regex` 和 `libphonenumber`
 features：
 
@@ -34,18 +42,7 @@ features：
 axutils = { version = "0.1", features = ["regex", "libphonenumber"] }
 ```
 
-## 使用 `TimeUtils`
-
-```rust
-use axutils::TimeUtils;
-
-assert!(TimeUtils::timestamp_seconds() > 0);
-assert!(TimeUtils::timestamp_milliseconds() > 0);
-assert!(TimeUtils::timestamp_microseconds() > 0);
-assert!(TimeUtils::timestamp_nanoseconds() > 0);
-```
-
-### `PathUtils`
+## 使用 `PathUtils`
 
 `PathUtils` 提供路径判断、当前进程路径获取和多路径拼接：
 
@@ -70,6 +67,21 @@ assert!(source_file.ends_with("README.md"));
 let executable =
     PathUtils::executable_path().expect("the current executable should be available");
 assert!(!executable.as_os_str().is_empty());
+```
+
+## 使用 `RegUtils`
+
+启用 `regex` feature 后，可以使用正则校验工具：
+
+```rust
+use axutils::RegUtils;
+
+assert!(RegUtils::is_email("user@example.com"));
+assert!(!RegUtils::is_email("user@example"));
+assert!(RegUtils::is_email_strict("user@example.com"));
+
+assert!(RegUtils::is_phone_cn("13812345678"));
+assert!(!RegUtils::is_phone_cn("12812345678"));
 ```
 
 ### `RegUtils::is_email`
@@ -123,7 +135,7 @@ assert!(!RegUtils::is_phone("13812345678"));
 assert!(!RegUtils::is_phone("+86 13812345678"));
 ```
 
-### `TimeUtils`
+## 使用 `TimeUtils`
 
 `TimeUtils` 提供五个获取当前 Unix 时间戳的方法：
 
@@ -145,25 +157,50 @@ assert!(nanoseconds / 1_000 >= microseconds);
 
 如果系统时间早于 Unix 纪元，这些方法会 panic。
 
-## 使用 `RegUtils`
+## 使用 `RandomUtils`
 
-启用 `regex` feature 后，可以使用正则校验工具：
+启用 `rand` feature 后，`RandomUtils` 可以生成普通 ASCII 随机字符串，以及从闭区间中
+获取随机整数或浮点数：
 
 ```rust
-use axutils::RegUtils;
+use axutils::{LetterCase, RandomUtils};
 
-assert!(RegUtils::is_email("user@example.com"));
-assert!(!RegUtils::is_email("user@example"));
-assert!(RegUtils::is_email_strict("user@example.com"));
+let numeric = RandomUtils::numeric_string(8).expect("the string should be allocatable");
+assert_eq!(numeric.len(), 8);
+assert!(numeric.bytes().all(|byte| byte.is_ascii_digit()));
 
-assert!(RegUtils::is_phone_cn("13812345678"));
-assert!(!RegUtils::is_phone_cn("12812345678"));
+let lowercase = RandomUtils::alphabetic_string(8, LetterCase::Lower)
+    .expect("the string should be allocatable");
+assert!(lowercase.bytes().all(|byte| byte.is_ascii_lowercase()));
+
+let alphanumeric =
+    RandomUtils::alphanumeric_string(16).expect("the string should be allocatable");
+assert!(alphanumeric.bytes().all(|byte| byte.is_ascii_alphanumeric()));
+
+let integer = RandomUtils::integer(1..=100).expect("the range should be valid");
+assert!((1..=100).contains(&integer));
+
+let float = RandomUtils::float(0.0..=1.0).expect("the range should be valid");
+assert!((0.0..=1.0).contains(&float));
 ```
+
+`alphabetic_string` 支持 `LetterCase::Lower`、`LetterCase::Upper` 和
+`LetterCase::Mixed` 三种模式，分别生成小写、大写和大小写混合的 ASCII 字母。
+字符串长度为 `0` 时返回空字符串；如果长度超出平台可分配范围，会返回
+`std::collections::TryReserveError`。这些方法不会为长度设置固定上限；对于来自不可信输入的
+长度，调用方应先做业务上限校验，避免成功分配超大字符串带来的资源消耗。整数和浮点数的
+区间都是闭区间，起点大于终点时返回 `RandomRangeError::InvalidRange`，浮点区间还会拒绝
+`NaN` 和正负无穷；如果有限浮点区间的跨度导致底层均匀分布无法构造，也会返回
+`RandomRangeError::InvalidRange`。
+
+该工具用于普通随机数据、测试数据和一般业务随机取值，不承诺密码学安全，不应直接用于
+密码、Session Token、API 密钥或其他安全敏感数据。
 
 ## API 文档
 
 发布后可在 [docs.rs/axutils](https://docs.rs/axutils) 查看完整 API 文档。
 
-默认 feature 为空，当前 crate 默认不会启用第三方 `regex` 或 `phonenumber` 依赖；
-`PathUtils` 和 `TimeUtils` 直接从 crate 根模块导出，`RegUtils` 仅在启用 `regex` feature 后导出。
-`RegUtils::is_phone` 必须显式同时启用 `regex` 和 `libphonenumber` features。
+默认 feature 为空，当前 crate 默认不会启用第三方 `rand`、`regex` 或 `phonenumber` 依赖；
+`PathUtils` 和 `TimeUtils` 直接从 crate 根模块导出，`RandomUtils` 及其相关类型仅在启用
+`rand` feature 后导出，`RegUtils` 仅在启用 `regex` feature 后导出。`RegUtils::is_phone`
+必须显式同时启用 `regex` 和 `libphonenumber` features。

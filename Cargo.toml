@@ -20,9 +20,11 @@ crate-type = ["lib"]
 
 [features]
 default = []
+rand = ["dep:rand"]
 regex = ["dep:regex"]
 libphonenumber = ["dep:libphonenumber"]
 
 [dependencies]
+rand = { version = "0.9", optional = true }
 regex = { version = "1", optional = true }
 libphonenumber = { package = "phonenumber", version = "0.3", optional = true }
