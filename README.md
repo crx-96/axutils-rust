@@ -5,8 +5,8 @@
 当前项目最低支持 Rust 1.76。
 
 当前提供 `PathUtils`、`TimeUtils`、`FormatUtils`、`RegUtils` 和 `RandomUtils`：`PathUtils`、
-`TimeUtils` 与 `FormatUtils` 不依赖第三方包，默认可用，分别用于路径处理、获取当前 Unix
-时间戳和将秒数格式化为中文持续时间字符串；`RegUtils` 的基础能力依赖第三方 `regex` crate，
+`TimeUtils` 与 `FormatUtils::seconds_to_human` 不依赖第三方包，默认可用，分别用于路径处理、获取当前 Unix
+时间戳和将秒数格式化为中文持续时间字符串；`FormatUtils` 还可按需启用模板后端；`RegUtils` 的基础能力依赖第三方 `regex` crate，
 需要显式启用 `regex` feature，用于校验电子邮箱地址和中国大陆手机号码；`RandomUtils` 依赖
 第三方 `rand` crate，需要显式启用 `rand` feature。`RegUtils::is_phone` 还需要同时启用独立的
 `libphonenumber` feature。
@@ -33,6 +33,22 @@ axutils = { version = "0.1", features = ["regex"] }
 ```toml
 [dependencies]
 axutils = { version = "0.1", features = ["rand"] }
+```
+
+如果需要运行时模板渲染，必须显式同时启用 `serde` 和一个模板后端。`strfmt` 使用 `{name}`
+语法，适用于扁平变量；`minijinja` 使用 `{{ name }}` 语法，支持嵌套字段、数组、条件和
+循环。后端 feature 不会自动启用 `serde`，由调用方控制组合：
+
+```toml
+[dependencies]
+axutils = { version = "0.1", features = ["serde", "strfmt"] }
+serde = { version = "1", features = ["derive"] }
+```
+
+```toml
+[dependencies]
+axutils = { version = "0.1", features = ["serde", "minijinja"] }
+serde = { version = "1", features = ["derive"] }
 ```
 
 如果需要校验带国家/地区前缀的国际手机号码，同时启用 `regex` 和 `libphonenumber`
@@ -177,6 +193,57 @@ assert_eq!(FormatUtils::seconds_to_human(3600), "1小时0分钟0秒");
 assert_eq!(FormatUtils::seconds_to_human(90_061), "1天1小时1分钟1秒");
 ```
 
+### 模板渲染
+
+显式同时启用 `serde` 和 `strfmt` 或 `minijinja` feature 后，模板方法接受任意
+`serde::Serialize` 上下文，成功时返回 `Some(String)`，包括空字符串；模板语法错误、变量
+缺失、序列化失败或后端渲染错误时，返回 `default` 的拥有副本，未提供默认值则返回 `None`。
+两个后端同时启用时不会导出简写 `template`，请明确调用对应后缀方法。
+
+`strfmt` 仅把序列化根对象的顶层字段映射为变量：字符串直接使用，数字、布尔、`null`、数组
+和对象使用紧凑 JSON 文本。因此它支持 `{name}`，不支持 `{profile.city}`；根上下文为标量或
+数组时会走回退路径。
+
+```rust
+use axutils::FormatUtils;
+
+#[derive(serde::Serialize)]
+struct Greeting<'a> {
+    name: &'a str,
+    age: u8,
+}
+
+let context = Greeting { name: "小王", age: 18 };
+assert_eq!(
+    FormatUtils::template_strfmt("你好，{name}，今年 {age} 岁", &context, None),
+    Some("你好，小王，今年 18 岁".to_owned()),
+);
+assert_eq!(
+    FormatUtils::template_strfmt("你好，{missing}", &context, Some("匿名用户")),
+    Some("匿名用户".to_owned()),
+);
+```
+
+MiniJinja 使用严格未定义变量行为，并明确关闭自动 HTML 转义。变量值不会被再次解析为模板：
+
+```rust
+use axutils::FormatUtils;
+
+#[derive(serde::Serialize)]
+struct Profile<'a> { city: &'a str }
+#[derive(serde::Serialize)]
+struct User<'a> { name: &'a str, profile: Profile<'a> }
+
+let user = User { name: "小王", profile: Profile { city: "杭州" } };
+assert_eq!(
+    FormatUtils::template_minijinja("你好，{{ name }}（{{ profile.city }}）", &user, None),
+    Some("你好，小王（杭州）".to_owned()),
+);
+```
+
+运行时模板如果来自不可信来源，调用方应限制模板长度、调用频率和数据规模，以控制 MiniJinja
+完整表达式语言可能带来的 CPU 和内存消耗；这种场景优先选择功能更受限的 `strfmt`。
+
 ## 使用 `RandomUtils`
 
 启用 `rand` feature 后，`RandomUtils` 可以生成普通 ASCII 随机字符串，以及从闭区间中
@@ -220,7 +287,7 @@ assert!((0.0..=1.0).contains(&float));
 
 发布后可在 [docs.rs/axutils](https://docs.rs/axutils) 查看完整 API 文档。
 
-默认 feature 为空，当前 crate 默认不会启用第三方 `rand`、`regex` 或 `phonenumber` 依赖；
-`PathUtils`、`TimeUtils` 和 `FormatUtils` 直接从 crate 根模块导出，`RandomUtils` 及其相关类型仅在启用
+默认 feature 为空，当前 crate 默认不会启用第三方 `rand`、`regex`、`phonenumber`、`serde`、
+`serde_json`、`strfmt` 或 `minijinja` 依赖；`PathUtils`、`TimeUtils` 和 `FormatUtils` 直接从 crate 根模块导出，`RandomUtils` 及其相关类型仅在启用
 `rand` feature 后导出，`RegUtils` 仅在启用 `regex` feature 后导出。`RegUtils::is_phone`
 必须显式同时启用 `regex` 和 `libphonenumber` features。

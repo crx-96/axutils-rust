@@ -22,7 +22,7 @@
 - feature 守卫、模块路径、README 示例和开发者文档必须保持一致；默认 feature 只包含不依赖第三方包的能力，当前正则能力统一使用 `regex` feature。
 - 模块、类型和方法的 feature 守卫应按其直接能力和依赖分别控制：模块或类型只由自身所属能力的 feature 导出，不因其他可选依赖 feature 单独启用而扩大公共 API。
 - 一个 API 同时依赖多个可选能力时，使用 `#[cfg(all(feature = "...", feature = "..."))]` 精确限制实现、导入、测试和文档示例；不要用更宽的模块级守卫替代方法级约束。
-- 可选依赖对应的 feature 应保持独立，除非 API 契约明确要求，否则不得隐式启用其他 feature；多 feature 组合及其公共 API 矩阵必须同步记录在工具类定位文档、README 和 API doc 中。
+- 可选依赖对应的 feature 应保持独立：后端或单项能力 feature 只能通过 `dep:<dependency-name>` 启用其同名直接依赖，禁止引用、自动启用或聚合其他项目 feature。一个 API 需要多个可选能力时，由用户显式启用全部 feature，并在代码中使用精确的 `cfg(all(...))` 限制；多 feature 组合及其公共 API 矩阵必须同步记录在工具类定位文档、README 和 API doc 中。仅作为公共 API 基础设施的 feature 可以启用其不可单独使用的内部适配依赖，但不得启用其他项目 feature。
 
 ## 验证命令
 
