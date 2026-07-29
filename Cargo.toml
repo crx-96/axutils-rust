@@ -26,6 +26,9 @@ libphonenumber = ["dep:libphonenumber"]
 serde = ["dep:serde", "dep:serde_json"]
 strfmt = ["dep:strfmt"]
 minijinja = ["dep:minijinja"]
+chrono = ["dep:chrono"]
+time = ["dep:time"]
+jiff = ["dep:jiff"]
 
 [dependencies]
 rand = { version = "0.9", optional = true }
@@ -35,3 +38,6 @@ serde = { version = "1", features = ["derive"], optional = true }
 serde_json = { version = "1", optional = true }
 strfmt = { version = "0.2", optional = true }
 minijinja = { version = "2", default-features = false, features = ["serde"], optional = true }
+chrono = { version = "0.4.45", default-features = false, optional = true }
+time = { version = "=0.3.36", default-features = false, optional = true }
+jiff = { version = "0.2.35", default-features = false, optional = true }

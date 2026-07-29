@@ -31,7 +31,15 @@
 //! [dependencies]
 //! axutils = { version = "0.1", features = ["serde", "minijinja"] }
 //! ```
+//!
+//! `TimeUtils` 的日期格式化能力分别由 `chrono`、`time` 和 `jiff` feature 提供。三个
+//! feature 相互独立；只启用一个后端时可以使用无后缀方法，同时启用多个后端时应调用带
+//! 后缀的方法以明确日期类型。日期默认模板为 `yyyy-MM-dd`，含时间值默认模板为
+//! `yyyy-MM-dd HH:mm:ss`；带偏移方法的 `offset: Option<TimeZoneOffset>` 传入 `None` 时
+//! 使用 `+08:00`。格式化采用本 crate 的统一模板：`yyyy`、`MM`、`dd`、`HH`、`mm`、
+//! `ss`、`SSS` 与固定偏移专用的 `XXX`。
 
+mod time;
 pub mod utils;
 
 #[cfg(feature = "regex")]
@@ -51,6 +59,10 @@ pub use utils::PathUtils;
 
 pub use utils::time_utils;
 pub use utils::TimeUtils;
+
+pub use time::{
+    TimeFormatError, TimeFormatToken, TimeValueKind, TimeZoneOffset, TimeZoneOffsetError,
+};
 
 pub use utils::format_utils;
 pub use utils::FormatUtils;

@@ -11,6 +11,9 @@
 第三方 `rand` crate，需要显式启用 `rand` feature。`RegUtils::is_phone` 还需要同时启用独立的
 `libphonenumber` feature。
 
+日期格式化可按需启用 `chrono`、`time` 或 `jiff` 中的任一独立 feature。每个后端只接收
+自身的日期类型；仅启用一个后端时可使用简写方法，同时启用多个后端时必须调用带后缀的方法。
+
 ## 安装
 
 在项目的 `Cargo.toml` 中添加：
@@ -33,6 +36,30 @@ axutils = { version = "0.1", features = ["regex"] }
 ```toml
 [dependencies]
 axutils = { version = "0.1", features = ["rand"] }
+```
+
+如果需要使用 Chrono 日期格式化：
+
+```toml
+[dependencies]
+axutils = { version = "0.1", features = ["chrono"] }
+chrono = "0.4"
+```
+
+如果需要使用 `time` 日期格式化：
+
+```toml
+[dependencies]
+axutils = { version = "0.1", features = ["time"] }
+time = { version = "=0.3.36", default-features = false }
+```
+
+如果需要使用 Jiff 日期格式化：
+
+```toml
+[dependencies]
+axutils = { version = "0.1", features = ["jiff"] }
+jiff = { version = "0.2.35", default-features = false }
 ```
 
 如果需要运行时模板渲染，必须显式同时启用 `serde` 和一个模板后端。`strfmt` 使用 `{name}`
@@ -174,6 +201,54 @@ assert!(nanoseconds / 1_000 >= microseconds);
 
 如果系统时间早于 Unix 纪元，这些方法会 panic。
 
+### 日期格式化
+
+`chrono`、`time` 和 `jiff` feature 彼此独立，且不启用时区数据库。三个后端共用以下小型
+模板子集，而不是直接使用各库不兼容的原生格式语法：
+
+| token | 含义 | 日期 | 无时区日期时间 | 固定偏移日期时间 |
+| --- | --- | --- | --- | --- |
+| `yyyy` | 带符号的完整公历年，绝对值至少四位 | 是 | 是 | 是 |
+| `MM`、`dd` | 两位月、日 | 是 | 是 | 是 |
+| `HH`、`mm`、`ss` | 两位时、分、秒 | 否 | 是 | 是 |
+| `SSS` | 截断后的三位毫秒 | 否 | 是 | 是 |
+| `XXX` | `Z`、`+HH:MM` 或 `+HH:MM:ss` 固定偏移 | 否 | 否 | 是 |
+
+日期、无时区日期时间、固定偏移日期时间的默认模板分别为 `yyyy-MM-dd`、
+`yyyy-MM-dd HH:mm:ss`、`yyyy-MM-dd HH:mm:ss`。非 ASCII 字符可直接作为字面量；ASCII
+字母字面量须用单引号包围，`''` 表示一个单引号。无效模板或当前值不支持的 token 会由具体值方法
+返回 `TimeFormatError`；`format_option_*` 会将输入 `None` 和全部格式化错误都折叠为 `None`，
+需要错误详情时请使用返回 `Result` 的方法。
+
+以下是 Chrono 后端的示例：
+
+```rust
+use axutils::TimeUtils;
+
+let value = chrono::NaiveDate::from_ymd_opt(2024, 2, 29)
+    .unwrap()
+    .and_hms_nano_opt(1, 2, 3, 987_654_321)
+    .unwrap();
+assert_eq!(
+    TimeUtils::format_datetime_with_offset_chrono(value, None, None).unwrap(),
+    "2024-02-29 01:02:03",
+);
+assert_eq!(
+    TimeUtils::format_datetime_chrono(value, Some("yyyy年MM月dd日 'at' HH:mm:ss.SSS")).unwrap(),
+    "2024年02月29日 at 01:02:03.987",
+);
+```
+
+带固定偏移的方法的 `offset` 参数为 `Option<TimeZoneOffset>`；传入 `None` 时使用默认的
+`+08:00`。默认模板不输出偏移；如确有展示需求，可传入包含 `XXX` 的自定义模板。
+`TimeZoneOffset` 仅代表 `-86_399..=86_399` 秒的固定 UTC 偏移，正值表示东区。它不会转换无时区
+日期时间字段，也不表示 `Asia/Shanghai` 一类 IANA 时区，更不会查询 DST。`from_hours` 仅接收
+`-23..=23` 的整小时偏移；半小时和秒级偏移请用 `from_seconds`。
+
+仅启用一个日期后端时，可将同一组方法写为 `format_date`、`format_datetime`、
+`format_datetime_with_offset` 及对应的 `format_option_*`。两个或三个日期后端同时启用时，这些
+简写不会导出，调用方必须使用 `*_chrono`、`*_time` 或 `*_jiff`。
+
 ## 使用 `FormatUtils`
 
 `FormatUtils` 提供 `seconds_to_human(seconds: u64) -> String`，将秒数格式化为中文
@@ -288,6 +363,6 @@ assert!((0.0..=1.0).contains(&float));
 发布后可在 [docs.rs/axutils](https://docs.rs/axutils) 查看完整 API 文档。
 
 默认 feature 为空，当前 crate 默认不会启用第三方 `rand`、`regex`、`phonenumber`、`serde`、
-`serde_json`、`strfmt` 或 `minijinja` 依赖；`PathUtils`、`TimeUtils` 和 `FormatUtils` 直接从 crate 根模块导出，`RandomUtils` 及其相关类型仅在启用
+`serde_json`、`strfmt`、`minijinja`、`chrono`、`time` 或 `jiff` 依赖；`PathUtils`、`TimeUtils` 和 `FormatUtils` 直接从 crate 根模块导出，`RandomUtils` 及其相关类型仅在启用
 `rand` feature 后导出，`RegUtils` 仅在启用 `regex` feature 后导出。`RegUtils::is_phone`
 必须显式同时启用 `regex` 和 `libphonenumber` features。
