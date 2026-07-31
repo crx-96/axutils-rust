@@ -520,7 +520,7 @@ sudo dnf install -y gcc make glibc-devel binutils
 xcode-select --install
 ```
 
-这些命令是消费方主动配置开发环境的示例，本仓库的 CI 不安装邮件专用系统包。Docker builder
+这些命令是消费方主动配置开发环境的示例。Docker builder
 还需要按镜像和取包方式提供 HTTPS 下载所需的工具/CA；那是构建期依赖，与 SMTP 运行时的
 `webpki-roots` 不同。
 
