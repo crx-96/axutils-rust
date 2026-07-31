@@ -2,14 +2,19 @@
 
 `axutils` 是一个按 feature 组织的 Rust 常用工具库。
 
-当前项目最低支持 Rust 1.76。
+当前项目最低支持 Rust 1.85。这是因为邮件能力使用包含上游安全修复的 `lettre 0.11.22`；因此
+依赖 `axutils` 新版本的 Rust 1.76—1.84 项目需要先升级工具链。
 
-当前提供 `PathUtils`、`TimeUtils`、`FormatUtils`、`RegUtils` 和 `RandomUtils`：`PathUtils`、
+当前默认工具提供 `PathUtils`、`TimeUtils`、`FormatUtils`、`RegUtils` 和 `RandomUtils`：`PathUtils`、
 `TimeUtils` 与 `FormatUtils::seconds_to_human` 不依赖第三方包，默认可用，分别用于路径处理、获取当前 Unix
 时间戳和将秒数格式化为中文持续时间字符串；`FormatUtils` 还可按需启用模板后端；`RegUtils` 的基础能力依赖第三方 `regex` crate，
 需要显式启用 `regex` feature，用于校验电子邮箱地址和中国大陆手机号码；`RandomUtils` 依赖
 第三方 `rand` crate，需要显式启用 `rand` feature。`RegUtils::is_phone` 还需要同时启用独立的
 `libphonenumber` feature。
+
+邮件能力由 `lettre` feature 显式提供：同步发送只需要 `lettre`，异步发送必须同时启用
+`lettre` 和 `tokio`。邮件使用 Rustls 强制 SMTPS/STARTTLS，不提供明文或机会式降级；真实账号
+配置只应由调用方在本地安全管理，不能硬编码或提交到 Git。
 
 日期格式化可按需启用 `chrono`、`time` 或 `jiff` 中的任一独立 feature。每个后端只接收
 自身的日期类型；仅启用一个后端时可使用简写方法，同时启用多个后端时必须调用带后缀的方法。
@@ -38,6 +43,26 @@ axutils = { version = "0.1", features = ["regex"] }
 axutils = { version = "0.1", features = ["rand"] }
 ```
 
+如果需要同步 SMTP 邮件：
+
+```toml
+[dependencies]
+axutils = { version = "0.1", features = ["lettre"] }
+```
+
+如果需要异步 SMTP 邮件，必须显式同时启用两个 feature；调用方还需要自行提供 Tokio runtime：
+
+```toml
+[dependencies]
+axutils = { version = "0.1", features = ["lettre", "tokio"] }
+tokio = { version = "1.53.1", features = ["macros", "rt-multi-thread"] }
+```
+
+只启用 `tokio` 不会启用或导出任何邮件 API。`axutils` 的生产 Tokio 依赖只启用邮件异步传输所需
+的最小能力，不使用 `full`；上面的 `macros` 和 `rt-multi-thread` 是应用自身 runtime 示例。
+示例中的第三方依赖版本都是最低兼容版本，不是精确补丁锁定；Cargo 可以在兼容范围内解析后续
+版本。项目 manifest 对 `lettre`、Tokio、`time` 等依赖也遵循相同规则。
+
 如果需要使用 Chrono 日期格式化：
 
 ```toml
@@ -51,7 +76,7 @@ chrono = "0.4"
 ```toml
 [dependencies]
 axutils = { version = "0.1", features = ["time"] }
-time = { version = "=0.3.36", default-features = false }
+time = { version = "0.3.36", default-features = false }
 ```
 
 如果需要使用 Jiff 日期格式化：
@@ -358,11 +383,210 @@ assert!((0.0..=1.0).contains(&float));
 该工具用于普通随机数据、测试数据和一般业务随机取值，不承诺密码学安全，不应直接用于
 密码、Session Token、API 密钥或其他安全敏感数据。
 
+## 使用 SMTP 邮件能力
+
+启用 `lettre` feature 后，可以创建多个互不覆盖的 `EmailClient`。配置只接受 DNS 主机名，
+不接受 SMTP URL 或 IP 字面量；安全模式只有强制 SMTPS（`ImplicitTls`）和强制 STARTTLS
+（`StartTls`）。构造客户端不会连接网络，`send` 才会执行阻塞 SMTP I/O：
+
+```rust
+use axutils::{EmailClient, EmailConfig, EmailMessage, EmailSecurity};
+
+fn main() -> Result<(), axutils::EmailError> {
+    let config = EmailConfig::new(
+        "smtp.example.com",
+        465,
+        EmailSecurity::ImplicitTls,
+        "sender@example.com",
+        "application-password",
+        "sender@example.com",
+    )?;
+    let client = EmailClient::new(config)?;
+    let message = EmailMessage::text(
+        vec!["receiver@example.com".to_owned()],
+        "A test message",
+        "Hello from axutils.",
+    )?;
+    client.send(message)?;
+    Ok(())
+}
+```
+
+异步发送只在 `lettre,tokio` 组合下提供。客户端构造不会要求 runtime；异步连接池会在首次
+`send_async` 时于调用方的 Tokio runtime 中初始化。它不会创建 runtime 或调用 `block_on`，
+应用必须先运行自己的 Tokio runtime：
+
+```rust,no_run
+use axutils::{EmailClient, EmailConfig, EmailMessage, EmailSecurity};
+
+#[tokio::main]
+async fn main() -> Result<(), axutils::EmailError> {
+    let client = EmailClient::new(EmailConfig::new(
+        "smtp.example.com",
+        587,
+        EmailSecurity::StartTls,
+        "sender@example.com",
+        "application-password",
+        "sender@example.com",
+    )?)?;
+    let message = EmailMessage::html(
+        vec!["receiver@example.com".to_owned()],
+        "An HTML message",
+        "<p>Hello from <strong>axutils</strong>.</p>",
+    )?;
+    client.send_async(message).await?;
+    Ok(())
+}
+```
+
+`EmailMessage::text` 和 `EmailMessage::html` 都立即校验输入。每封邮件至少需要一个、最多
+100 个收件人；单个收件人最多 4 KiB，主题最多 16 KiB，正文最多 10 MiB。空主题和空正文允许
+发送。主题、显示名和地址中的控制字符会被拒绝以防止邮件头注入；HTML 不会自动净化或生成
+纯文本 fallback。上限是本 crate 的资源保护边界，不是服务商配额或 SMTP 传输行长度保证。
+
+每个 `EmailClient` 的同步池和（启用异步时）异步池分别最多 10 条连接，连接空闲 60 秒回收。
+多个账号应使用多个 `EmailClient`，调用方需要限制实例数量和并发发送量。同步方法会阻塞当前
+线程，Tokio 服务应使用异步方法；本 crate 不提供重试、队列、附件、抄送、密送、OAuth2 或
+邮件接收能力。
+
+单默认账号可以使用一次初始化、不可重置的全局入口：
+
+```rust
+use axutils::{EmailConfig, EmailMessage, EmailSecurity, EmailUtils};
+
+fn main() -> Result<(), axutils::EmailError> {
+    EmailUtils::init(EmailConfig::new(
+        "smtp.example.com",
+        465,
+        EmailSecurity::ImplicitTls,
+        "sender@example.com",
+        "application-password",
+        "sender@example.com",
+    )?)?;
+    EmailUtils::send(EmailMessage::text(
+        vec!["receiver@example.com".to_owned()],
+        "A test message",
+        "Hello from axutils.",
+    )?)?;
+    Ok(())
+}
+```
+
+`EmailUtils::init` 成功后再次初始化会返回 `AlreadyInitialized`，未初始化发送会返回
+`NotInitialized`；需要热切换账号、独立生命周期或多账号时请使用实例 API。密码不提供 getter，
+也不应写入源码、日志、SMTP URL、命令行参数或版本库。
+
+### 邮件 feature 矩阵
+
+| feature | 邮件类型/同步 API | 异步 API |
+| --- | --- | --- |
+| 无 | 不导出 | 不导出 |
+| `tokio` | 不导出 | 不导出 |
+| `lettre` | 导出 `EmailBody`、`EmailClient`、`EmailConfig`、`EmailError`、`EmailMessage`、`EmailSecurity`、`EmailTransportErrorKind` 和 `EmailUtils`，支持同步 | 不导出 |
+| `lettre,tokio` | 同上 | 支持 `EmailClient::send_async` 和 `EmailUtils::send_async` |
+
+邮件传输固定使用 Rustls、`ring` 和 `webpki-roots`。常见 Linux 构建不需要为该功能安装
+OpenSSL、`pkg-config`、CMake、Go 或系统 CA 包；`webpki-roots` 不读取企业私有 CA，因此自签名
+或私有 CA relay 不在首期支持范围内，也不能通过关闭证书校验绕过。
+
+## 构建与部署依赖
+
+`axutils` 是 library crate，本身不生成可部署的二进制或容器。下表是消费方应用已有 Rust
+工具链时的常见基础构建包；邮件功能本身不增加 TLS 系统包。应用的数据库、图像、压缩或其他
+native 依赖仍需按其自身文档安装对应包。
+
+| 环境 | 消费方源码构建的基础包 | 邮件功能额外 TLS 包 |
+| --- | --- | --- |
+| Debian/Ubuntu（含 slim） | `build-essential` | 无 |
+| Alpine Linux | `build-base` | 无 |
+| Fedora/RHEL | `gcc`、`make`、`glibc-devel`、按需 `binutils` | 无 |
+| Windows MSVC | Visual Studio Build Tools 的 C++ workload 和 Windows SDK | 无 OpenSSL |
+| macOS | Xcode Command Line Tools | 无 OpenSSL |
+
+例如，已安装 Rust 但系统较精简时，消费方可以自行安装：
+
+```bash
+# Debian / Ubuntu
+sudo apt-get update
+sudo apt-get install -y --no-install-recommends build-essential
+
+# Alpine Linux
+sudo apk add --no-cache build-base
+
+# Fedora / RHEL
+sudo dnf install -y gcc make glibc-devel binutils
+
+# macOS
+xcode-select --install
+```
+
+这些命令是消费方主动配置开发环境的示例，本仓库的 CI 不安装邮件专用系统包。Docker builder
+还需要按镜像和取包方式提供 HTTPS 下载所需的工具/CA；那是构建期依赖，与 SMTP 运行时的
+`webpki-roots` 不同。
+
+### Debian/Ubuntu 多阶段 Docker 说明性模板
+
+以下模板只适用于消费方自行替换后的应用，不是本仓库提供或验证过的 Dockerfile。请替换
+`<pinned-version>`、`<binary-name>`、workspace 清单和 `src` 路径，并按应用的其他依赖调整：
+
+```dockerfile
+ARG RUST_VERSION
+FROM rust:${RUST_VERSION}-slim-bookworm AS builder
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+COPY Cargo.toml Cargo.lock ./
+COPY src ./src
+RUN cargo build --locked --release
+
+FROM debian:bookworm-slim AS runtime
+WORKDIR /app
+COPY --from=builder /app/target/release/<binary-name> /usr/local/bin/app
+USER 65532:65532
+ENTRYPOINT ["/usr/local/bin/app"]
+```
+
+`RUST_VERSION` 应由消费方替换为不低于 1.85 的固定版本，正式部署还应按供应链策略固定
+基础镜像 digest。runtime 阶段不需要为 axutils 邮件功能安装 OpenSSL 或 CA 包；应用其他
+功能需要的动态库、时区数据或健康检查工具须单独评估。
+
+### Alpine/musl 多阶段 Docker 说明性模板
+
+原生构建当前容器架构时，官方 Alpine Rust builder 通常直接执行 `cargo build`，不要无条件
+写死 `x86_64-unknown-linux-musl`；Buildx 同时构建 ARM64 时尤其要避免把 AMD64 target 写死：
+
+```dockerfile
+ARG RUST_VERSION
+FROM rust:${RUST_VERSION}-alpine AS builder
+
+RUN apk add --no-cache build-base
+WORKDIR /app
+COPY Cargo.toml Cargo.lock ./
+COPY src ./src
+RUN cargo build --locked --release
+
+FROM alpine:<pinned-version> AS runtime
+RUN addgroup -S app && adduser -S -G app app
+WORKDIR /app
+COPY --from=builder /app/target/release/<binary-name> /usr/local/bin/app
+USER app
+ENTRYPOINT ["/usr/local/bin/app"]
+```
+
+Alpine runtime 不需要为邮件功能安装 `openssl`、`libssl3` 或 `ca-certificates`；`curl` 也只有
+在应用健康检查或其他功能实际需要时才添加。Alpine/musl、ARM64、WASM、Android、iOS 和
+FreeBSD 不属于本 crate 首期已承诺的验证目标；消费方必须自行验证其完整应用和镜像。
+
 ## API 文档
 
 发布后可在 [docs.rs/axutils](https://docs.rs/axutils) 查看完整 API 文档。
 
 默认 feature 为空，当前 crate 默认不会启用第三方 `rand`、`regex`、`phonenumber`、`serde`、
-`serde_json`、`strfmt`、`minijinja`、`chrono`、`time` 或 `jiff` 依赖；`PathUtils`、`TimeUtils` 和 `FormatUtils` 直接从 crate 根模块导出，`RandomUtils` 及其相关类型仅在启用
-`rand` feature 后导出，`RegUtils` 仅在启用 `regex` feature 后导出。`RegUtils::is_phone`
-必须显式同时启用 `regex` 和 `libphonenumber` features。
+`serde_json`、`strfmt`、`minijinja`、`chrono`、`time`、`jiff`、`lettre` 或 `tokio` 依赖；
+`PathUtils`、`TimeUtils` 和 `FormatUtils` 直接从 crate 根模块导出，`RandomUtils` 及其相关类型
+仅在启用 `rand` feature 后导出，`RegUtils` 仅在启用 `regex` feature 后导出，邮件类型仅在
+启用 `lettre` feature 后导出。`RegUtils::is_phone` 必须显式同时启用 `regex` 和
+`libphonenumber` features；异步邮件必须显式同时启用 `lettre` 和 `tokio`。

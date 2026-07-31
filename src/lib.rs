@@ -2,6 +2,15 @@
 //!
 //! 默认不启用第三方依赖，因此 `PathUtils`、`TimeUtils` 和 `FormatUtils` 的持续时间格式化
 //! 能力可以直接使用。
+//! 需要发送 SMTP 邮件时，显式启用 `lettre` feature；它提供强制 SMTPS/STARTTLS、连接池、
+//! 多实例 `EmailClient` 和一次初始化的全局 `EmailUtils`。如果还要使用异步发送，必须
+//! 同时启用 `lettre` 与 `tokio` feature，异步调用方需要自行运行在 Tokio runtime 中。
+//!
+//! ```toml
+//! [dependencies]
+//! axutils = { version = "0.1", features = ["lettre"] }
+//! # 异步邮件改为 features = ["lettre", "tokio"]，并由调用方提供 Tokio runtime。
+//! ```
 //! 需要随机工具时，
 //! 通过 `rand` feature 显式启用 `RandomUtils`；需要邮箱和中国大陆手机号码校验时，
 //! 通过 `regex` feature 显式启用 `RegUtils`；`is_phone` 还需要同时启用独立的
@@ -66,3 +75,15 @@ pub use time::{
 
 pub use utils::format_utils;
 pub use utils::FormatUtils;
+
+#[cfg(feature = "lettre")]
+pub mod email;
+
+#[cfg(feature = "lettre")]
+pub use email::{
+    EmailBody, EmailClient, EmailConfig, EmailError, EmailMessage, EmailSecurity,
+    EmailTransportErrorKind,
+};
+
+#[cfg(feature = "lettre")]
+pub use utils::EmailUtils;

@@ -2,7 +2,8 @@
 name = "axutils"
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.76"
+rust-version = "1.85"
+resolver = "3"
 description = "Rust utility library with opt-in feature modules"
 license = "MIT"
 readme = "README.md"
@@ -29,6 +30,8 @@ minijinja = ["dep:minijinja"]
 chrono = ["dep:chrono"]
 time = ["dep:time"]
 jiff = ["dep:jiff"]
+lettre = ["dep:lettre"]
+tokio = ["dep:tokio", "lettre?/tokio1-rustls"]
 
 [dependencies]
 rand = { version = "0.9", optional = true }
@@ -39,5 +42,17 @@ serde_json = { version = "1", optional = true }
 strfmt = { version = "0.2", optional = true }
 minijinja = { version = "2", default-features = false, features = ["serde"], optional = true }
 chrono = { version = "0.4.45", default-features = false, optional = true }
-time = { version = "=0.3.36", default-features = false, optional = true }
+time = { version = "0.3.36", default-features = false, optional = true }
 jiff = { version = "0.2.35", default-features = false, optional = true }
+lettre = { version = "0.11.22", default-features = false, optional = true, features = [
+    "builder",
+    "smtp-transport",
+    "pool",
+    "rustls",
+    "ring",
+    "webpki-roots",
+] }
+tokio = { version = "1.53.1", default-features = false, optional = true }
+
+[dev-dependencies]
+tokio = { version = "1.53.1", default-features = false, features = ["macros", "rt-multi-thread"] }

@@ -1,0 +1,20 @@
+[package]
+name = "axutils-email-feature-matrix"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[features]
+sync = ["axutils/lettre"]
+all = ["axutils/lettre", "axutils/tokio"]
+tokio-only = ["axutils/tokio"]
+negative-email-module = []
+negative-email-client = []
+negative-email-utils = []
+negative-tokio-email-module = ["axutils/tokio"]
+negative-tokio-email-client = ["axutils/tokio"]
+negative-tokio-email-utils = ["axutils/tokio"]
+negative-async = ["axutils/lettre"]
+
+[dependencies]
+axutils = { path = "../../..", default-features = false }

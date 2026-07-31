@@ -22,4 +22,8 @@ target
 Cargo.lock
 
 docs/plans/
-docs/status/
+docs/status/*
+!docs/status/STATUS.md
+
+# Local SMTP integration-test credentials
+config/
