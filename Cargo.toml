@@ -12,7 +12,7 @@ keywords = ["utilities", "validation", "regex"]
 categories = ["development-tools"]
 
 # Keep developer-only files out of the package published to crates.io.
-include = ["Cargo.toml", "README.md", "CHANGELOG.md", "LICENSE", "src/**"]
+include = ["Cargo.toml", "README.md", "CHANGELOG.md", "LICENSE", "src/**", "docs/examples/**"]
 
 [lib]
 name = "axutils"

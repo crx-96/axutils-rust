@@ -1,8 +1,9 @@
 # axutils 开发者文档
 
 本文档面向项目维护者和贡献者，不属于 crates.io 发布包。`Cargo.toml` 使用
-`package.include` 白名单，仅将源码、`README.md`、`CHANGELOG.md`、`LICENSE` 和 Cargo 配置打入发布包，
-因此 `develop.md`、`AGENTS.md`、`CLAUDE.md` 以及 `docs/` 不会随包发布。
+`package.include` 白名单，将源码、`README.md`、`CHANGELOG.md`、`LICENSE`、Cargo 配置和
+`docs/examples/` 打入发布包；`develop.md`、`AGENTS.md`、`CLAUDE.md` 以及 `docs/` 中的计划、
+状态和其他开发资料不随包发布。
 
 ## 项目结构
 
@@ -15,6 +16,7 @@
 ├── AGENTS.md        # 项目协作规则，不随包发布
 ├── CLAUDE.md        # 项目协作规则（Claude Code 同步副本），不随包发布
 ├── docs/
+│   ├── examples/     # 模块详细使用文档，随包发布
 │   ├── module-map.md  # 工具类和公共模块定位，不随包发布
 │   ├── plans/         # 设计与实施计划，不随包发布
 │   └── status/        # 长任务状态记录，不随包发布
@@ -66,7 +68,8 @@ git diff --check
 
 1. API doc，说明行为、输入范围和限制；
 2. `# Examples` doctest，确保 README/API 示例可编译运行；
-3. 覆盖正常输入和边界输入的单元测试。
+3. 覆盖正常输入和边界输入的单元测试；
+4. 在对应 `docs/examples/<前缀>.md` 中维护独立的方法小节、参数/返回值说明和可编译示例。
 
 新增方法时优先评估性能和安全边界；新增、删除或重命名工具类/公共模块时，必须同步维护
 `docs/module-map.md` 中的职责、导出、依赖和使用场景定位。
@@ -102,15 +105,15 @@ feature、`--no-default-features`、相关单 feature、组合 feature 和 `--al
    cargo clippy --all-targets --all-features -- -D warnings
    ```
 
-5. 检查发布包文件清单，确认开发者文档没有被包含：
+5. 检查发布包文件清单，确认详细使用文档已包含且开发者文档没有被包含：
 
    ```powershell
    cargo package --list
    cargo package --allow-dirty --list
    ```
 
-   输出应包含 `README.md`、`CHANGELOG.md` 和 `src/`，不应包含 `develop.md`、`AGENTS.md`、`CLAUDE.md` 或
-   `docs/skills/`。
+   输出应包含 `README.md`、`CHANGELOG.md`、`src/` 和 `docs/examples/`，逐项确认 7 份模块文档均在；
+   不应包含 `develop.md`、`AGENTS.md`、`CLAUDE.md`、`docs/plans/`、`docs/status/` 或 `docs/skills/`。
 
 6. 先执行发布 dry-run：
 

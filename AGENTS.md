@@ -23,6 +23,51 @@ SMTP 邮件能力通过显式 `lettre` feature 提供；异步发送还需要同
   命令行、日志或文档。
 - `tests/` 不属于运行时依赖；删除它会失去回归测试，删除前必须确认对应能力不再需要并同步清理目录引用。
 
+## 模块使用文档
+
+- 每个公共能力单元必须在 `docs/examples/<前缀>.md` 维护一份详细使用文档（映射关系见
+  `docs/module-map.md` 末尾的「使用示例文档」小节）。文档命名取能力单元的前缀，**不带
+  `Utils` 后缀**：工具类按去掉 `Utils` 后的前缀命名（`PathUtils` → `path.md`、
+  `TimeUtils` → `time.md`、`FormatUtils` → `format.md`、`RegUtils` → `reg.md`、
+  `RandomUtils` → `random.md`），领域模块按模块名命名并把对应的 `Utils` 静态入口合并进
+  同一份文档（email 模块 + `EmailUtils` → `email.md`，config 模块 + `ConfigUtils` →
+  `config.md`）。文档必须说明该单元的完整公共 API：模块、结构体、枚举、常量、错误类型，
+  以及当前或未来可能出现的公共自由函数、trait、类型别名、静态项和宏及其 feature 依赖；
+  每个本 crate 定义的公共自由函数和 inherent/associated 方法单独一节，写清签名、参数含义、
+  返回值/错误语义、正常与边界示例、注意事项与限制。公共 trait 的必需方法与默认方法在 trait
+  小节逐项说明；不能因为当前仓库尚无某类公共项，就把它排除在长期规则之外。
+- 公共导出路径必须完整记录：对每个公开模块、类型、错误、枚举、常量、自由函数、trait、
+  类型别名、静态项和宏，列出当前源码实际支持的所有 crate 根路径、领域模块路径、`utils`
+  命名空间重导出路径和公开子模块直达路径，并标注 feature 守卫；如果某条路径只是兼容性/
+  次级路径，也要保留并说明推荐路径。每条路径都必须经过当前源码或最小编译 fixture 验证；
+  私有实现文件路径不能冒充公共导入路径，也不能因存在推荐路径而省略其他可访问公共路径。
+- 新增公共类型、自由函数、trait/trait 方法或 inherent/associated 方法，或修改现有签名或行为
+  时，必须在同一变更中同步更新对应 `docs/examples/` 文档；新增公共能力单元时必须新建对应
+  文档，并同步更新
+  `docs/module-map.md` 的映射表。
+- `docs/examples/` 文档随 crate 发布（后续实施完成后 `Cargo.toml` 的 `package.include` 白名单必须
+  包含 `docs/examples/**`），必须提交到 Git；发布前运行 `cargo package --list` 确认其在发布包内。
+- `README.md` 只保留简短示例与能力概览，详细示例一律链接到 `docs/examples/` 对应文档，
+  不在 README 中复制完整行为说明。
+- 文档示例优先复用源码 API doc 中已通过 doctest 验证的示例，至少保证可编译；涉及 SMTP
+  网络、进程级单例、外部文件、异步 runtime 或平台状态时，必须使用 `no_run`、函数指针/构造
+  示例或明确的“不会执行外部副作用”说明，不能在验证或阅读示例时向真实 relay 发信。示例中
+  只能使用 `example.com` 等保留域名和明显的占位凭据，不得出现真实账号、密码、授权码、真实
+  邮箱地址或本地配置。
+- 新建或修改 `docs/examples/` 或 `README.md` 时，必须对该次变更涉及文档的**全部** Rust
+  代码块做编译验证，不能用抽查代表性片段代替。Markdown 本身不由 `cargo test --doc` 自动
+  收集；应在临时 scratch
+  crate 中通过 `#![doc = include_str!(...)]` 配合 `cargo test --doc`，按文档实际 feature 组合
+  验证普通、`no_run` 和必要的 `compile_fail` 代码块，并在完成后删除 scratch 目录。需要证明
+  API 在某个 feature 组合下不存在时，还要运行预期失败的最小编译 fixture 并核对诊断目标。
+- 文档维护触发条件不仅包括新增方法：还包括任一公共项的新增、删除、重命名、可见性变化、
+  签名变化、返回值或错误语义变化、feature 守卫变化、公开常量或枚举变体变化，以及会改变
+  已记录行为/安全边界的实现修改。每个当前或未来由本 crate 定义的公共自由函数和 inherent/associated 方法
+  （包括 feature-gated 方法和单后端别名）必须在对应文档中拥有独立小节和至少一个针对该项的
+  调用示例；把多个函数/方法合并成一个示例不能代替逐项覆盖。公共 trait 的方法、公开常量、
+  枚举变体、类型别名、静态项、宏、`#[non_exhaustive]` 约束和重要 trait 实现也必须在导出清单
+  或专门小节中说明。
+
 ## 修改约定
 
 - 默认使用中文编写说明、审查意见、提交信息和文档；代码中的 Rust 标识符遵循 Rust 命名规范。
@@ -71,8 +116,9 @@ cargo test --no-default-features
 ## 发布边界
 
 `Cargo.toml` 的 `package.include` 是发布包白名单。`README.md`、`CHANGELOG.md`、`LICENSE`、
-`Cargo.toml` 和 `src/**` 可以随包发布；`develop.md`、`AGENTS.md`、`CLAUDE.md` 和 `docs/skills/**`
-仅供仓库开发使用，不要调整白名单将它们带入 crates.io。
+`Cargo.toml`、`src/**` 和 `docs/examples/**` 可以随包发布；`develop.md`、`AGENTS.md`、
+`CLAUDE.md` 以及 `docs/` 中的 `docs/plans/**`、`docs/status/**`、`docs/skills/**` 仅供仓库开发
+使用，不要调整白名单将它们带入 crates.io。
 
 ## 项目专属 skill
 

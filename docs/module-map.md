@@ -27,3 +27,22 @@
 4. 与现有工具类的关系，尤其是可能重叠的 API 和复用方式。
 
 如果工具类的职责、公共导出、feature、依赖或适用范围发生变化，也必须同步更新本清单。
+
+## 使用示例文档
+
+每个公共能力单元在 `docs/examples/` 维护详细使用文档（命名取能力前缀、不带 `Utils`
+后缀），作为 README 简单示例的补充：
+
+| 能力单元 | 使用文档 |
+| --- | --- |
+| `PathUtils` | `docs/examples/path.md` |
+| `TimeUtils` 与时间类型 | `docs/examples/time.md` |
+| `FormatUtils` 与 `TemplateEngine` | `docs/examples/format.md` |
+| `RegUtils` | `docs/examples/reg.md` |
+| `RandomUtils` 与相关类型 | `docs/examples/random.md` |
+| `EmailClient`、email 配置/消息/错误类型 | `docs/examples/email.md` |
+| `EmailUtils`（`axutils::EmailUtils`、`axutils::utils::EmailUtils`、`axutils::utils::email_utils::EmailUtils`） | `docs/examples/email.md` |
+| `ConfigLoader`、配置格式/值/错误类型 | `docs/examples/config.md` |
+| `ConfigUtils`（`axutils::ConfigUtils`、`axutils::utils::ConfigUtils`、`axutils::utils::config_utils::ConfigUtils`） | `docs/examples/config.md` |
+
+新增、删除或重命名能力单元时，必须同步更新本表与对应文档；文档随 crate 发布。
