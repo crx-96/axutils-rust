@@ -4,8 +4,8 @@
 //! 模板能力需要显式同时启用 `serde` 和 `strfmt` 或 `minijinja` feature，并通过
 //! `TemplateEngine` 参数显式选择后端。`RandomUtils` 及其相关类型需要 `rand` feature，
 //! `RegUtils` 需要 `regex` feature；SMTP 邮件能力需要 `lettre` feature，异步发送还需要
-//! 同时启用 `tokio`。配置文件读取能力（`ConfigUtils`）需要 `serde` feature，YAML/TOML/INI
-//! 后端分别还需要额外启用 `serde-saphyr`/`toml`/`rust-ini`。
+//! 同时启用 `tokio`。配置文件读取能力（`ConfigUtils`）需要 `serde` feature，文件异步入口还
+//! 需要同时启用 `tokio`；YAML/TOML/INI 后端分别还需要额外启用 `serde-saphyr`/`toml`/`rust-ini`。
 
 #[cfg(feature = "rand")]
 pub mod random_utils;

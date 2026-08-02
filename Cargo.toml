@@ -55,7 +55,7 @@ lettre = { version = "0.11.22", default-features = false, optional = true, featu
     "ring",
     "webpki-roots",
 ] }
-tokio = { version = "1.53.1", default-features = false, optional = true }
+tokio = { version = "1.53.1", default-features = false, features = ["fs", "io-util"], optional = true }
 toml = { version = "1.1.4", default-features = false, features = ["parse", "serde", "std"], optional = true }
 serde-saphyr = { version = "1.0.0", default-features = false, features = ["deserialize"], optional = true }
 rust-ini = { version = "0.21.3", default-features = false, optional = true }

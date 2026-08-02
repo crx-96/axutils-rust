@@ -31,6 +31,10 @@
   `"server.tls.port"`）与有类型 `serde::Deserialize` 两条读取路径，共享同一套文件大小
   （1 KiB–16 MiB，默认 1 MiB）上限；JSON/TOML/YAML/INI 的无类型读取以及 YAML/INI 的有类型
   读取使用统一的嵌套深度上限（1–256，默认 64），JSON/TOML 有类型读取使用各自后端的递归保护。
+- 新增 `serde,tokio` feature 组合下的异步配置文件读取：`ConfigLoader` 提供
+  `load_value_async`/`load_async`，`ConfigUtils` 提供 `load_value_async`/`load_async`/
+  `load_value_as_async`/`load_as_async`；异步读取复用现有格式解析、大小上限、BOM、UTF-8、深度、
+  `.env` 回退和错误脱敏语义，Tokio 生产依赖仅增加 `fs`/`io-util` 能力，不创建 runtime。
 
 ### Changed
 

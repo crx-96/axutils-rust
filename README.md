@@ -25,7 +25,8 @@
 自实现的 `.env`（dotenv）；YAML、TOML、INI 分别需要额外启用 `serde-saphyr`、`toml`、`rust-ini`
 feature。所有格式共享同一套文件大小上限；JSON/TOML/YAML/INI 的无类型读取以及 YAML/INI 的
 有类型读取使用配置的嵌套深度上限，JSON/TOML 有类型读取使用各自后端的递归保护，错误不回显
-配置文件内容。
+配置文件内容。若需要异步读取磁盘文件，还要为 `axutils` 启用 `tokio` feature；异步入口只
+异步化文件 I/O，不创建 runtime 或调用 `block_on`。
 
 ## 安装
 
@@ -70,6 +71,33 @@ tokio = { version = "1.53.1", features = ["macros", "rt-multi-thread"] }
 的最小能力，不使用 `full`；上面的 `macros` 和 `rt-multi-thread` 是应用自身 runtime 示例。
 示例中的第三方依赖版本都是最低兼容版本，不是精确补丁锁定；Cargo 可以在兼容范围内解析后续
 版本。项目 manifest 对 `lettre`、Tokio、`time` 等依赖也遵循相同规则。
+
+如果需要异步读取配置文件，`axutils` 同样需要显式启用 `serde` 与 `tokio`，应用仍需直接依赖
+Tokio 并启用自身需要的 runtime feature：
+
+```toml
+[dependencies]
+axutils = { version = "0.1", features = ["serde", "tokio"] }
+tokio = { version = "1.53.1", features = ["macros", "rt-multi-thread"] }
+```
+
+```rust,no_run
+use axutils::ConfigUtils;
+
+#[tokio::main]
+async fn main() -> Result<(), axutils::ConfigError> {
+    let value = ConfigUtils::load_value_async("app.json").await?;
+    let _ = value;
+    Ok(())
+}
+```
+
+`axutils` 的生产 Tokio 依赖只启用 `fs` 和 `io-util`；`macros`、`rt-multi-thread` 等 runtime
+能力由应用直接依赖的 Tokio 提供。异步方法适合避免在调用方 worker 上直接执行文件 I/O，解析
+阶段仍在当前异步任务中同步执行；若需隔离解析 CPU，请由调用方自行决定 `spawn_blocking` 和
+并发限制。每个并发读取调用独立占用最多约文件大小上限加 1 字节的缓冲区，`axutils` 不新增
+全局并发或内存配额；多个异步读取的总内存上限可相乘，调用方需自行限制路径来源、任务数和
+总内存。
 
 如果需要使用 Chrono 日期格式化：
 
@@ -600,7 +628,9 @@ fn main() -> Result<(), axutils::ConfigError> {
 ```
 
 从磁盘读取文件使用 `ConfigUtils::load_value`/`load`（按扩展名推断）或
-`ConfigUtils::load_value_as`/`load_as`（显式指定格式）。需要自定义文件大小/嵌套深度上限，或
+`ConfigUtils::load_value_as`/`load_as`（显式指定格式）；在 `serde,tokio` 下可对应使用
+`load_value_async`/`load_async` 和 `load_value_as_async`/`load_as_async`，调用方必须在已有 Tokio
+runtime 中等待。需要自定义文件大小/嵌套深度上限，或
 关闭 `.env` 的进程环境变量回退时，使用 `ConfigUtils::loader()` 获取一个可配置的
 `ConfigLoader`：
 
@@ -661,8 +691,9 @@ assert_eq!(value.get("GREETING").and_then(|v| v.as_str()), Some("hello, localhos
 
 ### 安全与资源上限
 
-- **文件大小**：默认上限 1 MiB，可调 1 KiB–16 MiB；采用 `File::open` + `Read::take` 流式截断，
-  不依赖 `fs::metadata` 报告的大小，避免 TOCTOU 及命名管道、`/proc` 等特殊文件耗尽内存。
+- **文件大小**：默认上限 1 MiB，可调 1 KiB–16 MiB；同步路径采用 `File::open` + `Read::take`，
+  异步路径采用 `tokio::fs::File` + `AsyncReadExt::take`，均不依赖 `fs::metadata` 报告的大小，
+  避免 TOCTOU 及命名管道、`/proc` 等特殊文件耗尽内存。
 - **嵌套深度**：默认上限 64，可调 1–256；JSON/TOML/INI 由本 crate 在构建 `ConfigValue` 时精确
   计数，YAML 由 `serde-saphyr` 自身的 `Budget::max_depth` 精确强制；JSON/TOML 有类型读取路径
   依赖各后端自身的递归限制，YAML/INI 有类型读取路径使用上述配置。
@@ -684,18 +715,25 @@ assert_eq!(value.get("GREETING").and_then(|v| v.as_str()), Some("hello, localhos
 
 ### 配置 feature 矩阵
 
-| 启用组合 | `config` 模块/`ConfigUtils` | 支持的格式 |
+| 启用组合 | `config` 模块/`ConfigUtils` | 支持的格式与异步入口 |
 | --- | --- | --- |
 | 无 | 不导出 | 无 |
+| 仅 `tokio` | 不导出 | 无 |
 | 仅 `toml` / `serde-saphyr` / `rust-ini` | 不导出 | 无 |
-| `serde` | 导出 | JSON、`.env` |
-| `serde` + `toml` | 导出 | JSON、`.env`、TOML |
-| `serde` + `serde-saphyr` | 导出 | JSON、`.env`、YAML |
-| `serde` + `rust-ini` | 导出 | JSON、`.env`、INI |
-| `serde` + 全部三个后端 | 导出 | 五种全部 |
+| `serde` | 导出 | JSON、`.env`；仅同步 |
+| `serde` + `toml` | 导出 | JSON、`.env`、TOML；仅同步 |
+| `serde` + `serde-saphyr` | 导出 | JSON、`.env`、YAML；仅同步 |
+| `serde` + `rust-ini` | 导出 | JSON、`.env`、INI；仅同步 |
+| `serde` + 全部三个后端 | 导出 | 五种全部；仅同步 |
+| `serde` + `tokio` | 导出 | JSON、`.env`；提供六个异步文件入口 |
+| `serde` + `tokio` + `toml` | 导出 | JSON、`.env`、TOML；提供六个异步文件入口 |
+| `serde` + `tokio` + `serde-saphyr` | 导出 | JSON、`.env`、YAML；提供六个异步文件入口 |
+| `serde` + `tokio` + `rust-ini` | 导出 | JSON、`.env`、INI；提供六个异步文件入口 |
+| `serde` + `tokio` + 全部三个后端 | 导出 | 五种全部；提供六个异步文件入口 |
 
-只启用某个后端 feature 而不启用 `serde` 时，不会导出任何配置 API；未启用对应后端的格式，其
-`ConfigFormat` 变体和解析函数都不存在于公共 API 中，而不是运行时报错。
+只启用某个后端 feature 或 `tokio` 而不启用 `serde` 时，不会导出任何配置 API；只启用 `serde`
+而不启用 `tokio` 时仍只有同步配置入口。未启用对应后端的格式，其 `ConfigFormat` 变体和解析
+函数都不存在于公共 API 中，而不是运行时报错。
 
 ## 构建与部署依赖
 

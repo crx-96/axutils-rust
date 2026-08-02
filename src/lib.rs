@@ -56,6 +56,8 @@
 //! 路径访问）与有类型 `serde::Deserialize` 两条读取路径；文件大小上限统一，JSON/TOML/YAML/INI
 //! 的无类型路径以及 YAML/INI 的有类型路径使用配置的嵌套深度上限，JSON/TOML 有类型路径使用
 //! 各自后端的递归保护；错误不回显配置文件内容：
+//! 同时启用 `tokio` feature 后还可使用六个异步文件入口；调用方必须自行提供 Tokio runtime，
+//! crate 不创建 runtime 或调用 `block_on`，解析阶段仍在当前异步任务中执行。
 //!
 //! ```toml
 //! [dependencies]

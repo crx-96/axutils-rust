@@ -1,4 +1,7 @@
 //! 配置文件读取的静态便捷入口。
+//!
+//! 同时启用 `serde` 与 `tokio` feature 后，文件读取入口还提供异步版本；异步版本要求调用方
+//! 已经运行在 Tokio runtime 中，不创建 runtime 或调用 `block_on`。
 
 use std::path::Path;
 
@@ -41,6 +44,35 @@ impl ConfigUtils {
         ConfigLoader::new().load_value(path)
     }
 
+    /// 按扩展名推断格式，异步读取配置文件为无类型的 [`ConfigValue`]。
+    ///
+    /// 该方法仅在同时启用 `serde` 与 `tokio` feature 时提供，调用方必须在已有 Tokio runtime
+    /// 中等待它。文件大小、UTF-8/BOM、格式、深度、`.env` 回退和错误语义沿用默认
+    /// [`ConfigLoader::load_value_async`]；crate 不创建 runtime 或调用 `block_on`，解析阶段仍在
+    /// 当前异步任务中同步执行。每个并发调用独立占用最多约文件大小上限加 1 字节的读取缓冲区，
+    /// crate 不新增全局并发或内存配额；调用方需自行限制路径来源、任务数和总内存。配置文件
+    /// 可能包含凭据，不要直接记录整个配置值。
+    ///
+    /// # Errors
+    ///
+    /// 见 [`ConfigLoader::load_value_async`]。
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use axutils::ConfigUtils;
+    ///
+    /// async fn example() -> Result<(), axutils::ConfigError> {
+    ///     let value = ConfigUtils::load_value_async("app.json").await?;
+    ///     let _ = value;
+    ///     Ok(())
+    /// }
+    /// ```
+    #[cfg(all(feature = "serde", feature = "tokio"))]
+    pub async fn load_value_async(path: impl AsRef<Path>) -> Result<ConfigValue, ConfigError> {
+        ConfigLoader::new().load_value_async(path).await
+    }
+
     /// 按扩展名推断格式，从磁盘读取配置文件并反序列化为调用方类型 `T`。
     ///
     /// # Errors
@@ -74,6 +106,41 @@ impl ConfigUtils {
         ConfigLoader::new().load(path)
     }
 
+    /// 按扩展名推断格式，异步读取配置文件并反序列化为调用方类型 `T`。
+    ///
+    /// 该方法仅在同时启用 `serde` 与 `tokio` feature 时提供，调用方必须在已有 Tokio runtime
+    /// 中等待它。文件大小、UTF-8/BOM、格式、深度、`.env` 回退和错误语义沿用默认
+    /// [`ConfigLoader::load_async`]；crate 不创建 runtime 或调用 `block_on`，解析阶段仍在当前
+    /// 异步任务中同步执行。每个并发调用独立占用最多约文件大小上限加 1 字节的读取缓冲区，crate
+    /// 不新增全局并发或内存配额；调用方需自行限制路径来源、任务数和总内存。配置文件可能包含
+    /// 凭据，不要直接记录反序列化结果。
+    ///
+    /// # Errors
+    ///
+    /// 见 [`ConfigLoader::load_async`]。
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use axutils::ConfigUtils;
+    /// use serde::Deserialize;
+    ///
+    /// #[derive(Deserialize)]
+    /// struct AppConfig {
+    ///     port: u16,
+    /// }
+    ///
+    /// async fn example() -> Result<(), axutils::ConfigError> {
+    ///     let config: AppConfig = ConfigUtils::load_async("app.json").await?;
+    ///     let _ = config;
+    ///     Ok(())
+    /// }
+    /// ```
+    #[cfg(all(feature = "serde", feature = "tokio"))]
+    pub async fn load_async<T: DeserializeOwned>(path: impl AsRef<Path>) -> Result<T, ConfigError> {
+        ConfigLoader::new().load_async(path).await
+    }
+
     /// 使用显式指定的格式（忽略扩展名推断），从磁盘读取配置文件为无类型的 [`ConfigValue`]。
     ///
     /// # Errors
@@ -102,6 +169,41 @@ impl ConfigUtils {
         format: ConfigFormat,
     ) -> Result<ConfigValue, ConfigError> {
         ConfigLoader::new().with_format(format).load_value(path)
+    }
+
+    /// 使用显式指定的格式异步读取配置文件为无类型的 [`ConfigValue`]。
+    ///
+    /// 该方法仅在同时启用 `serde` 与 `tokio` feature 时提供，显式格式会覆盖扩展名推断；调用方
+    /// 必须在已有 Tokio runtime 中等待它。文件大小、UTF-8/BOM、深度、`.env` 回退和错误语义沿用
+    /// [`ConfigLoader::load_value_async`]；crate 不创建 runtime 或调用 `block_on`，解析阶段仍在
+    /// 当前异步任务中同步执行。每个并发调用独立占用最多约文件大小上限加 1 字节的读取缓冲区，
+    /// crate 不新增全局并发或内存配额；调用方需自行限制路径来源、任务数和总内存。配置文件
+    /// 可能包含凭据，不要直接记录整个配置值。
+    ///
+    /// # Errors
+    ///
+    /// 见 [`ConfigLoader::load_value_async`]。
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use axutils::{ConfigFormat, ConfigUtils};
+    ///
+    /// async fn example() -> Result<(), axutils::ConfigError> {
+    ///     let value = ConfigUtils::load_value_as_async("app.conf", ConfigFormat::Json).await?;
+    ///     let _ = value;
+    ///     Ok(())
+    /// }
+    /// ```
+    #[cfg(all(feature = "serde", feature = "tokio"))]
+    pub async fn load_value_as_async(
+        path: impl AsRef<Path>,
+        format: ConfigFormat,
+    ) -> Result<ConfigValue, ConfigError> {
+        ConfigLoader::new()
+            .with_format(format)
+            .load_value_async(path)
+            .await
     }
 
     /// 使用显式指定的格式（忽略扩展名推断），从磁盘读取配置文件并反序列化为调用方类型 `T`。
@@ -138,6 +240,49 @@ impl ConfigUtils {
         format: ConfigFormat,
     ) -> Result<T, ConfigError> {
         ConfigLoader::new().with_format(format).load(path)
+    }
+
+    /// 使用显式指定的格式异步读取配置文件，并反序列化为调用方类型 `T`。
+    ///
+    /// 该方法仅在同时启用 `serde` 与 `tokio` feature 时提供，显式格式会覆盖扩展名推断；调用方
+    /// 必须在已有 Tokio runtime 中等待它。文件大小、UTF-8/BOM、深度、`.env` 回退和错误语义沿用
+    /// [`ConfigLoader::load_async`]；crate 不创建 runtime 或调用 `block_on`，解析阶段仍在当前
+    /// 异步任务中同步执行。每个并发调用独立占用最多约文件大小上限加 1 字节的读取缓冲区，crate
+    /// 不新增全局并发或内存配额；调用方需自行限制路径来源、任务数和总内存。配置文件可能包含
+    /// 凭据，不要直接记录反序列化结果。
+    ///
+    /// # Errors
+    ///
+    /// 见 [`ConfigLoader::load_async`]；有类型反序列化错误按对应格式同步后端的既有映射返回，
+    /// 例如 [`ConfigError::Parse`] 或 [`ConfigError::TypeMismatch`]。
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use axutils::{ConfigFormat, ConfigUtils};
+    /// use serde::Deserialize;
+    ///
+    /// #[derive(Deserialize)]
+    /// struct AppConfig {
+    ///     port: u16,
+    /// }
+    ///
+    /// async fn example() -> Result<(), axutils::ConfigError> {
+    ///     let config: AppConfig =
+    ///         ConfigUtils::load_as_async("app.conf", ConfigFormat::Json).await?;
+    ///     let _ = config;
+    ///     Ok(())
+    /// }
+    /// ```
+    #[cfg(all(feature = "serde", feature = "tokio"))]
+    pub async fn load_as_async<T: DeserializeOwned>(
+        path: impl AsRef<Path>,
+        format: ConfigFormat,
+    ) -> Result<T, ConfigError> {
+        ConfigLoader::new()
+            .with_format(format)
+            .load_async(path)
+            .await
     }
 
     /// 把内存中的文本按指定格式解析为无类型的 [`ConfigValue`]。

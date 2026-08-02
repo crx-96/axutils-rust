@@ -51,6 +51,13 @@ cargo test --no-default-features
 cargo check --no-default-features --features lettre
 cargo check --no-default-features --features lettre,tokio
 cargo test --doc --no-default-features --features lettre,tokio
+cargo check --no-default-features --features tokio
+cargo check --no-default-features --features serde
+cargo check --no-default-features --features serde,tokio
+cargo check --no-default-features --features serde,tokio,toml,serde-saphyr,rust-ini
+cargo tree --no-default-features --features tokio -e normal,build
+cargo tree --no-default-features --features serde,tokio -e normal,build
+cargo tree --no-default-features --features tokio -e features
 cargo package --list
 git diff --check
 ```
@@ -68,6 +75,10 @@ git diff --check
 feature、`--no-default-features`、相关单 feature、组合 feature 和 `--all-features`。
 配置读取能力以 `serde` 为基础 feature；YAML、TOML、INI 分别还需要
 `serde-saphyr`、`toml`、`rust-ini`，且单独启用这些后端 feature 时不得导出配置 API。
+配置文件异步读取要求调用方显式同时启用 `serde` 与 `tokio`；`tokio` 单 feature 不导出配置
+模块，`serde` 单 feature 只提供同步入口。异步入口只替换受限文件读取，不创建 runtime 或
+调用 `block_on`，解析阶段仍在当前 Tokio worker 中执行；测试需覆盖 `ConfigUtils` 四个包装、
+`ConfigLoader` 两个方法、显式格式、大小/深度/BOM/UTF-8/错误脱敏和各格式后端。
 邮件能力还必须验证 `tokio` 单 feature 不导出邮件 API、`lettre` 单 feature 不导出异步 API，
 以及生产依赖树只包含 Rustls、`ring` 和 `webpki-roots` 方案，不包含 native-tls/OpenSSL。
 
@@ -172,9 +183,10 @@ axutils = { version = "0.1", features = ["regex", "libphonenumber"] }
 `Cargo.toml`、`README.md`、`CHANGELOG.md`、API doc、doctest 和测试。
 
 邮件模块只由 `lettre` feature 导出；`tokio` feature 通过弱依赖语法为“已经启用的
-`lettre`”打开 Tokio Rustls 适配，因此单独启用 `tokio` 不会拉入 `lettre`。生产依赖不使用
-`tokio` 的 `full`、`macros` 或 `rt-multi-thread`；测试和 ignored 真实测试所需 runtime
-feature 只放在 dev-dependency。`lettre` 最低版本为经核验的 `0.11.22`，使用 Cargo 默认 caret
+`lettre`”打开 Tokio Rustls 适配，因此单独启用 `tokio` 不会拉入 `lettre`。同一个 `tokio`
+feature 也为 `serde + tokio` 配置异步入口提供 `fs`/`io-util`；生产依赖不使用 `tokio` 的
+`full`、`macros` 或 `rt-multi-thread`，测试和 ignored 真实测试所需 runtime feature 只放在
+dev-dependency。`lettre` 最低版本为经核验的 `0.11.22`，使用 Cargo 默认 caret
 约束，允许后续兼容版本；使用的 feature 包括 `builder`、`smtp-transport`、`pool`、`rustls`、
 `ring` 和 `webpki-roots`，不启用 native-tls、OpenSSL 或
 机会式 STARTTLS。

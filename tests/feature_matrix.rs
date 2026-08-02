@@ -116,15 +116,23 @@ fn verifies_config_feature_api_matrix_and_dependency_boundaries() {
 
     for (feature, expected_success, diagnostic_token) in [
         ("", true, ""),
+        ("tokio-only", true, ""),
         ("serde-only", true, ""),
         ("serde-toml", true, ""),
+        ("serde-tokio", true, ""),
         ("all", true, ""),
+        ("serde-tokio-all", true, ""),
         ("negative-config-module-no-serde", false, "config"),
         ("negative-config-utils-no-serde", false, "configutils"),
+        ("negative-tokio-config-no-serde", false, "configutils"),
         ("negative-toml-only-no-serde", false, "configutils"),
+        ("negative-config-async-no-tokio", false, "load_value_async"),
         ("negative-yaml-under-serde-only", false, "configformat"),
         ("negative-toml-under-serde-only", false, "configformat"),
         ("negative-ini-under-serde-only", false, "configformat"),
+        ("negative-yaml-under-serde-tokio", false, "configformat"),
+        ("negative-toml-under-serde-tokio", false, "configformat"),
+        ("negative-ini-under-serde-tokio", false, "configformat"),
     ] {
         let output = run_fixture(&fixture_manifest, &target_dir.0, feature);
         if expected_success {
@@ -166,6 +174,25 @@ fn assert_config_dependency_boundaries() {
     assert!(!has_package(&serde_only_tree, "toml"));
     assert!(!has_package(&serde_only_tree, "serde-saphyr"));
     assert!(!has_package(&serde_only_tree, "rust-ini"));
+
+    let tokio_only_tree = cargo_tree("tokio");
+    assert!(has_package(&tokio_only_tree, "tokio"));
+    assert!(!has_package(&tokio_only_tree, "serde"));
+    assert!(!has_package(&tokio_only_tree, "serde_json"));
+    assert!(!has_package(&tokio_only_tree, "lettre"));
+
+    let serde_tokio_tree = cargo_tree("serde,tokio");
+    assert!(has_package(&serde_tokio_tree, "serde"));
+    assert!(has_package(&serde_tokio_tree, "serde_json"));
+    assert!(has_package(&serde_tokio_tree, "tokio"));
+    assert!(!has_package(&serde_tokio_tree, "toml"));
+    assert!(!has_package(&serde_tokio_tree, "serde-saphyr"));
+    assert!(!has_package(&serde_tokio_tree, "rust-ini"));
+    assert!(!has_package(&serde_tokio_tree, "lettre"));
+
+    let tokio_feature_tree = cargo_tree_with_edges("tokio", "normal,build,features");
+    assert!(tokio_feature_tree.contains("tokio feature \"fs\""));
+    assert!(tokio_feature_tree.contains("tokio feature \"io-util\""));
 }
 
 fn run_fixture(manifest: &Path, target_dir: &Path, feature: &str) -> Output {
@@ -224,6 +251,10 @@ fn assert_dependency_boundaries() {
 }
 
 fn cargo_tree(features: &str) -> String {
+    cargo_tree_with_edges(features, "normal,build")
+}
+
+fn cargo_tree_with_edges(features: &str, edges: &str) -> String {
     let output = Command::new("cargo")
         .arg("tree")
         .arg("--manifest-path")
@@ -233,7 +264,7 @@ fn cargo_tree(features: &str) -> String {
         .arg(features)
         .arg("--offline")
         .arg("--edges")
-        .arg("normal,build")
+        .arg(edges)
         .env("CARGO_TERM_COLOR", "never")
         .output()
         .unwrap_or_else(|_| panic!("failed to run cargo tree for feature `{features}`"));
