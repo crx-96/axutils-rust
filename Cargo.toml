@@ -2,7 +2,7 @@
 name = "axutils"
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.85"
+rust-version = "1.88"
 resolver = "3"
 description = "Rust utility library with opt-in feature modules"
 license = "MIT"
@@ -32,6 +32,9 @@ time = ["dep:time"]
 jiff = ["dep:jiff"]
 lettre = ["dep:lettre"]
 tokio = ["dep:tokio", "lettre?/tokio1-rustls"]
+toml = ["dep:toml"]
+serde-saphyr = ["dep:serde-saphyr"]
+rust-ini = ["dep:rust-ini"]
 
 [dependencies]
 rand = { version = "0.9", optional = true }
@@ -53,6 +56,9 @@ lettre = { version = "0.11.22", default-features = false, optional = true, featu
     "webpki-roots",
 ] }
 tokio = { version = "1.53.1", default-features = false, optional = true }
+toml = { version = "1.1.4", default-features = false, features = ["parse", "serde", "std"], optional = true }
+serde-saphyr = { version = "1.0.0", default-features = false, features = ["deserialize"], optional = true }
+rust-ini = { version = "0.21.3", default-features = false, optional = true }
 
 [dev-dependencies]
 tokio = { version = "1.53.1", default-features = false, features = ["macros", "rt-multi-thread"] }

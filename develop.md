@@ -19,6 +19,7 @@
 │   ├── plans/         # 设计与实施计划，不随包发布
 │   └── status/        # 长任务状态记录，不随包发布
 └── src/
+    ├── config/         # 配置文件读取后端（需要 serde 及对应格式 feature）
     ├── email/         # SMTP 配置、消息、错误与多实例客户端（需要 lettre feature）
     ├── lib.rs          # crate 入口和公共导出
     └── utils/
@@ -26,12 +27,13 @@
         ├── path_utils.rs  # PathUtils 实现与单元测试
         ├── random_utils.rs # RandomUtils 实现与单元测试（需要 rand feature）
         ├── reg_utils.rs  # RegUtils 实现与单元测试
-        └── time_utils.rs # TimeUtils 实现与单元测试
+        ├── time_utils.rs # TimeUtils 实现与单元测试
+        └── config_utils.rs # ConfigUtils 静态配置读取入口（需要 serde feature）
 ```
 
 ## 本地开发
 
-项目当前最低支持 Rust 1.85，要求 Rust 工具链满足 `Cargo.toml` 中声明的
+项目当前最低支持 Rust 1.88，要求 Rust 工具链满足 `Cargo.toml` 中声明的
 `rust-version`。常用检查命令如下：
 
 第三方依赖统一声明最低兼容版本，使用 Cargo 默认 caret 约束，不在 `version` 字段使用等号前缀
@@ -64,6 +66,8 @@ git diff --check
 
 新增 feature 时，应同步更新 `Cargo.toml`、`README.md`、`CHANGELOG.md` 和本文件，并至少验证默认
 feature、`--no-default-features`、相关单 feature、组合 feature 和 `--all-features`。
+配置读取能力以 `serde` 为基础 feature；YAML、TOML、INI 分别还需要
+`serde-saphyr`、`toml`、`rust-ini`，且单独启用这些后端 feature 时不得导出配置 API。
 邮件能力还必须验证 `tokio` 单 feature 不导出邮件 API、`lettre` 单 feature 不导出异步 API，
 以及生产依赖树只包含 Rustls、`ring` 和 `webpki-roots` 方案，不包含 native-tls/OpenSSL。
 
@@ -133,6 +137,9 @@ time = ["dep:time"]
 jiff = ["dep:jiff"]
 lettre = ["dep:lettre"]
 tokio = ["dep:tokio", "lettre?/tokio1-rustls"]
+toml = ["dep:toml"]
+serde-saphyr = ["dep:serde-saphyr"]
+rust-ini = ["dep:rust-ini"]
 ```
 
 调用方直接依赖 `axutils = "0.1"` 即可使用 `PathUtils` 和 `TimeUtils`；需要
@@ -172,7 +179,7 @@ feature 只放在 dev-dependency。`lettre` 最低版本为经核验的 `0.11.22
 `ring` 和 `webpki-roots`，不启用 native-tls、OpenSSL 或
 机会式 STARTTLS。
 
-本仓库不再维护 GitHub Actions CI 工作流。跨平台验证需要维护者在 Windows、Linux、macOS 的 Rust 1.85
+本仓库不再维护 GitHub Actions CI 工作流。跨平台验证需要维护者在 Windows、Linux、macOS 的 Rust 1.88
 和 stable 环境中自行执行；当前仓库只提供不连接 SMTP relay 的测试和 feature/依赖边界验证，不会连接
 SMTP relay。`axutils` 是 library crate，不新增 Dockerfile；README 中的 Debian/Ubuntu 与 Alpine Docker
 内容只是消费方替换占位符后的说明性模板。

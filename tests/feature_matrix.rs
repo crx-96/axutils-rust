@@ -55,6 +55,72 @@ fn verifies_feature_api_matrix_and_dependency_boundaries() {
     assert_dependency_boundaries();
 }
 
+#[test]
+fn verifies_config_feature_api_matrix_and_dependency_boundaries() {
+    let fixture_manifest = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("fixtures")
+        .join("config_feature_matrix")
+        .join("Cargo.toml");
+    let target_dir = TemporaryTarget(env::temp_dir().join(format!(
+        "axutils-config-feature-matrix-{}",
+        std::process::id()
+    )));
+
+    for (feature, expected_success, diagnostic_token) in [
+        ("", true, ""),
+        ("serde-only", true, ""),
+        ("serde-toml", true, ""),
+        ("all", true, ""),
+        ("negative-config-module-no-serde", false, "config"),
+        ("negative-config-utils-no-serde", false, "configutils"),
+        ("negative-toml-only-no-serde", false, "configutils"),
+        ("negative-yaml-under-serde-only", false, "configformat"),
+        ("negative-toml-under-serde-only", false, "configformat"),
+        ("negative-ini-under-serde-only", false, "configformat"),
+    ] {
+        let output = run_fixture(&fixture_manifest, &target_dir.0, feature);
+        if expected_success {
+            assert!(
+                output.status.success(),
+                "config fixture feature `{feature}` should compile successfully"
+            );
+        } else {
+            assert!(
+                !output.status.success(),
+                "config fixture feature `{feature}` should fail to compile"
+            );
+            assert_expected_diagnostic(&output, diagnostic_token, feature);
+        }
+    }
+
+    assert_config_dependency_boundaries();
+}
+
+fn assert_config_dependency_boundaries() {
+    let toml_only_tree = cargo_tree("toml");
+    assert!(has_package(&toml_only_tree, "toml"));
+    assert!(!has_package(&toml_only_tree, "serde-saphyr"));
+    assert!(!has_package(&toml_only_tree, "rust-ini"));
+    assert!(!has_package(&toml_only_tree, "serde_json"));
+
+    let saphyr_only_tree = cargo_tree("serde-saphyr");
+    assert!(has_package(&saphyr_only_tree, "serde-saphyr"));
+    assert!(!has_package(&saphyr_only_tree, "toml"));
+    assert!(!has_package(&saphyr_only_tree, "rust-ini"));
+
+    let ini_only_tree = cargo_tree("rust-ini");
+    assert!(has_package(&ini_only_tree, "rust-ini"));
+    assert!(!has_package(&ini_only_tree, "toml"));
+    assert!(!has_package(&ini_only_tree, "serde-saphyr"));
+
+    let serde_only_tree = cargo_tree("serde");
+    assert!(has_package(&serde_only_tree, "serde_json"));
+    assert!(!has_package(&serde_only_tree, "toml"));
+    assert!(!has_package(&serde_only_tree, "serde-saphyr"));
+    assert!(!has_package(&serde_only_tree, "rust-ini"));
+}
+
 fn run_fixture(manifest: &Path, target_dir: &Path, feature: &str) -> Output {
     let mut command = Command::new("cargo");
     command

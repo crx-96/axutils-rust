@@ -1,0 +1,19 @@
+[package]
+name = "axutils-config-feature-matrix"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[features]
+serde-only = ["axutils/serde"]
+serde-toml = ["axutils/serde", "axutils/toml"]
+all = ["axutils/serde", "axutils/toml", "axutils/serde-saphyr", "axutils/rust-ini"]
+negative-config-module-no-serde = []
+negative-config-utils-no-serde = []
+negative-toml-only-no-serde = ["axutils/toml"]
+negative-yaml-under-serde-only = ["axutils/serde"]
+negative-toml-under-serde-only = ["axutils/serde"]
+negative-ini-under-serde-only = ["axutils/serde"]
+
+[dependencies]
+axutils = { path = "../../..", default-features = false }

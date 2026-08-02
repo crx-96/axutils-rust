@@ -26,4 +26,4 @@ docs/status/*
 !docs/status/STATUS.md
 
 # Local SMTP integration-test credentials
-config/
+/config/

@@ -47,6 +47,18 @@
 //! `yyyy-MM-dd HH:mm:ss`；带偏移方法的 `offset: Option<TimeZoneOffset>` 传入 `None` 时
 //! 使用 `+08:00`。格式化采用本 crate 的统一模板：`yyyy`、`MM`、`dd`、`HH`、`mm`、
 //! `ss`、`SSS` 与固定偏移专用的 `XXX`。
+//!
+//! 需要读取配置文件时，通过 `serde` feature 显式启用 `ConfigLoader`/`ConfigUtils`，提供
+//! JSON 与自实现 `.env`（dotenv）读取；YAML、TOML、INI 分别需要额外启用
+//! `serde-saphyr`、`toml`、`rust-ini` feature。每种格式都提供无类型 [`ConfigValue`]（点号
+//! 路径访问）与有类型 `serde::Deserialize` 两条读取路径；文件大小上限统一，JSON/TOML/YAML/INI
+//! 的无类型路径以及 YAML/INI 的有类型路径使用配置的嵌套深度上限，JSON/TOML 有类型路径使用
+//! 各自后端的递归保护；错误不回显配置文件内容：
+//!
+//! ```toml
+//! [dependencies]
+//! axutils = { version = "0.1", features = ["serde", "serde-saphyr", "toml", "rust-ini"] }
+//! ```
 
 mod time;
 pub mod utils;
@@ -87,3 +99,12 @@ pub use email::{
 
 #[cfg(feature = "lettre")]
 pub use utils::EmailUtils;
+
+#[cfg(feature = "serde")]
+pub mod config;
+
+#[cfg(feature = "serde")]
+pub use config::{ConfigError, ConfigFormat, ConfigLoader, ConfigValue};
+
+#[cfg(feature = "serde")]
+pub use utils::ConfigUtils;

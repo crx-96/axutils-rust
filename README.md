@@ -2,8 +2,10 @@
 
 `axutils` 是一个按 feature 组织的 Rust 常用工具库。
 
-当前项目最低支持 Rust 1.85。这是因为邮件能力使用包含上游安全修复的 `lettre 0.11.22`；因此
-依赖 `axutils` 新版本的 Rust 1.76—1.84 项目需要先升级工具链。
+当前项目最低支持 Rust 1.88。这是因为配置文件读取能力的 YAML 后端使用 `serde-saphyr 1.0.0`，
+该 crate 声明 `edition = "2024"` 并使用了 let-chains 语法，实测需要 Rust 1.88（let-chains
+稳定化版本）才能编译；邮件能力使用的 `lettre 0.11.22` 只要求 Rust 1.85。因此依赖 `axutils`
+新版本的 Rust 1.76—1.87 项目需要先升级工具链。
 
 当前默认工具提供 `PathUtils`、`TimeUtils`、`FormatUtils`、`RegUtils` 和 `RandomUtils`：`PathUtils`、
 `TimeUtils` 与 `FormatUtils::seconds_to_human` 不依赖第三方包，默认可用，分别用于路径处理、获取当前 Unix
@@ -18,6 +20,12 @@
 
 日期格式化可按需启用 `chrono`、`time` 或 `jiff` 中的任一独立 feature。每个后端只接收
 自身的日期类型；仅启用一个后端时可使用简写方法，同时启用多个后端时必须调用带后缀的方法。
+
+配置文件读取能力（`ConfigLoader`/`ConfigUtils`）由 `serde` feature 显式提供，支持 JSON 和
+自实现的 `.env`（dotenv）；YAML、TOML、INI 分别需要额外启用 `serde-saphyr`、`toml`、`rust-ini`
+feature。所有格式共享同一套文件大小上限；JSON/TOML/YAML/INI 的无类型读取以及 YAML/INI 的
+有类型读取使用配置的嵌套深度上限，JSON/TOML 有类型读取使用各自后端的递归保护，错误不回显
+配置文件内容。
 
 ## 安装
 
@@ -109,6 +117,21 @@ features：
 ```toml
 [dependencies]
 axutils = { version = "0.1", features = ["regex", "libphonenumber"] }
+```
+
+如果需要读取配置文件，启用 `serde` feature 即可读取 JSON 与 `.env`：
+
+```toml
+[dependencies]
+axutils = { version = "0.1", features = ["serde"] }
+```
+
+需要 YAML、TOML 或 INI 时，分别额外启用 `serde-saphyr`、`toml` 或 `rust-ini`；可以同时启用
+多个后端：
+
+```toml
+[dependencies]
+axutils = { version = "0.1", features = ["serde", "serde-saphyr", "toml", "rust-ini"] }
 ```
 
 ## 使用 `PathUtils`
@@ -489,6 +512,143 @@ fn main() -> Result<(), axutils::EmailError> {
 OpenSSL、`pkg-config`、CMake、Go 或系统 CA 包；`webpki-roots` 不读取企业私有 CA，因此自签名
 或私有 CA relay 不在首期支持范围内，也不能通过关闭证书校验绕过。
 
+## 使用配置文件读取能力
+
+启用 `serde` feature 后，`ConfigUtils` 和 `ConfigLoader` 提供统一的配置文件读取能力，支持
+JSON、`.env`、YAML（`serde-saphyr`）、TOML（`toml`）、INI（`rust-ini`）五种格式。每种格式都有
+两条读取路径：无类型的 `ConfigValue`（支持 `"server.tls.port"` 点号路径访问）和有类型的
+`serde::Deserialize`。文件大小上限由加载器统一执行；JSON/TOML/YAML/INI 的无类型读取以及
+YAML/INI 的有类型读取还使用加载器配置的嵌套深度上限，JSON/TOML 有类型读取使用各自后端的
+递归保护。格式默认按文件扩展名推断，也可以显式指定：
+
+```rust
+use axutils::{ConfigFormat, ConfigUtils};
+use serde::Deserialize;
+
+#[derive(Deserialize)]
+struct ServerConfig {
+    host: String,
+    port: u16,
+}
+
+#[derive(Deserialize)]
+struct AppConfig {
+    server: ServerConfig,
+}
+
+fn main() -> Result<(), axutils::ConfigError> {
+    // 无类型读取：按扩展名推断格式。
+    let value = ConfigUtils::parse_value(r#"{"server": {"port": 8080}}"#, ConfigFormat::Json)?;
+    assert_eq!(value.get("server.port").and_then(|v| v.as_i64()), Some(8080));
+
+    // 有类型读取：直接反序列化为调用方结构体。
+    let config: AppConfig = ConfigUtils::parse(
+        r#"{"server": {"host": "localhost", "port": 8080}}"#,
+        ConfigFormat::Json,
+    )?;
+    assert_eq!(config.server.port, 8080);
+    Ok(())
+}
+```
+
+从磁盘读取文件使用 `ConfigUtils::load_value`/`load`（按扩展名推断）或
+`ConfigUtils::load_value_as`/`load_as`（显式指定格式）。需要自定义文件大小/嵌套深度上限，或
+关闭 `.env` 的进程环境变量回退时，使用 `ConfigUtils::loader()` 获取一个可配置的
+`ConfigLoader`：
+
+```rust,no_run
+use axutils::ConfigUtils;
+
+fn main() -> Result<(), axutils::ConfigError> {
+    let loader = ConfigUtils::loader()
+        .with_max_bytes(64 * 1024)?
+        .with_max_depth(16)?
+        .with_env_substitution(false);
+    let value = loader.load_value("app.toml")?;
+    let _ = value;
+    Ok(())
+}
+```
+
+### `.env`（dotenv）语法
+
+`.env` 解析器为本 crate 自实现，不依赖第三方包，随 `serde` feature 直接可用。文件名为
+`.env` 或以 `.env.` 开头（例如 `.env.local`）时按文件名识别，其余情况按 `env` 扩展名识别。
+
+| 语法元素 | 规则 |
+| --- | --- |
+| `KEY=VALUE` | 等号两侧允许空白；允许可选的 `export ` 前缀 |
+| 注释 | 空行忽略；`#` 开头的整行为注释；未加引号的值中 ` #` 之后视为行尾注释 |
+| 键名 | 限定为 `[A-Za-z_][A-Za-z0-9_]*`，不做大小写转换 |
+| 无引号值 | 去掉首尾空白，不处理转义，不跨行 |
+| 单引号值 | 原样保留，不做插值、不处理转义，可跨行直到配对的单引号 |
+| 双引号值 | 处理 `\n`、`\r`、`\t`、`\\`、`\"`、`\$` 转义，做 `${VAR}` 插值，可跨行 |
+| 重复键 | 返回 `DuplicateKey` 错误，不静默覆盖 |
+
+解析结果是扁平表（`ConfigValue::Table`，值全部为字符串），不按 `__` 等分隔符拆分为嵌套结构；
+需要嵌套配置请使用 TOML/YAML/JSON。
+
+`${VAR}` 插值规则：
+
+1. 先在当前文件中已解析的键里查找（文件优先）；
+2. 找不到时，若 `with_env_substitution(true)`（默认）则回退到进程环境变量；
+3. 两者都没有时返回 `UndefinedVariable`，**不会静默替换为空字符串**；
+4. 只支持 `${VAR}` 形式，不支持 `$VAR`、`${VAR:-default}` 或命令替换；
+5. 只能引用同一文件中出现在自身之前的键，不存在循环引用。
+
+与 `dotenv`/`dotenvy` 的已知差异：插值优先级相反（本 crate 文件优先，`dotenvy` 环境变量
+优先）、未定义变量报错而非空串、不支持 `$VAR` 无花括号形式、重复键报错而非静默覆盖。本 crate
+不声称与其完全兼容。
+
+```rust
+use axutils::{ConfigFormat, ConfigUtils};
+
+let value = ConfigUtils::parse_value(
+    "HOST=localhost\nGREETING=\"hello, ${HOST}\"\n",
+    ConfigFormat::Env,
+)
+.unwrap();
+assert_eq!(value.get("GREETING").and_then(|v| v.as_str()), Some("hello, localhost"));
+```
+
+### 安全与资源上限
+
+- **文件大小**：默认上限 1 MiB，可调 1 KiB–16 MiB；采用 `File::open` + `Read::take` 流式截断，
+  不依赖 `fs::metadata` 报告的大小，避免 TOCTOU 及命名管道、`/proc` 等特殊文件耗尽内存。
+- **嵌套深度**：默认上限 64，可调 1–256；JSON/TOML/INI 由本 crate 在构建 `ConfigValue` 时精确
+  计数，YAML 由 `serde-saphyr` 自身的 `Budget::max_depth` 精确强制；JSON/TOML 有类型读取路径
+  依赖各后端自身的递归限制，YAML/INI 有类型读取路径使用上述配置。
+- **YAML 别名炸弹**：显式设置 `serde-saphyr` 的 `Budget`（含 `max_depth`）与
+  `AliasLimits`：总回放事件最多 1,000,000 次、单个 anchor 最多展开 10,000 次、回放栈深度
+  不超过嵌套深度上限，并关闭错误的源码片段渲染（`with_snippet: false`），防御 billion-laughs
+  一类别名展开攻击。
+- **重复键**：TOML 语法本身禁止；YAML 显式配置为拒绝；INI 与 `.env` 由本 crate 检测并拒绝；
+  `serde_json` 的“后者覆盖”语义无法配置——五种格式在该点上行为不完全一致。
+- **整数范围**：超出 `i64` 可表示范围的整数返回 `ValueOutOfRange`，不会静默转换为浮点数丢失
+  精度（JSON 后端对不含小数点/指数、且超过 `u64::MAX` 的纯整数字面量存在已知限制，见
+  `ConfigValue::Integer` 的 API doc）。
+- **编码**：只接受 UTF-8，自动跳过前导 BOM；非 UTF-8 返回 `NotUtf8`，不做编码猜测。
+- **错误脱敏**：错误不回显配置文件的原始内容、解析出的值或原始出错行文本；键名、格式名、文件
+  路径和资源上限可能出现在错误中，配置值本身永远不会。
+- **无隐式副作用**：不写入进程环境变量、不创建或修改任何文件、不解析 `include` 指令、不访问
+  网络、不执行模板或表达式；配置文件常含凭据，调用方仍需自行限制文件权限，并避免把整棵
+  `ConfigValue` 或反序列化结果打日志。
+
+### 配置 feature 矩阵
+
+| 启用组合 | `config` 模块/`ConfigUtils` | 支持的格式 |
+| --- | --- | --- |
+| 无 | 不导出 | 无 |
+| 仅 `toml` / `serde-saphyr` / `rust-ini` | 不导出 | 无 |
+| `serde` | 导出 | JSON、`.env` |
+| `serde` + `toml` | 导出 | JSON、`.env`、TOML |
+| `serde` + `serde-saphyr` | 导出 | JSON、`.env`、YAML |
+| `serde` + `rust-ini` | 导出 | JSON、`.env`、INI |
+| `serde` + 全部三个后端 | 导出 | 五种全部 |
+
+只启用某个后端 feature 而不启用 `serde` 时，不会导出任何配置 API；未启用对应后端的格式，其
+`ConfigFormat` 变体和解析函数都不存在于公共 API 中，而不是运行时报错。
+
 ## 构建与部署依赖
 
 `axutils` 是 library crate，本身不生成可部署的二进制或容器。下表是消费方应用已有 Rust
@@ -549,7 +709,7 @@ USER 65532:65532
 ENTRYPOINT ["/usr/local/bin/app"]
 ```
 
-`RUST_VERSION` 应由消费方替换为不低于 1.85 的固定版本，正式部署还应按供应链策略固定
+`RUST_VERSION` 应由消费方替换为不低于 1.88 的固定版本，正式部署还应按供应链策略固定
 基础镜像 digest。runtime 阶段不需要为 axutils 邮件功能安装 OpenSSL 或 CA 包；应用其他
 功能需要的动态库、时区数据或健康检查工具须单独评估。
 
@@ -585,8 +745,11 @@ FreeBSD 不属于本 crate 首期已承诺的验证目标；消费方必须自�
 发布后可在 [docs.rs/axutils](https://docs.rs/axutils) 查看完整 API 文档。
 
 默认 feature 为空，当前 crate 默认不会启用第三方 `rand`、`regex`、`phonenumber`、`serde`、
-`serde_json`、`strfmt`、`minijinja`、`chrono`、`time`、`jiff`、`lettre` 或 `tokio` 依赖；
-`PathUtils`、`TimeUtils` 和 `FormatUtils` 直接从 crate 根模块导出，`RandomUtils` 及其相关类型
-仅在启用 `rand` feature 后导出，`RegUtils` 仅在启用 `regex` feature 后导出，邮件类型仅在
-启用 `lettre` feature 后导出。`RegUtils::is_phone` 必须显式同时启用 `regex` 和
+`serde_json`、`strfmt`、`minijinja`、`chrono`、`time`、`jiff`、`lettre`、`tokio`、
+`serde-saphyr`、`toml` 或 `rust-ini` 依赖；`PathUtils`、`TimeUtils` 和 `FormatUtils` 直接从
+crate 根模块导出，`RandomUtils` 及其相关类型仅在启用 `rand` feature 后导出，`RegUtils` 仅在
+启用 `regex` feature 后导出，邮件类型仅在启用 `lettre` feature 后导出，配置读取类型
+（`ConfigLoader`、`ConfigUtils`、`ConfigFormat`、`ConfigValue`、`ConfigError`）仅在启用
+`serde` feature 后导出，其 YAML/TOML/INI 变体和后端还分别需要额外启用
+`serde-saphyr`/`toml`/`rust-ini` feature。`RegUtils::is_phone` 必须显式同时启用 `regex` 和
 `libphonenumber` features；异步邮件必须显式同时启用 `lettre` 和 `tokio`。
