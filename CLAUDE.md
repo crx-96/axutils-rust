@@ -43,6 +43,15 @@ SMTP 邮件能力通过显式 `lettre` feature 提供；异步发送还需要同
 - 一个 API 同时依赖多个可选能力时，使用 `#[cfg(all(feature = "...", feature = "..."))]` 精确限制实现、导入、测试和文档示例；不要用更宽的模块级守卫替代方法级约束。
 - 可选依赖对应的 feature 应保持独立：后端或单项能力 feature 只能通过 `dep:<dependency-name>` 启用其同名直接依赖，禁止引用、自动启用或聚合其他项目 feature。一个 API 需要多个可选能力时，由用户显式启用全部 feature，并在代码中使用精确的 `cfg(all(...))` 限制；多 feature 组合及其公共 API 矩阵必须同步记录在工具类定位文档、README、CHANGELOG 和 API doc 中。仅作为公共 API 基础设施的 feature 可以启用其不可单独使用的内部适配依赖，但不得启用其他项目 feature。
 - 依赖版本约束必须使用最低兼容版本的 Cargo 默认 caret 写法（例如 `version = "0.11.22"`），不得在 `version` 字段使用等号前缀来精确锁定补丁版本。本项目是 library crate，不提交 `Cargo.lock` 作为依赖版本策略；安全下限和兼容性通过 manifest、MSRV 与无锁 fresh-resolution 验证。若未来确有技术原因需要精确版本，必须先取得用户明确确认，并在计划、状态和 `CHANGELOG.md` 中记录原因；当前项目不设此类例外。
+- 一个能力存在多个可选第三方后端时，优先设计为“一个通用方法 + 内部按 feature 匹配的枚举
+  参数”（参见 `ConfigLoader`/`ConfigUtils` 对 `ConfigFormat` 的处理）：枚举各变体按自身依赖
+  的 feature 精确 `#[cfg(...)]` 守卫，未启用的后端既不出现在枚举里也不出现在公共方法签名里；
+  各后端的具体实现下沉为模块私有函数，不作为独立的公共方法暴露。仅当各后端要求的入参具体
+  类型本身随后端变化（例如不同第三方 crate 各自的日期/时间类型），导致无法用同一个方法签名
+  覆盖所有后端时，才回退为“公共方法名按后端后缀区分”（参见 `TimeUtils` 的
+  `format_date_chrono`/`format_date_time`/`format_date_jiff`）；此时应避免新增“仅当且仅当
+  只启用一个后端 feature 时才存在”的无后缀别名，除非已有同类先例（如 `TimeUtils` 现有别名）
+  且团队接受该别名在多后端同时启用时从公共 API 消失的行为。
 
 ## 验证命令
 

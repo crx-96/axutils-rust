@@ -56,6 +56,53 @@ fn verifies_feature_api_matrix_and_dependency_boundaries() {
 }
 
 #[test]
+fn verifies_format_template_feature_api_matrix() {
+    let fixture_manifest = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("fixtures")
+        .join("format_feature_matrix")
+        .join("Cargo.toml");
+    let target_dir = TemporaryTarget(env::temp_dir().join(format!(
+        "axutils-format-feature-matrix-{}",
+        std::process::id()
+    )));
+
+    for (feature, expected_success, diagnostic_token) in [
+        ("format-serde-strfmt", true, ""),
+        ("format-serde-minijinja", true, ""),
+        ("format-serde-all", true, ""),
+        ("negative-format-no-features", false, "templateengine"),
+        ("negative-format-serde-only", false, "templateengine"),
+        ("negative-format-strfmt-only", false, "templateengine"),
+        ("negative-format-minijinja-only", false, "templateengine"),
+        (
+            "negative-format-serde-strfmt-missing-minijinja",
+            false,
+            "minijinja",
+        ),
+        (
+            "negative-format-serde-minijinja-missing-strfmt",
+            false,
+            "strfmt",
+        ),
+    ] {
+        let output = run_fixture(&fixture_manifest, &target_dir.0, feature);
+        if expected_success {
+            assert!(
+                output.status.success(),
+                "format fixture feature `{feature}` should compile successfully"
+            );
+        } else {
+            assert!(
+                !output.status.success(),
+                "format fixture feature `{feature}` should fail to compile"
+            );
+            assert_expected_diagnostic(&output, diagnostic_token, feature);
+        }
+    }
+}
+
+#[test]
 fn verifies_config_feature_api_matrix_and_dependency_boundaries() {
     let fixture_manifest = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests")

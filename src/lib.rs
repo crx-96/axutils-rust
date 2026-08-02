@@ -33,8 +33,10 @@
 //!
 //! `FormatUtils` 的运行时模板能力需要用户显式启用 `serde` 和一个后端 feature：`strfmt`
 //! 使用 `{name}` 语法并只支持扁平顶层变量；`minijinja` 使用 `{{ name }}` 语法，支持嵌套
-//! 字段、数组、条件和循环。后端 feature 不会自动启用 `serde`；同时启用两个后端时，请调用
-//! 带后缀的方法以明确选择模板语法：
+//! 字段、数组、条件和循环。后端 feature 不会自动启用 `serde`；通过
+//! `FormatUtils::template(template, context, default, engine)` 的 `engine` 参数显式选择
+//! `TemplateEngine::Strfmt` 或 `TemplateEngine::MiniJinja` 模板语法，同时启用两个后端时也使用
+//! 同一个入口：
 //!
 //! ```toml
 //! [dependencies]
@@ -87,6 +89,8 @@ pub use time::{
 
 pub use utils::format_utils;
 pub use utils::FormatUtils;
+#[cfg(all(feature = "serde", any(feature = "strfmt", feature = "minijinja")))]
+pub use utils::TemplateEngine;
 
 #[cfg(feature = "lettre")]
 pub mod email;

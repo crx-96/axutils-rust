@@ -12,7 +12,10 @@
 - 新增 `TimeUtils`，提供当前 Unix 时间戳获取能力；通过独立的 `chrono`、`time` 或 `jiff` feature
   提供日期、日期时间和固定 UTC 偏移格式化能力。
 - 新增 `FormatUtils`，提供将秒数格式化为中文持续时间的默认能力；通过 `serde` 与 `strfmt` 或
-  `minijinja` feature 组合提供运行时模板渲染。
+  `minijinja` feature 组合提供运行时模板渲染，并通过
+  `FormatUtils::template(template, context, default, engine)` 显式选择 `TemplateEngine::Strfmt`
+  或 `TemplateEngine::MiniJinja` 模板后端；缺少 `serde` 或未启用任何模板后端时不导出该统一
+  入口和 `TemplateEngine`。
 - 新增 `RegUtils`，在 `regex` feature 下提供常见/严格电子邮箱和中国大陆手机号码格式校验；同时启用
   `libphonenumber` feature 后提供国际 E.164 手机号码校验。
 - 新增 `RandomUtils`、`LetterCase` 和 `RandomRangeError`，在 `rand` feature 下提供 ASCII 随机字符串、

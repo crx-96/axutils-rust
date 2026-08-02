@@ -2,7 +2,7 @@
 
 #[cfg(all(feature = "minijinja", feature = "serde"))]
 use minijinja::{AutoEscape, Environment, UndefinedBehavior};
-#[cfg(all(feature = "strfmt", feature = "serde"))]
+#[cfg(all(feature = "serde", any(feature = "strfmt", feature = "minijinja")))]
 use serde::Serialize;
 #[cfg(all(feature = "strfmt", feature = "serde"))]
 use std::collections::HashMap;
@@ -10,6 +10,34 @@ use std::collections::HashMap;
 /// 秒数格式化工具。
 #[derive(Debug, Clone, Copy, Default)]
 pub struct FormatUtils;
+
+#[cfg(all(feature = "serde", any(feature = "strfmt", feature = "minijinja")))]
+/// 运行时模板渲染使用的引擎。
+///
+/// 未启用对应后端 feature 时，该变体不存在于枚举中，也不会出现在公共 API 里。枚举本身与
+/// 统一入口使用相同的外层守卫，因此只启用 `serde` 或只启用模板后端时不会导出一个无法使用
+/// 的空枚举或孤立类型。
+///
+/// # Examples
+///
+/// ```
+/// use axutils::TemplateEngine;
+///
+/// #[cfg(feature = "strfmt")]
+/// let _ = TemplateEngine::Strfmt;
+/// #[cfg(feature = "minijinja")]
+/// let _ = TemplateEngine::MiniJinja;
+/// ```
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TemplateEngine {
+    /// `strfmt` 引擎；使用 `{name}` 语法，只支持扁平顶层变量。
+    #[cfg(feature = "strfmt")]
+    Strfmt,
+    /// MiniJinja 引擎；使用 `{{ name }}` 语法，支持嵌套字段、数组、条件和循环。
+    #[cfg(feature = "minijinja")]
+    MiniJinja,
+}
 
 impl FormatUtils {
     /// 将秒数格式化为中文持续时间字符串，最大单位为天。
@@ -51,117 +79,83 @@ impl FormatUtils {
         }
     }
 
-    /// 使用 `strfmt` 语法渲染扁平命名模板。
+    /// 使用显式指定的引擎渲染运行时模板。
     ///
-    /// 模板变量使用 `{name}` 形式。`context` 会被序列化为 JSON 对象，其顶层字段成为模板
-    /// 变量：字符串保持原样；数字、布尔和 `null` 使用紧凑 JSON 文本；数组和对象同样使用
-    /// 紧凑 JSON 文本。因此该方法不支持 `{profile.city}` 等嵌套访问。根上下文不是对象、
-    /// 序列化失败、变量缺失或模板语法错误时，返回 `default` 的拥有副本；未提供默认值时
-    /// 返回 `None`。成功渲染为空字符串时仍返回 `Some(String::new())`。
+    /// `TemplateEngine::Strfmt` 使用 `{name}` 语法并只支持扁平顶层变量；`TemplateEngine::MiniJinja`
+    /// 使用 `{{ name }}` 语法，支持嵌套字段、数组、条件和循环。模板解析、上下文序列化或渲染
+    /// 失败时返回 `default` 的拥有副本；未提供默认值时返回 `None`。成功渲染为空字符串时仍
+    /// 返回 `Some(String::new())`。MiniJinja 环境关闭自动 HTML 转义，变量值不会被再次当作模板
+    /// 解析；对来自不可信来源的运行时模板，调用方应限制模板长度、调用频率和数据规模。
     ///
     /// # Examples
     ///
     /// ```
-    /// use axutils::FormatUtils;
+    /// use axutils::{FormatUtils, TemplateEngine};
     ///
     /// #[derive(serde::Serialize)]
     /// struct Greeting<'a> {
     ///     name: &'a str,
-    ///     age: u8,
     /// }
     ///
-    /// let context = Greeting { name: "小王", age: 18 };
+    /// let context = Greeting { name: "小王" };
+    /// #[cfg(feature = "strfmt")]
     /// assert_eq!(
-    ///     FormatUtils::template_strfmt("你好，{name}，今年 {age} 岁", &context, None),
-    ///     Some("你好，小王，今年 18 岁".to_owned()),
+    ///     FormatUtils::template("你好，{name}", &context, None, TemplateEngine::Strfmt),
+    ///     Some("你好，小王".to_owned()),
+    /// );
+    /// #[cfg(feature = "minijinja")]
+    /// assert_eq!(
+    ///     FormatUtils::template("你好，{{ name }}", &context, None, TemplateEngine::MiniJinja),
+    ///     Some("你好，小王".to_owned()),
     /// );
     /// ```
-    #[cfg(all(feature = "strfmt", feature = "serde"))]
-    pub fn template_strfmt<T: Serialize>(
-        template: &str,
-        context: &T,
-        default: Option<&str>,
-    ) -> Option<String> {
-        strfmt_context(context)
-            .and_then(|variables| strfmt::strfmt(template, &variables).ok())
-            .or_else(|| default.map(str::to_owned))
-    }
-
-    /// 使用 MiniJinja 语法渲染模板。
-    ///
-    /// 模板变量使用 `{{ name }}` 形式，并支持嵌套字段、数组、条件和循环。未定义变量按严格
-    /// 模式处理；模板语法错误、渲染错误或上下文序列化错误时，返回 `default` 的拥有副本；未
-    /// 提供默认值时返回 `None`。环境明确关闭自动 HTML 转义，变量值不会被再次当作模板解析。
-    /// 成功渲染为空字符串时仍返回 `Some(String::new())`。
-    ///
-    /// 运行时模板若来自不可信来源，调用方应限制模板长度、调用频率和数据规模，以控制完整
-    /// 模板表达式语言带来的 CPU 与内存消耗。
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use axutils::FormatUtils;
-    ///
-    /// #[derive(serde::Serialize)]
-    /// struct Profile<'a> { city: &'a str }
-    /// #[derive(serde::Serialize)]
-    /// struct User<'a> { name: &'a str, profile: Profile<'a> }
-    ///
-    /// let user = User { name: "小王", profile: Profile { city: "杭州" } };
-    /// assert_eq!(
-    ///     FormatUtils::template_minijinja("你好，{{ name }}（{{ profile.city }}）", &user, None),
-    ///     Some("你好，小王（杭州）".to_owned()),
-    /// );
-    /// ```
-    #[cfg(all(feature = "minijinja", feature = "serde"))]
-    pub fn template_minijinja<T: serde::Serialize>(
-        template: &str,
-        context: &T,
-        default: Option<&str>,
-    ) -> Option<String> {
-        let mut environment = Environment::new();
-        environment.set_undefined_behavior(UndefinedBehavior::Strict);
-        environment.set_auto_escape_callback(|_| AutoEscape::None);
-
-        environment
-            .add_template("runtime-template.txt", template)
-            .ok()
-            .and_then(|()| {
-                environment
-                    .get_template("runtime-template.txt")
-                    .ok()
-                    .and_then(|added_template| added_template.render(context).ok())
-            })
-            .or_else(|| default.map(str::to_owned))
-    }
-
-    /// 使用当前唯一启用的模板后端渲染模板。
-    ///
-    /// 仅启用 `strfmt` feature 时采用 `{name}` 语法；仅启用 `minijinja` feature 时采用
-    /// `{{ name }}` 语法。同时启用两个后端时不会导出此方法，以避免静默选择不同语义；请
-    /// 改用 [`Self::template_strfmt`] 或 [`Self::template_minijinja`]。
-    #[cfg(all(feature = "strfmt", feature = "serde", not(feature = "minijinja")))]
+    #[cfg(all(feature = "serde", any(feature = "strfmt", feature = "minijinja")))]
     pub fn template<T: Serialize>(
         template: &str,
         context: &T,
         default: Option<&str>,
+        engine: TemplateEngine,
     ) -> Option<String> {
-        Self::template_strfmt(template, context, default)
+        match engine {
+            #[cfg(feature = "strfmt")]
+            TemplateEngine::Strfmt => strfmt_render(template, context, default),
+            #[cfg(feature = "minijinja")]
+            TemplateEngine::MiniJinja => minijinja_render(template, context, default),
+        }
     }
+}
 
-    /// 使用当前唯一启用的模板后端渲染模板。
-    ///
-    /// 仅启用 `minijinja` feature 时采用 `{{ name }}` 语法；仅启用 `strfmt` feature 时采用
-    /// `{name}` 语法。同时启用两个后端时不会导出此方法，以避免静默选择不同语义；请改用
-    /// [`Self::template_strfmt`] 或 [`Self::template_minijinja`]。
-    #[cfg(all(feature = "minijinja", feature = "serde", not(feature = "strfmt")))]
-    pub fn template<T: serde::Serialize>(
-        template: &str,
-        context: &T,
-        default: Option<&str>,
-    ) -> Option<String> {
-        Self::template_minijinja(template, context, default)
-    }
+#[cfg(all(feature = "strfmt", feature = "serde"))]
+fn strfmt_render<T: Serialize>(
+    template: &str,
+    context: &T,
+    default: Option<&str>,
+) -> Option<String> {
+    strfmt_context(context)
+        .and_then(|variables| strfmt::strfmt(template, &variables).ok())
+        .or_else(|| default.map(str::to_owned))
+}
+
+#[cfg(all(feature = "minijinja", feature = "serde"))]
+fn minijinja_render<T: Serialize>(
+    template: &str,
+    context: &T,
+    default: Option<&str>,
+) -> Option<String> {
+    let mut environment = Environment::new();
+    environment.set_undefined_behavior(UndefinedBehavior::Strict);
+    environment.set_auto_escape_callback(|_| AutoEscape::None);
+
+    environment
+        .add_template("runtime-template.txt", template)
+        .ok()
+        .and_then(|()| {
+            environment
+                .get_template("runtime-template.txt")
+                .ok()
+                .and_then(|added_template| added_template.render(context).ok())
+        })
+        .or_else(|| default.map(str::to_owned))
 }
 
 #[cfg(all(feature = "strfmt", feature = "serde"))]
@@ -238,7 +232,7 @@ mod tests {
 
     #[cfg(all(feature = "strfmt", feature = "serde"))]
     mod strfmt_tests {
-        use super::FormatUtils;
+        use super::super::{FormatUtils, TemplateEngine};
         use serde::ser::Error as _;
         use serde::{Serialize, Serializer};
         use std::collections::HashMap;
@@ -262,10 +256,11 @@ mod tests {
                 tags: ["rust", "模板"],
             };
             assert_eq!(
-                FormatUtils::template_strfmt(
+                FormatUtils::template(
                     "{name}|{age}|{enabled}|{empty}|{tags}",
                     &context,
                     None,
+                    TemplateEngine::Strfmt,
                 ),
                 Some("小王|18|true|null|[\"rust\",\"模板\"]".to_owned()),
             );
@@ -275,8 +270,21 @@ mod tests {
         fn renders_hash_map_and_escaped_braces() {
             let context = HashMap::from([("name", "小王")]);
             assert_eq!(
-                FormatUtils::template_strfmt("{{{name}}}", &context, None),
+                FormatUtils::template("{{{name}}}", &context, None, TemplateEngine::Strfmt),
                 Some("{小王}".to_owned()),
+            );
+        }
+
+        #[test]
+        fn successful_empty_output_is_not_replaced_by_default() {
+            #[derive(Serialize)]
+            struct Name<'a> {
+                name: &'a str,
+            }
+            let context = Name { name: "小王" };
+            assert_eq!(
+                FormatUtils::template("", &context, Some("失败"), TemplateEngine::Strfmt),
+                Some(String::new()),
             );
         }
 
@@ -288,15 +296,20 @@ mod tests {
             }
             let context = Name { name: "小王" };
             assert_eq!(
-                FormatUtils::template_strfmt("{missing}", &context, Some("匿名用户")),
+                FormatUtils::template(
+                    "{missing}",
+                    &context,
+                    Some("匿名用户"),
+                    TemplateEngine::Strfmt,
+                ),
                 Some("匿名用户".to_owned()),
             );
             assert_eq!(
-                FormatUtils::template_strfmt("{missing}", &context, None),
+                FormatUtils::template("{missing}", &context, None, TemplateEngine::Strfmt),
                 None
             );
             assert_eq!(
-                FormatUtils::template_strfmt("{name", &context, Some("失败")),
+                FormatUtils::template("{name", &context, Some("失败"), TemplateEngine::Strfmt),
                 Some("失败".to_owned()),
             );
         }
@@ -314,28 +327,19 @@ mod tests {
             }
 
             assert_eq!(
-                FormatUtils::template_strfmt("{name}", &42, Some("失败")),
+                FormatUtils::template("{name}", &42, Some("失败"), TemplateEngine::Strfmt),
                 Some("失败".to_owned()),
             );
-            assert_eq!(FormatUtils::template_strfmt("{name}", &Failing, None), None);
-        }
-
-        #[test]
-        fn single_backend_alias_uses_strfmt() {
-            #[cfg(not(feature = "minijinja"))]
-            {
-                let context = HashMap::from([("name", "小王")]);
-                assert_eq!(
-                    FormatUtils::template("你好，{name}", &context, None),
-                    Some("你好，小王".to_owned()),
-                );
-            }
+            assert_eq!(
+                FormatUtils::template("{name}", &Failing, None, TemplateEngine::Strfmt),
+                None
+            );
         }
     }
 
     #[cfg(all(feature = "minijinja", feature = "serde"))]
     mod minijinja_tests {
-        use super::FormatUtils;
+        use super::super::{FormatUtils, TemplateEngine};
         use serde::Serialize;
 
         #[derive(Serialize)]
@@ -357,10 +361,11 @@ mod tests {
                 tags: ["Rust", "模板"],
             };
             assert_eq!(
-                FormatUtils::template_minijinja(
+                FormatUtils::template(
                     "你好，{{ name }}（{{ profile.city }}）{% for tag in tags %}[{{ tag }}]{% endfor %}",
                     &user,
                     None,
+                    TemplateEngine::MiniJinja,
                 ),
                 Some("你好，小王（杭州）[Rust][模板]".to_owned()),
             );
@@ -374,19 +379,29 @@ mod tests {
                 tags: ["Rust", "模板"],
             };
             assert_eq!(
-                FormatUtils::template_minijinja("{{ missing }}", &user, Some("匿名用户")),
+                FormatUtils::template(
+                    "{{ missing }}",
+                    &user,
+                    Some("匿名用户"),
+                    TemplateEngine::MiniJinja,
+                ),
                 Some("匿名用户".to_owned()),
             );
             assert_eq!(
-                FormatUtils::template_minijinja("{{ missing }}", &user, None),
+                FormatUtils::template("{{ missing }}", &user, None, TemplateEngine::MiniJinja),
                 None
             );
             assert_eq!(
-                FormatUtils::template_minijinja("{% if %}", &user, Some("失败")),
+                FormatUtils::template("{% if %}", &user, Some("失败"), TemplateEngine::MiniJinja),
                 Some("失败".to_owned()),
             );
             assert_eq!(
-                FormatUtils::template_minijinja("{% if false %}x{% endif %}", &user, None),
+                FormatUtils::template(
+                    "{% if false %}x{% endif %}",
+                    &user,
+                    None,
+                    TemplateEngine::MiniJinja,
+                ),
                 Some(String::new()),
             );
         }
@@ -401,25 +416,38 @@ mod tests {
                 value: "{{ secret }}",
             };
             assert_eq!(
-                FormatUtils::template_minijinja("{{ value }}", &context, None),
+                FormatUtils::template("{{ value }}", &context, None, TemplateEngine::MiniJinja),
                 Some("{{ secret }}".to_owned()),
             );
         }
+    }
+
+    #[cfg(all(feature = "serde", feature = "strfmt", feature = "minijinja"))]
+    mod both_backend_tests {
+        use super::super::{FormatUtils, TemplateEngine};
+        use serde::Serialize;
+
+        #[derive(Serialize)]
+        struct Context<'a> {
+            name: &'a str,
+        }
 
         #[test]
-        fn single_backend_alias_uses_minijinja() {
-            #[cfg(not(feature = "strfmt"))]
-            {
-                let context = User {
-                    name: "小王",
-                    profile: Profile { city: "杭州" },
-                    tags: ["Rust", "模板"],
-                };
-                assert_eq!(
-                    FormatUtils::template("你好，{{ name }}", &context, None),
-                    Some("你好，小王".to_owned()),
-                );
-            }
+        fn explicit_engine_selects_the_requested_backend() {
+            let context = Context { name: "小王" };
+            assert_eq!(
+                FormatUtils::template("你好，{name}", &context, None, TemplateEngine::Strfmt),
+                Some("你好，小王".to_owned()),
+            );
+            assert_eq!(
+                FormatUtils::template(
+                    "你好，{{ name }}",
+                    &context,
+                    None,
+                    TemplateEngine::MiniJinja,
+                ),
+                Some("你好，小王".to_owned()),
+            );
         }
     }
 }
