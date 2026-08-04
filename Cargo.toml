@@ -35,6 +35,10 @@ tokio = ["dep:tokio", "lettre?/tokio1-rustls"]
 toml = ["dep:toml"]
 serde-saphyr = ["dep:serde-saphyr"]
 rust-ini = ["dep:rust-ini"]
+base64 = ["dep:base64"]
+md5 = ["dep:md5"]
+aes = ["dep:aes", "dep:aes-gcm", "dep:cbc", "dep:zeroize"]
+encoding_rs = ["dep:encoding_rs"]
 
 [dependencies]
 rand = { version = "0.9", optional = true }
@@ -59,6 +63,13 @@ tokio = { version = "1.53.1", default-features = false, features = ["fs", "io-ut
 toml = { version = "1.1.4", default-features = false, features = ["parse", "serde", "std"], optional = true }
 serde-saphyr = { version = "1.0.0", default-features = false, features = ["deserialize"], optional = true }
 rust-ini = { version = "0.21.3", default-features = false, optional = true }
+base64 = { version = "0.23.0", default-features = false, features = ["std"], optional = true }
+md5 = { package = "md-5", version = "0.11.0", default-features = false, optional = true }
+aes = { version = "0.9.2", default-features = false, features = ["zeroize"], optional = true }
+aes-gcm = { version = "0.11.0", default-features = false, features = ["aes", "alloc", "getrandom", "zeroize"], optional = true }
+cbc = { version = "0.2.1", default-features = false, features = ["alloc", "block-padding", "zeroize"], optional = true }
+zeroize = { version = "1.9.0", default-features = false, optional = true }
+encoding_rs = { version = "0.8.35", default-features = false, features = ["alloc"], optional = true }
 
 [dev-dependencies]
 tokio = { version = "1.53.1", default-features = false, features = ["macros", "rt-multi-thread"] }

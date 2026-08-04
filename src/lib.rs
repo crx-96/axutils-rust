@@ -63,6 +63,19 @@
 //! [dependencies]
 //! axutils = { version = "0.1", features = ["serde", "serde-saphyr", "toml", "rust-ini"] }
 //! ```
+//!
+//! `CryptoUtils` 的十六进制编解码（`hex_encode`/`hex_encode_upper`/`hex_decode`）与
+//! `TextEncoding::Utf8` 文本编解码默认可用，仅依赖标准库；Base64、MD5、AES 分别需要显式启用
+//! `base64`、`md5`（实际启用 crates.io 上的 `md-5` crate）、`aes` feature，`encoding_rs`
+//! feature 为 `TextEncoding` 追加六个 legacy 编码变体。AES 支持 GCM（推荐，带认证）与
+//! CBC+PKCS#7（**无完整性认证**，仅用于旧系统互操作）两种模式，随机 IV/nonce 只使用操作系统
+//! 随机源；同时启用 `aes` 与 `base64` 后额外提供 `aes_encrypt_base64`/`aes_decrypt_base64`。
+//! MD5 是摘要算法，已存在实用碰撞攻击，**禁止**用于密码存储、数字签名或任何对抗性场景。
+//!
+//! ```toml
+//! [dependencies]
+//! axutils = { version = "0.1", features = ["aes", "base64"] }
+//! ```
 
 mod time;
 pub mod utils;
@@ -114,3 +127,15 @@ pub use config::{ConfigError, ConfigFormat, ConfigLoader, ConfigValue};
 
 #[cfg(feature = "serde")]
 pub use utils::ConfigUtils;
+
+pub mod crypto;
+
+pub use crypto::{CryptoError, TextEncoding};
+pub use utils::crypto_utils;
+pub use utils::CryptoUtils;
+
+#[cfg(feature = "base64")]
+pub use crypto::{Base64Alphabet, Base64Options};
+
+#[cfg(feature = "aes")]
+pub use crypto::{AesKey, AesKeyBits, AesMode};

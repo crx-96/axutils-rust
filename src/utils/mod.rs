@@ -6,6 +6,8 @@
 //! `RegUtils` 需要 `regex` feature；SMTP 邮件能力需要 `lettre` feature，异步发送还需要
 //! 同时启用 `tokio`。配置文件读取能力（`ConfigUtils`）需要 `serde` feature，文件异步入口还
 //! 需要同时启用 `tokio`；YAML/TOML/INI 后端分别还需要额外启用 `serde-saphyr`/`toml`/`rust-ini`。
+//! `CryptoUtils` 的十六进制编解码与 `TextEncoding::Utf8` 默认可用，Base64/MD5/AES 分别需要
+//! `base64`/`md5`/`aes` feature，`encoding_rs` 为 `TextEncoding` 追加 legacy 编码变体。
 
 #[cfg(feature = "rand")]
 pub mod random_utils;
@@ -22,6 +24,8 @@ pub mod email_utils;
 
 #[cfg(feature = "serde")]
 pub mod config_utils;
+
+pub mod crypto_utils;
 
 #[cfg(feature = "rand")]
 pub use random_utils::{LetterCase, RandomRangeError, RandomUtils};
@@ -40,3 +44,5 @@ pub use email_utils::EmailUtils;
 
 #[cfg(feature = "serde")]
 pub use config_utils::ConfigUtils;
+
+pub use crypto_utils::CryptoUtils;

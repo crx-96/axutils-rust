@@ -7,8 +7,9 @@
 因此，使用新版本 `axutils` 的 Rust 1.76—1.87 项目需要先升级工具链。
 
 默认 feature 为空。默认可用的是 `PathUtils`、`TimeUtils`、`FormatUtils::seconds_to_human`，以及时间
-格式化共用的根类型；`RegUtils` 需要 `regex`，`RandomUtils` 需要 `rand`，模板、日期后端、邮件和
-配置读取能力也都需要显式 feature。公共导出路径和完整边界见各模块使用文档。
+格式化共用的根类型；`CryptoUtils` 的十六进制编解码和 `TextEncoding::Utf8` 文本编解码同样默认可用。
+`RegUtils` 需要 `regex`，`RandomUtils` 需要 `rand`，模板、日期后端、邮件、配置读取和 `CryptoUtils`
+的 Base64/MD5/AES 能力都需要显式 feature。公共导出路径和完整边界见各模块使用文档。
 
 邮件能力使用 Rustls 强制 SMTPS/STARTTLS，不提供明文或机会式降级；配置文件读取统一限制文件大小，
 错误不回显配置值。真实凭据只能由调用方在本地安全管理，不能硬编码或提交到 Git。
@@ -120,6 +121,35 @@ axutils = { version = "0.1", features = ["serde", "serde-saphyr", "toml", "rust-
 [dependencies]
 axutils = { version = "0.1", features = ["serde", "tokio"] }
 tokio = { version = "1.53.1", features = ["macros", "rt-multi-thread"] }
+```
+
+`CryptoUtils` 的十六进制编解码默认可用；Base64、MD5、AES 分别需要显式启用 `base64`、`md5`、
+`aes`；`encoding_rs` 为文本编解码追加 GBK/GB18030/Big5/Shift_JIS/EUC-KR/windows-1252 六种
+legacy 编码：
+
+```toml
+[dependencies]
+axutils = { version = "0.1", features = ["base64"] }
+```
+
+```toml
+[dependencies]
+axutils = { version = "0.1", features = ["md5"] }
+```
+
+```toml
+[dependencies]
+axutils = { version = "0.1", features = ["aes"] }
+```
+
+```toml
+[dependencies]
+axutils = { version = "0.1", features = ["aes", "base64"] }
+```
+
+```toml
+[dependencies]
+axutils = { version = "0.1", features = ["encoding_rs"] }
 ```
 
 所有 feature 都可以同时启用；各后端仍须满足自己的组合前提。完整 API 和每个方法的可编译示例见
@@ -314,6 +344,69 @@ assert_eq!(value.get("server.port").and_then(|value| value.as_i64()), Some(8080)
 
 完整示例与边界说明见 [Config 使用文档](https://github.com/crx-96/axutils-rust/blob/main/docs/examples/config.md)。
 
+## 使用 `CryptoUtils`
+
+十六进制编解码默认可用：
+
+```rust
+use axutils::CryptoUtils;
+
+let encoded = CryptoUtils::hex_encode([0x00, 0xff]).unwrap();
+assert_eq!(encoded, "00ff");
+assert_eq!(CryptoUtils::hex_decode(&encoded).unwrap(), vec![0x00, 0xff]);
+```
+
+启用 `base64` 后可以按标准/URL-safe 字母表和有/无填充编解码：
+
+```rust
+# #[cfg(feature = "base64")]
+# fn main() {
+use axutils::{Base64Options, CryptoUtils};
+
+let encoded = CryptoUtils::base64_encode("foobar", Base64Options::STANDARD).unwrap();
+assert_eq!(encoded, "Zm9vYmFy");
+assert_eq!(CryptoUtils::base64_decode(&encoded, Base64Options::STANDARD).unwrap(), b"foobar");
+# }
+# #[cfg(not(feature = "base64"))]
+# fn main() {}
+```
+
+启用 `md5` 后可以计算 MD5 摘要；**MD5 不是加密，已存在实用碰撞攻击，禁止用于密码存储、数字
+签名或任何对抗性场景**：
+
+```rust
+# #[cfg(feature = "md5")]
+# fn main() {
+use axutils::CryptoUtils;
+
+assert_eq!(CryptoUtils::md5_hex("abc"), "900150983cd24fb0d6963f7d28e17f72");
+# }
+# #[cfg(not(feature = "md5"))]
+# fn main() {}
+```
+
+启用 `aes` 后可以用 AES-GCM（推荐）或 AES-CBC+PKCS#7（仅用于旧系统互操作，**无完整性认证**）
+加解密；`aes_encrypt` 内部生成随机 nonce/IV 并前置到输出：
+
+```rust
+# #[cfg(feature = "aes")]
+# fn main() {
+use axutils::{AesKey, AesMode, CryptoUtils};
+
+let key = AesKey::from_bytes([0x00; 32]).unwrap();
+let ciphertext = CryptoUtils::aes_encrypt("hello world", &key, AesMode::Gcm).unwrap();
+let plaintext = CryptoUtils::aes_decrypt(&ciphertext, &key, AesMode::Gcm).unwrap();
+assert_eq!(plaintext, b"hello world");
+# }
+# #[cfg(not(feature = "aes"))]
+# fn main() {}
+```
+
+`CryptoError` 不回显明文、密文、密钥、IV 或原始文本内容；AES 的随机 IV/nonce/密钥生成只使用
+操作系统随机源，失败返回 `CryptoError::RandomSource`，不 panic、不降级到非密码学随机源。
+
+完整示例与边界说明见 [CryptoUtils 使用文档](https://github.com/crx-96/axutils-rust/blob/main/docs/examples/crypto.md)。
+
 ## 构建与部署依赖
 
 `axutils` 是 library crate，本身不生成可部署的二进制或容器。下表是消费方应用已有 Rust
@@ -413,4 +506,6 @@ FreeBSD 不属于本 crate 首期已承诺的验证目标；消费方必须自�
 默认 feature 为空：`RandomUtils` 及其相关类型仅在 `rand` 下导出，`RegUtils` 仅在 `regex` 下
 导出，邮件类型仅在 `lettre` 下导出，配置类型仅在 `serde` 下导出；模板、日期和配置后端需要
 满足各自的组合前提。`RegUtils::is_phone` 必须同时启用 `regex` 与 `libphonenumber`，异步邮件
-必须同时启用 `lettre` 与 `tokio`。
+必须同时启用 `lettre` 与 `tokio`。`CryptoUtils` 的十六进制编解码与 `TextEncoding::Utf8` 默认
+可用；`Base64*`/`md5*`/`Aes*` 分别仅在 `base64`/`md5`/`aes` 下导出，`aes_encrypt_base64`/
+`aes_decrypt_base64` 需要同时启用 `aes` 与 `base64`。

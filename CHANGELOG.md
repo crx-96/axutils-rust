@@ -35,6 +35,24 @@
   `load_value_async`/`load_async`，`ConfigUtils` 提供 `load_value_async`/`load_async`/
   `load_value_as_async`/`load_as_async`；异步读取复用现有格式解析、大小上限、BOM、UTF-8、深度、
   `.env` 回退和错误脱敏语义，Tokio 生产依赖仅增加 `fs`/`io-util` 能力，不创建 runtime。
+- 新增 `CryptoUtils`（`src/utils/crypto_utils.rs`）与 `crypto` 模块（`src/crypto/`），提供内存
+  数据的十六进制、Base64、MD5 和 AES 编码/摘要/加解密能力。十六进制编解码
+  （`hex_encode`/`hex_encode_upper`/`hex_decode`）与 `TextEncoding::Utf8` 文本编解码不依赖任何
+  第三方 crate，在任何 feature 组合下（含无 feature）都默认可用；`CryptoUtils`、`CryptoError`
+  基线变体（`OddHexLength`/`InvalidHex`/`TextDecodeInvalid`/`OutputTooLarge`）与 `crypto`/
+  `crypto_utils` 模块同样默认导出。
+  - `base64` feature 提供 `Base64Alphabet`、`Base64Options`（`STANDARD`/`STANDARD_NO_PAD`/
+    `URL_SAFE`/`URL_SAFE_NO_PAD` 四种组合）与 `base64_encode`/`base64_encode_text`/
+    `base64_decode`/`base64_decode_text`；解码严格拒绝非规范填充、非法字符和非零尾随比特。
+  - `md5` feature（实际启用 crates.io 上的 `md-5` crate，别名映射为 `dep:md5`，**不是**同名的
+    旧 `md5` crate）提供 `md5`/`md5_hex`/`md5_text`/`md5_hex_text`。
+  - `aes` feature（聚合 `aes`/`aes-gcm`/`cbc`/`zeroize` 四个内部适配依赖）提供 `AesKey`、
+    `AesKeyBits`、`AesMode`（`Gcm`/`CbcPkcs7`）与 `aes_encrypt`/`aes_decrypt`/
+    `aes_encrypt_with_iv`/`aes_decrypt_with_iv`/`aes_encrypt_hex`/`aes_decrypt_hex`；同时启用
+    `aes` 与 `base64` 后额外提供 `aes_encrypt_base64`/`aes_decrypt_base64`。支持 AES-128/192/256、
+    随机 IV/nonce（容器布局为 `iv || 密文(|| tag)`）与调用方显式提供 IV/nonce 两条路径。
+  - `encoding_rs` feature 为 `TextEncoding` 追加 `Gbk`/`Gb18030`/`Big5`/`ShiftJis`/`EucKr`/
+    `Windows1252` 六个 legacy 编码变体，供 Base64/MD5 的 `*_text` 入口使用。
 
 ### Changed
 
@@ -66,6 +84,25 @@
   （billion laughs）类拒绝服务输入；TOML 语法本身禁止重复键，YAML 显式配置为拒绝重复键，INI 与
   `.env` 由本 crate 检测重复键，`serde_json` 的“后者覆盖”语义无法配置，五种格式在该点上行为不完全
   一致，已在文档中如实说明。
+- `MD5` 是摘要算法，已存在实用碰撞攻击，不提供不可逆加密或抗碰撞安全性；**禁止**用于密码存储、
+  数字签名、证书、防篡改校验、内容寻址或任何对抗性场景，仅适用于输入不受攻击者控制的非对抗性
+  一致性校验（如内部缓存键、去重）。
+- `AesMode::CbcPkcs7` **不提供完整性认证**，密文可被篡改且存在 padding oracle 风险；新系统应使用
+  `AesMode::Gcm`，CBC 仅用于与旧系统互操作，且必须由上层协议自行提供认证。通过最小长度检查后，
+  认证失败、填充非法或 CBC 密文非整块等解密失败统一映射为单一的 `CryptoError::Decrypt`，不区分具体
+  原因；低于绝对最小长度的输入返回 `CryptoError::CiphertextTooShort`。
+- AES-GCM 随机 96-bit nonce 在同一密钥下的安全消息数上限约为 2^32；`aes_encrypt_with_iv`/
+  `aes_decrypt_with_iv` 把 nonce/IV 唯一性责任交给调用方，重用 nonce 会破坏机密性与完整性。
+- `AesKey` 内部密钥字节在 `Drop` 时清零（`zeroize`），`Debug` 只输出密钥位数，不提供导出密钥
+  字节的公开方法；随机源仅使用操作系统随机源，失败返回 `CryptoError::RandomSource`，不 panic、
+  不回退到非密码学随机源。
+- `CryptoError` 不回显明文、密文、密钥、IV、摘要或原始文本内容，只包含长度、位置偏移和编码名称；
+  Base64/十六进制/AES 的可检查输出长度溢出或分配失败统一返回 `CryptoError::OutputTooLarge`。
+- 修正 `TextEncodeUnmappable.position` 的语义为 `encoding_rs` 返回的已读取 UTF-8 字节数；AES
+  随机密钥材料、加解密临时缓冲和便捷编码路径中的中间密文在使用后或错误返回前清零，减少敏感数据
+  残留在可复用堆内存中的风险。
+- `TextEncoding` 的文本编解码严格失败，不做静默字符替换；`Gbk` 编码器无法输出 GB18030 的 4 字节
+  序列，WHATWG 标准中 ISO-8859-1/Latin-1 映射为 `Windows1252`。
 - `.env` 的 `${VAR}` 插值优先使用文件中已解析的键，找不到时可选择性回退到进程环境变量（默认允许，
   可通过 `ConfigLoader::with_env_substitution(false)` 关闭）；未定义变量返回错误而不会静默替换为
   空字符串；本 crate 只读取文件与（可选）进程环境变量，不写入、不合并、不修改进程环境。这些语义与

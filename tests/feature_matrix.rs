@@ -152,6 +152,147 @@ fn verifies_config_feature_api_matrix_and_dependency_boundaries() {
     assert_config_dependency_boundaries();
 }
 
+#[test]
+fn verifies_crypto_feature_api_matrix_and_dependency_boundaries() {
+    let fixture_manifest = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("fixtures")
+        .join("crypto_feature_matrix")
+        .join("Cargo.toml");
+    let target_dir = TemporaryTarget(env::temp_dir().join(format!(
+        "axutils-crypto-feature-matrix-{}",
+        std::process::id()
+    )));
+
+    for (feature, expected_success, diagnostic_token) in [
+        ("none", true, ""),
+        ("encoding-rs-only", true, ""),
+        ("base64-only", true, ""),
+        ("md5-only", true, ""),
+        ("aes-only", true, ""),
+        ("base64-md5", true, ""),
+        ("base64-aes", true, ""),
+        ("base64-encoding-rs", true, ""),
+        ("md5-aes", true, ""),
+        ("md5-encoding-rs", true, ""),
+        ("aes-encoding-rs", true, ""),
+        ("base64-md5-aes", true, ""),
+        ("base64-md5-encoding-rs", true, ""),
+        ("base64-aes-encoding-rs", true, ""),
+        ("md5-aes-encoding-rs", true, ""),
+        ("all", true, ""),
+        ("negative-none-base64", false, "base64_encode"),
+        ("negative-none-md5", false, "md5"),
+        ("negative-none-aes", false, "aeskey"),
+        ("negative-none-legacy-encoding", false, "gbk"),
+        ("negative-encoding-rs-only-base64", false, "base64_encode"),
+        ("negative-encoding-rs-only-md5", false, "md5"),
+        ("negative-encoding-rs-only-aes", false, "aeskey"),
+        ("negative-base64-only-md5", false, "md5"),
+        ("negative-base64-only-aes", false, "aeskey"),
+        ("negative-base64-only-legacy-encoding", false, "gbk"),
+        ("negative-md5-only-base64", false, "base64_encode"),
+        ("negative-md5-only-aes", false, "aeskey"),
+        ("negative-md5-only-legacy-encoding", false, "gbk"),
+        ("negative-aes-only-base64", false, "base64_encode"),
+        ("negative-aes-only-md5", false, "md5"),
+        ("negative-aes-only-legacy-encoding", false, "gbk"),
+        (
+            "negative-aes-only-aes-base64-combo",
+            false,
+            "aes_encrypt_base64",
+        ),
+        ("negative-aes-base64-md5", false, "md5"),
+        ("negative-aes-base64-legacy-encoding", false, "gbk"),
+        ("negative-base64-encoding-rs-md5", false, "md5"),
+        ("negative-base64-encoding-rs-aes", false, "aeskey"),
+        ("negative-base64-md5-aes", false, "aeskey"),
+        ("negative-base64-md5-legacy-encoding", false, "gbk"),
+        ("negative-base64-md5-encoding-rs", false, "aeskey"),
+        ("negative-md5-aes-base64-combo", false, "aes_encrypt_base64"),
+        ("negative-md5-aes-legacy-encoding", false, "gbk"),
+        ("negative-md5-aes-encoding-rs", false, "base64_encode"),
+        (
+            "negative-md5-aes-encoding-rs-base64-combo",
+            false,
+            "aes_encrypt_base64",
+        ),
+        ("negative-md5-encoding-rs-base64", false, "base64_encode"),
+        ("negative-md5-encoding-rs-aes", false, "aeskey"),
+        (
+            "negative-aes-encoding-rs-base64-combo",
+            false,
+            "aes_encrypt_base64",
+        ),
+        ("negative-aes-encoding-rs-md5", false, "md5"),
+        ("negative-base64-md5-aes-encoding-rs", false, "gbk"),
+        ("negative-base64-aes-encoding-rs-md5", false, "md5"),
+    ] {
+        let output = run_fixture(&fixture_manifest, &target_dir.0, feature);
+        if expected_success {
+            assert!(
+                output.status.success(),
+                "crypto fixture feature `{feature}` should compile successfully: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        } else {
+            assert!(
+                !output.status.success(),
+                "crypto fixture feature `{feature}` should fail to compile"
+            );
+            assert_expected_diagnostic(&output, diagnostic_token, feature);
+        }
+    }
+
+    assert_crypto_dependency_boundaries();
+}
+
+fn assert_crypto_dependency_boundaries() {
+    let base64_tree = cargo_tree("base64");
+    assert!(has_package(&base64_tree, "base64"));
+    assert!(!has_package(&base64_tree, "md-5"));
+    assert!(!has_package(&base64_tree, "aes-gcm"));
+    assert!(!has_package(&base64_tree, "cbc"));
+    assert!(!has_package(&base64_tree, "zeroize"));
+    assert!(!has_package(&base64_tree, "encoding_rs"));
+
+    let md5_tree = cargo_tree("md5");
+    assert!(has_package(&md5_tree, "md-5"));
+    assert!(has_package(&md5_tree, "digest"));
+    assert!(!has_package(&md5_tree, "base64"));
+    assert!(!has_package(&md5_tree, "aes"));
+    assert!(!has_package(&md5_tree, "aes-gcm"));
+    assert!(!has_package(&md5_tree, "encoding_rs"));
+
+    let aes_tree = cargo_tree("aes");
+    assert!(has_package(&aes_tree, "aes"));
+    assert!(has_package(&aes_tree, "aes-gcm"));
+    assert!(has_package(&aes_tree, "cbc"));
+    assert!(has_package(&aes_tree, "zeroize"));
+    assert!(!has_package(&aes_tree, "base64"));
+    assert!(!has_package(&aes_tree, "md-5"));
+    assert!(!has_package(&aes_tree, "encoding_rs"));
+
+    let encoding_rs_tree = cargo_tree("encoding_rs");
+    assert!(has_package(&encoding_rs_tree, "encoding_rs"));
+    assert!(!has_package(&encoding_rs_tree, "base64"));
+    assert!(!has_package(&encoding_rs_tree, "md-5"));
+    assert!(!has_package(&encoding_rs_tree, "aes"));
+
+    for features in [
+        "base64",
+        "md5",
+        "aes",
+        "encoding_rs",
+        "base64,md5,aes,encoding_rs",
+    ] {
+        assert_forbidden_tls_packages(&cargo_tree(features));
+    }
+
+    let base64_feature_tree = cargo_tree_with_edges("base64", "normal,build,features");
+    assert!(!base64_feature_tree.contains("base64 feature \"simd-unsafe\""));
+}
+
 fn assert_config_dependency_boundaries() {
     let toml_only_tree = cargo_tree("toml");
     assert!(has_package(&toml_only_tree, "toml"));

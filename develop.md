@@ -22,6 +22,7 @@
 │   └── status/        # 长任务状态记录，不随包发布
 └── src/
     ├── config/         # 配置文件读取后端（需要 serde 及对应格式 feature）
+    ├── crypto/         # 十六进制/TextEncoding 默认可用；Base64/MD5/AES 需要对应 feature
     ├── email/         # SMTP 配置、消息、错误与多实例客户端（需要 lettre feature）
     ├── lib.rs          # crate 入口和公共导出
     └── utils/
@@ -30,7 +31,8 @@
         ├── random_utils.rs # RandomUtils 实现与单元测试（需要 rand feature）
         ├── reg_utils.rs  # RegUtils 实现与单元测试
         ├── time_utils.rs # TimeUtils 实现与单元测试
-        └── config_utils.rs # ConfigUtils 静态配置读取入口（需要 serde feature）
+        ├── config_utils.rs # ConfigUtils 静态配置读取入口（需要 serde feature）
+        └── crypto_utils.rs # CryptoUtils 静态入口（十六进制/TextEncoding 默认可用）
 ```
 
 ## 本地开发
@@ -57,9 +59,20 @@ cargo check --no-default-features --features tokio
 cargo check --no-default-features --features serde
 cargo check --no-default-features --features serde,tokio
 cargo check --no-default-features --features serde,tokio,toml,serde-saphyr,rust-ini
+cargo check --no-default-features --features encoding_rs
+cargo check --no-default-features --features base64
+cargo check --no-default-features --features md5
+cargo check --no-default-features --features aes
+cargo check --no-default-features --features aes,base64
+cargo check --no-default-features --features base64,md5,aes,encoding_rs
+cargo test --no-default-features --features base64,md5,aes,encoding_rs
 cargo tree --no-default-features --features tokio -e normal,build
 cargo tree --no-default-features --features serde,tokio -e normal,build
 cargo tree --no-default-features --features tokio -e features
+cargo tree --no-default-features --features base64 -e normal
+cargo tree --no-default-features --features md5 -e normal
+cargo tree --no-default-features --features aes -e normal
+cargo tree --no-default-features --features encoding_rs -e normal
 cargo package --list
 git diff --check
 ```
@@ -78,6 +91,11 @@ git diff --check
 feature、`--no-default-features`、相关单 feature、组合 feature 和 `--all-features`。
 配置读取能力以 `serde` 为基础 feature；YAML、TOML、INI 分别还需要
 `serde-saphyr`、`toml`、`rust-ini`，且单独启用这些后端 feature 时不得导出配置 API。
+`CryptoUtils` 本身与十六进制/`TextEncoding::Utf8` 文本编解码能力默认可用（不依赖任何第三方
+crate，与 `PathUtils` 同类）；`base64`/`md5`/`aes` 各自解锁对应算法，`encoding_rs` 单独启用会
+为 `TextEncoding` 追加 legacy 编码变体（不是零效果的空 feature），`aes + base64` 才有
+`aes_encrypt_base64`/`aes_decrypt_base64` 便捷方法。
+
 配置文件异步读取要求调用方显式同时启用 `serde` 与 `tokio`；`tokio` 单 feature 不导出配置
 模块，`serde` 单 feature 只提供同步入口。异步入口只替换受限文件读取，不创建 runtime 或
 调用 `block_on`，解析阶段仍在当前 Tokio worker 中执行；测试需覆盖 `ConfigUtils` 四个包装、
@@ -112,7 +130,7 @@ feature、`--no-default-features`、相关单 feature、组合 feature 和 `--al
    cargo package --allow-dirty --list
    ```
 
-   输出应包含 `README.md`、`CHANGELOG.md`、`src/` 和 `docs/examples/`，逐项确认 7 份模块文档均在；
+   输出应包含 `README.md`、`CHANGELOG.md`、`src/` 和 `docs/examples/`，逐项确认 8 份模块文档均在；
    不应包含 `develop.md`、`AGENTS.md`、`CLAUDE.md`、`docs/plans/`、`docs/status/` 或 `docs/skills/`。
 
 6. 先执行发布 dry-run：
@@ -154,6 +172,10 @@ tokio = ["dep:tokio", "lettre?/tokio1-rustls"]
 toml = ["dep:toml"]
 serde-saphyr = ["dep:serde-saphyr"]
 rust-ini = ["dep:rust-ini"]
+base64 = ["dep:base64"]
+md5 = ["dep:md5"]
+aes = ["dep:aes", "dep:aes-gcm", "dep:cbc", "dep:zeroize"]
+encoding_rs = ["dep:encoding_rs"]
 ```
 
 调用方直接依赖 `axutils = "0.1"` 即可使用 `PathUtils` 和 `TimeUtils`；需要
