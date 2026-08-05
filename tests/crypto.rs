@@ -1,6 +1,6 @@
 #![cfg(all(feature = "base64", feature = "md5", feature = "aes"))]
 
-use axutils::{AesKey, AesMode, Base64Alphabet, Base64Options, CryptoUtils};
+use axutils::{AesCipher, AesMode, Base64Alphabet, Base64Options, CryptoUtils};
 
 fn hex_bytes(hex: &str) -> Vec<u8> {
     assert!(hex.len().is_multiple_of(2));
@@ -153,13 +153,12 @@ fn aes_cbc_nist_sp800_38a_vectors_include_pkcs7_block() {
     ];
 
     for (key_hex, expected_hex) in cases {
-        let key = AesKey::from_bytes(hex_bytes(key_hex)).unwrap();
+        let cipher = AesCipher::from_key_bytes(hex_bytes(key_hex), AesMode::CbcPkcs7).unwrap();
         let expected = hex_bytes(expected_hex);
-        let ciphertext =
-            CryptoUtils::aes_encrypt_with_iv(&plaintext, &key, &iv, AesMode::CbcPkcs7).unwrap();
+        let ciphertext = cipher.encrypt_with_iv(&plaintext, &iv).unwrap();
         assert_eq!(ciphertext, expected, "key = {key_hex}");
         assert_eq!(
-            CryptoUtils::aes_decrypt_with_iv(&ciphertext, &key, &iv, AesMode::CbcPkcs7).unwrap(),
+            cipher.decrypt_with_iv(&ciphertext, &iv).unwrap(),
             plaintext,
             "key = {key_hex}"
         );
@@ -185,12 +184,12 @@ fn aes_gcm_nist_vectors_cover_all_key_sizes() {
     ];
 
     for (key_hex, expected_hex) in cases {
-        let key = AesKey::from_bytes(hex_bytes(key_hex)).unwrap();
+        let cipher = AesCipher::from_key_bytes(hex_bytes(key_hex), AesMode::Gcm).unwrap();
         let expected = hex_bytes(expected_hex);
-        let ciphertext = CryptoUtils::aes_encrypt_with_iv([], &key, &iv, AesMode::Gcm).unwrap();
+        let ciphertext = cipher.encrypt_with_iv([], &iv).unwrap();
         assert_eq!(ciphertext, expected, "key = {key_hex}");
         assert_eq!(
-            CryptoUtils::aes_decrypt_with_iv(&ciphertext, &key, &iv, AesMode::Gcm).unwrap(),
+            cipher.decrypt_with_iv(&ciphertext, &iv).unwrap(),
             Vec::<u8>::new(),
             "key = {key_hex}"
         );
@@ -205,22 +204,19 @@ fn aes_cbc_is_deterministic_for_fixed_key_iv_and_correct_across_key_sizes() {
     let iv = [0u8; 16];
 
     for key_len in [16usize, 24, 32] {
-        let key = AesKey::from_bytes(vec![0x11u8; key_len]).unwrap();
-        let a = CryptoUtils::aes_encrypt_with_iv(&plaintext, &key, &iv, AesMode::CbcPkcs7).unwrap();
-        let b = CryptoUtils::aes_encrypt_with_iv(&plaintext, &key, &iv, AesMode::CbcPkcs7).unwrap();
+        let cipher = AesCipher::from_key_bytes(vec![0x11u8; key_len], AesMode::CbcPkcs7).unwrap();
+        let a = cipher.encrypt_with_iv(&plaintext, &iv).unwrap();
+        let b = cipher.encrypt_with_iv(&plaintext, &iv).unwrap();
         // Fixed key/IV must be fully deterministic (unlike the random-IV container path).
         assert_eq!(a, b);
         // 65-byte plaintext pads up to 80 bytes (5 blocks).
         assert_eq!(a.len(), 80);
-        assert_eq!(
-            CryptoUtils::aes_decrypt_with_iv(&a, &key, &iv, AesMode::CbcPkcs7).unwrap(),
-            plaintext
-        );
+        assert_eq!(cipher.decrypt_with_iv(&a, &iv).unwrap(), plaintext);
 
         // A different key must produce different ciphertext for the same plaintext/IV.
-        let other_key = AesKey::from_bytes(vec![0x22u8; key_len]).unwrap();
-        let c = CryptoUtils::aes_encrypt_with_iv(&plaintext, &other_key, &iv, AesMode::CbcPkcs7)
-            .unwrap();
+        let other_cipher =
+            AesCipher::from_key_bytes(vec![0x22u8; key_len], AesMode::CbcPkcs7).unwrap();
+        let c = other_cipher.encrypt_with_iv(&plaintext, &iv).unwrap();
         assert_ne!(a, c);
     }
 }
@@ -228,23 +224,20 @@ fn aes_cbc_is_deterministic_for_fixed_key_iv_and_correct_across_key_sizes() {
 #[test]
 fn aes_gcm_authenticates_and_rejects_tampering_for_all_key_sizes() {
     for key_len in [16usize, 24, 32] {
-        let key = AesKey::from_bytes(vec![0x42u8; key_len]).unwrap();
+        let cipher = AesCipher::from_key_bytes(vec![0x42u8; key_len], AesMode::Gcm).unwrap();
         let nonce = vec![0x24u8; 12];
         let plaintext = b"NIST GCM key-length coverage payload";
-        let ciphertext =
-            CryptoUtils::aes_encrypt_with_iv(plaintext, &key, &nonce, AesMode::Gcm).unwrap();
+        let ciphertext = cipher.encrypt_with_iv(plaintext, &nonce).unwrap();
         assert_eq!(ciphertext.len(), plaintext.len() + 16);
         assert_eq!(
-            CryptoUtils::aes_decrypt_with_iv(&ciphertext, &key, &nonce, AesMode::Gcm).unwrap(),
+            cipher.decrypt_with_iv(&ciphertext, &nonce).unwrap(),
             plaintext
         );
 
         for tamper_at in [0usize, ciphertext.len() / 2, ciphertext.len() - 1] {
             let mut tampered = ciphertext.clone();
             tampered[tamper_at] ^= 0x01;
-            assert!(
-                CryptoUtils::aes_decrypt_with_iv(&tampered, &key, &nonce, AesMode::Gcm).is_err()
-            );
+            assert!(cipher.decrypt_with_iv(&tampered, &nonce).is_err());
         }
     }
 }
@@ -254,14 +247,14 @@ fn error_display_and_debug_never_echo_sentinel_secrets() {
     const SENTINEL_PLAINTEXT: &[u8] = b"SENTINEL_PLAINTEXT_MARKER";
     const SENTINEL_KEY: [u8; 16] = [0x99; 16];
 
-    let key = AesKey::from_bytes(SENTINEL_KEY).unwrap();
-    assert!(!format!("{key:?}").contains("153")); // 0x99 decimal, would only appear if leaked
+    let cipher = AesCipher::from_key_bytes(SENTINEL_KEY, AesMode::Gcm).unwrap();
+    assert!(!format!("{cipher:?}").contains("153")); // 0x99 decimal, would only appear if leaked
 
-    let ciphertext = CryptoUtils::aes_encrypt(SENTINEL_PLAINTEXT, &key, AesMode::Gcm).unwrap();
+    let ciphertext = cipher.encrypt(SENTINEL_PLAINTEXT).unwrap();
     let mut tampered = ciphertext.clone();
     let last = tampered.len() - 1;
     tampered[last] ^= 0x01;
-    let err = CryptoUtils::aes_decrypt(&tampered, &key, AesMode::Gcm).unwrap_err();
+    let err = cipher.decrypt(&tampered).unwrap_err();
     let rendered_display = format!("{err}");
     let rendered_debug = format!("{err:?}");
     assert!(!rendered_display
@@ -279,22 +272,17 @@ fn error_display_and_debug_never_echo_sentinel_secrets() {
 
 #[test]
 fn aes_hex_and_base64_convenience_methods_share_the_same_container_layout() {
-    let key = AesKey::from_bytes([0x07u8; 32]).unwrap();
     for mode in [AesMode::Gcm, AesMode::CbcPkcs7] {
+        let cipher = AesCipher::from_key_bytes([0x07u8; 32], mode).unwrap();
         let plaintext = "convenience method payload";
-        let hex = CryptoUtils::aes_encrypt_hex(plaintext, &key, mode).unwrap();
+        let hex = cipher.encrypt_hex(plaintext).unwrap();
         let container = CryptoUtils::hex_decode(&hex).unwrap();
-        assert_eq!(
-            CryptoUtils::aes_decrypt(&container, &key, mode).unwrap(),
-            plaintext.as_bytes()
-        );
+        assert_eq!(cipher.decrypt(&container).unwrap(), plaintext.as_bytes());
 
-        let b64 = CryptoUtils::aes_encrypt_base64(plaintext, &key, mode, Base64Options::STANDARD)
+        let b64 = cipher
+            .encrypt_base64(plaintext, Base64Options::STANDARD)
             .unwrap();
         let container2 = CryptoUtils::base64_decode(&b64, Base64Options::STANDARD).unwrap();
-        assert_eq!(
-            CryptoUtils::aes_decrypt(&container2, &key, mode).unwrap(),
-            plaintext.as_bytes()
-        );
+        assert_eq!(cipher.decrypt(&container2).unwrap(), plaintext.as_bytes());
     }
 }

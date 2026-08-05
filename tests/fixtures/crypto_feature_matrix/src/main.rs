@@ -16,6 +16,61 @@ fn assert_baseline() {
     assert_eq!(TextEncoding::Utf8.decode(b"hi").expect("utf8 decode"), "hi");
 }
 
+#[cfg(any(
+    feature = "aes-only",
+    feature = "base64-aes",
+    feature = "md5-aes",
+    feature = "aes-encoding-rs",
+    feature = "base64-md5-aes",
+    feature = "base64-aes-encoding-rs",
+    feature = "md5-aes-encoding-rs",
+    feature = "all",
+))]
+fn assert_aes_api() {
+    use axutils::{AesCipher, AesKey, AesMode, CryptoError, CryptoUtils};
+
+    let key = AesKey::from_bytes([0x00; 16]).expect("AES key");
+    let _: axutils::crypto::AesKey = key;
+    let _: axutils::crypto::AesKeyBits = axutils::AesKeyBits::Aes128;
+    let _: axutils::crypto::AesMode = AesMode::Gcm;
+    let _: axutils::AesCipher = AesCipher::from_key_bytes([0x01; 16], AesMode::Gcm).unwrap();
+    let _: axutils::crypto::AesCipher = AesCipher::from_key_bytes([0x02; 16], AesMode::Gcm).unwrap();
+    let _: axutils::crypto::CryptoError = CryptoError::NotInitialized;
+    let _: axutils::crypto::CryptoError = CryptoError::AlreadyInitialized;
+
+    CryptoUtils::aes_init_from_bytes([0x03; 16], AesMode::Gcm).expect("global AES init");
+    let ciphertext = CryptoUtils::aes_encrypt_hex("hi").expect("global encrypt");
+    assert_eq!(CryptoUtils::aes_decrypt_hex(&ciphertext).unwrap(), b"hi");
+
+    let cipher = AesCipher::from_key_bytes([0x04; 16], AesMode::CbcPkcs7).unwrap();
+    let ciphertext = cipher.encrypt("instance").unwrap();
+    assert_eq!(cipher.decrypt(&ciphertext).unwrap(), b"instance");
+
+    #[cfg(any(
+        feature = "base64-aes",
+        feature = "base64-md5-aes",
+        feature = "base64-aes-encoding-rs",
+        feature = "all",
+    ))]
+    {
+        let encoded = CryptoUtils::aes_encrypt_base64("hi", axutils::Base64Options::STANDARD)
+            .expect("global base64 encrypt");
+        assert_eq!(
+            CryptoUtils::aes_decrypt_base64(&encoded, axutils::Base64Options::STANDARD).unwrap(),
+            b"hi"
+        );
+        let encoded = cipher
+            .encrypt_base64("instance", axutils::Base64Options::URL_SAFE_NO_PAD)
+            .unwrap();
+        assert_eq!(
+            cipher
+                .decrypt_base64(&encoded, axutils::Base64Options::URL_SAFE_NO_PAD)
+                .unwrap(),
+            b"instance"
+        );
+    }
+}
+
 #[cfg(feature = "none")]
 fn main() {
     assert_baseline();
@@ -49,13 +104,7 @@ fn main() {
 #[cfg(feature = "aes-only")]
 fn main() {
     assert_baseline();
-    use axutils::{AesKey, AesMode, CryptoUtils};
-    let _: axutils::crypto::AesKey = AesKey::from_bytes([0u8; 16]).unwrap();
-    let _: axutils::crypto::AesKeyBits = axutils::AesKeyBits::Aes128;
-    let _: axutils::crypto::AesMode = AesMode::Gcm;
-    let key = AesKey::from_bytes([0u8; 16]).unwrap();
-    let ct = CryptoUtils::aes_encrypt_hex("hi", &key, AesMode::Gcm).unwrap();
-    assert_eq!(CryptoUtils::aes_decrypt_hex(&ct, &key, AesMode::Gcm).unwrap(), b"hi");
+    assert_aes_api();
 }
 
 #[cfg(feature = "base64-md5")]
@@ -69,13 +118,7 @@ fn main() {
 #[cfg(feature = "base64-aes")]
 fn main() {
     assert_baseline();
-    use axutils::{AesKey, AesMode, Base64Options, CryptoUtils};
-    let key = AesKey::from_bytes([0u8; 16]).unwrap();
-    let text = CryptoUtils::aes_encrypt_base64("hi", &key, AesMode::Gcm, Base64Options::STANDARD).unwrap();
-    assert_eq!(
-        CryptoUtils::aes_decrypt_base64(&text, &key, AesMode::Gcm, Base64Options::STANDARD).unwrap(),
-        b"hi"
-    );
+    assert_aes_api();
 }
 
 #[cfg(feature = "base64-encoding-rs")]
@@ -88,10 +131,8 @@ fn main() {
 #[cfg(feature = "md5-aes")]
 fn main() {
     assert_baseline();
-    use axutils::{AesKey, AesMode, CryptoUtils};
-    let _ = CryptoUtils::md5_hex("x");
-    let key = AesKey::from_bytes([0u8; 16]).unwrap();
-    let _ = CryptoUtils::aes_encrypt("x", &key, AesMode::CbcPkcs7).unwrap();
+    let _ = axutils::CryptoUtils::md5_hex("x");
+    assert_aes_api();
 }
 
 #[cfg(feature = "md5-encoding-rs")]
@@ -104,22 +145,17 @@ fn main() {
 #[cfg(feature = "aes-encoding-rs")]
 fn main() {
     assert_baseline();
-    use axutils::{AesKey, AesMode, CryptoUtils, TextEncoding};
-    let key = AesKey::from_bytes([0u8; 16]).unwrap();
+    assert_aes_api();
+    use axutils::TextEncoding;
     let bytes = TextEncoding::Gbk.encode("你好").unwrap();
-    let ct = CryptoUtils::aes_encrypt(&bytes, &key, AesMode::Gcm).unwrap();
-    let pt = CryptoUtils::aes_decrypt(&ct, &key, AesMode::Gcm).unwrap();
-    assert_eq!(TextEncoding::Gbk.decode(pt).unwrap(), "你好");
+    assert_eq!(TextEncoding::Gbk.decode(bytes).unwrap(), "你好");
 }
 
 #[cfg(feature = "base64-md5-aes")]
 fn main() {
     assert_baseline();
-    use axutils::{AesKey, AesMode, Base64Options, CryptoUtils};
-    let _ = CryptoUtils::md5_hex("x");
-    let key = AesKey::from_bytes([0u8; 16]).unwrap();
-    let text = CryptoUtils::aes_encrypt_base64("x", &key, AesMode::Gcm, Base64Options::STANDARD).unwrap();
-    let _ = CryptoUtils::aes_decrypt_base64(&text, &key, AesMode::Gcm, Base64Options::STANDARD).unwrap();
+    let _ = axutils::CryptoUtils::md5_hex("x");
+    assert_aes_api();
 }
 
 #[cfg(feature = "base64-md5-encoding-rs")]
@@ -133,31 +169,26 @@ fn main() {
 #[cfg(feature = "base64-aes-encoding-rs")]
 fn main() {
     assert_baseline();
-    use axutils::{AesKey, AesMode, Base64Options, CryptoUtils, TextEncoding};
-    let key = AesKey::from_bytes([0u8; 16]).unwrap();
+    assert_aes_api();
+    use axutils::TextEncoding;
     let bytes = TextEncoding::Gbk.encode("你好").unwrap();
-    let text = CryptoUtils::aes_encrypt_base64(&bytes, &key, AesMode::Gcm, Base64Options::STANDARD).unwrap();
-    let pt = CryptoUtils::aes_decrypt_base64(&text, &key, AesMode::Gcm, Base64Options::STANDARD).unwrap();
-    assert_eq!(TextEncoding::Gbk.decode(pt).unwrap(), "你好");
+    assert_eq!(TextEncoding::Gbk.decode(bytes).unwrap(), "你好");
 }
 
 #[cfg(feature = "md5-aes-encoding-rs")]
 fn main() {
     assert_baseline();
-    use axutils::{AesKey, AesMode, CryptoUtils, TextEncoding};
-    let _ = CryptoUtils::md5_hex_text("你好", TextEncoding::Gbk).unwrap();
-    let key = AesKey::from_bytes([0u8; 16]).unwrap();
-    let _ = CryptoUtils::aes_encrypt("x", &key, AesMode::Gcm).unwrap();
+    use axutils::TextEncoding;
+    let _ = axutils::CryptoUtils::md5_hex_text("你好", TextEncoding::Gbk).unwrap();
+    assert_aes_api();
 }
 
 #[cfg(feature = "all")]
 fn main() {
     assert_baseline();
-    use axutils::{AesKey, AesMode, Base64Options, CryptoUtils, TextEncoding};
-    let _ = CryptoUtils::md5_hex_text("你好", TextEncoding::Gbk).unwrap();
-    let key = AesKey::from_bytes([0u8; 16]).unwrap();
-    let text = CryptoUtils::aes_encrypt_base64("x", &key, AesMode::Gcm, Base64Options::STANDARD).unwrap();
-    let _ = CryptoUtils::aes_decrypt_base64(&text, &key, AesMode::Gcm, Base64Options::STANDARD).unwrap();
+    use axutils::TextEncoding;
+    let _ = axutils::CryptoUtils::md5_hex_text("你好", TextEncoding::Gbk).unwrap();
+    assert_aes_api();
 }
 
 // Negative fixtures: each references exactly one API that must NOT exist under the given
@@ -177,6 +208,17 @@ fn main() {
 #[cfg(feature = "negative-none-aes")]
 fn main() {
     let _ = axutils::AesKey::from_bytes;
+}
+
+#[cfg(feature = "negative-none-aescipher")]
+fn main() {
+    let _ = axutils::AesCipher::from_key_bytes;
+}
+
+#[cfg(feature = "negative-none-aes-errors")]
+fn main() {
+    let _ = axutils::CryptoError::NotInitialized;
+    let _ = axutils::CryptoError::AlreadyInitialized;
 }
 
 #[cfg(feature = "negative-none-legacy-encoding")]
@@ -199,6 +241,11 @@ fn main() {
     let _ = axutils::AesKey::from_bytes;
 }
 
+#[cfg(feature = "negative-encoding-rs-only-aescipher")]
+fn main() {
+    let _ = axutils::AesCipher::from_key_bytes;
+}
+
 #[cfg(feature = "negative-base64-only-md5")]
 fn main() {
     let _ = axutils::CryptoUtils::md5;
@@ -207,6 +254,11 @@ fn main() {
 #[cfg(feature = "negative-base64-only-aes")]
 fn main() {
     let _ = axutils::AesKey::from_bytes;
+}
+
+#[cfg(feature = "negative-base64-only-aescipher")]
+fn main() {
+    let _ = axutils::AesCipher::from_key_bytes;
 }
 
 #[cfg(feature = "negative-base64-only-legacy-encoding")]
@@ -222,6 +274,11 @@ fn main() {
 #[cfg(feature = "negative-md5-only-aes")]
 fn main() {
     let _ = axutils::AesKey::from_bytes;
+}
+
+#[cfg(feature = "negative-md5-only-aescipher")]
+fn main() {
+    let _ = axutils::AesCipher::from_key_bytes;
 }
 
 #[cfg(feature = "negative-md5-only-legacy-encoding")]
@@ -269,9 +326,19 @@ fn main() {
     let _ = axutils::AesKey::from_bytes;
 }
 
+#[cfg(feature = "negative-base64-encoding-rs-aescipher")]
+fn main() {
+    let _ = axutils::AesCipher::from_key_bytes;
+}
+
 #[cfg(feature = "negative-base64-md5-aes")]
 fn main() {
     let _ = axutils::AesKey::from_bytes;
+}
+
+#[cfg(feature = "negative-base64-md5-aescipher")]
+fn main() {
+    let _ = axutils::AesCipher::from_key_bytes;
 }
 
 #[cfg(feature = "negative-base64-md5-legacy-encoding")]
@@ -282,6 +349,11 @@ fn main() {
 #[cfg(feature = "negative-base64-md5-encoding-rs")]
 fn main() {
     let _ = axutils::AesKey::from_bytes;
+}
+
+#[cfg(feature = "negative-base64-md5-encoding-rs-aescipher")]
+fn main() {
+    let _ = axutils::AesCipher::from_key_bytes;
 }
 
 #[cfg(feature = "negative-md5-aes-base64-combo")]
@@ -312,6 +384,11 @@ fn main() {
 #[cfg(feature = "negative-md5-encoding-rs-aes")]
 fn main() {
     let _ = axutils::AesKey::from_bytes;
+}
+
+#[cfg(feature = "negative-md5-encoding-rs-aescipher")]
+fn main() {
+    let _ = axutils::AesCipher::from_key_bytes;
 }
 
 #[cfg(feature = "negative-aes-encoding-rs-base64-combo")]
@@ -354,15 +431,20 @@ fn main() {
     feature = "negative-none-base64",
     feature = "negative-none-md5",
     feature = "negative-none-aes",
+    feature = "negative-none-aescipher",
+    feature = "negative-none-aes-errors",
     feature = "negative-none-legacy-encoding",
     feature = "negative-encoding-rs-only-base64",
     feature = "negative-encoding-rs-only-md5",
     feature = "negative-encoding-rs-only-aes",
+    feature = "negative-encoding-rs-only-aescipher",
     feature = "negative-base64-only-md5",
     feature = "negative-base64-only-aes",
+    feature = "negative-base64-only-aescipher",
     feature = "negative-base64-only-legacy-encoding",
     feature = "negative-md5-only-base64",
     feature = "negative-md5-only-aes",
+    feature = "negative-md5-only-aescipher",
     feature = "negative-md5-only-legacy-encoding",
     feature = "negative-aes-only-base64",
     feature = "negative-aes-only-md5",
@@ -372,15 +454,19 @@ fn main() {
     feature = "negative-aes-base64-legacy-encoding",
     feature = "negative-base64-encoding-rs-md5",
     feature = "negative-base64-encoding-rs-aes",
+    feature = "negative-base64-encoding-rs-aescipher",
     feature = "negative-base64-md5-aes",
+    feature = "negative-base64-md5-aescipher",
     feature = "negative-base64-md5-legacy-encoding",
     feature = "negative-base64-md5-encoding-rs",
+    feature = "negative-base64-md5-encoding-rs-aescipher",
     feature = "negative-md5-aes-base64-combo",
     feature = "negative-md5-aes-legacy-encoding",
     feature = "negative-md5-aes-encoding-rs",
     feature = "negative-md5-aes-encoding-rs-base64-combo",
     feature = "negative-md5-encoding-rs-base64",
     feature = "negative-md5-encoding-rs-aes",
+    feature = "negative-md5-encoding-rs-aescipher",
     feature = "negative-aes-encoding-rs-base64-combo",
     feature = "negative-aes-encoding-rs-md5",
     feature = "negative-base64-md5-aes-encoding-rs",

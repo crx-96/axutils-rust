@@ -7,7 +7,9 @@
 //! 同时启用 `tokio`。配置文件读取能力（`ConfigUtils`）需要 `serde` feature，文件异步入口还
 //! 需要同时启用 `tokio`；YAML/TOML/INI 后端分别还需要额外启用 `serde-saphyr`/`toml`/`rust-ini`。
 //! `CryptoUtils` 的十六进制编解码与 `TextEncoding::Utf8` 默认可用，Base64/MD5/AES 分别需要
-//! `base64`/`md5`/`aes` feature，`encoding_rs` 为 `TextEncoding` 追加 legacy 编码变体。
+//! `base64`/`md5`/`aes` feature，`encoding_rs` 为 `TextEncoding` 追加 legacy 编码变体。AES
+//! 静态入口在 `aes` feature 下需要先初始化一次进程级密钥与模式；多密钥或可控生命周期场景
+//! 应使用 `crate::AesCipher` 实例。
 
 #[cfg(feature = "rand")]
 pub mod random_utils;

@@ -47,15 +47,22 @@
   - `md5` feature（实际启用 crates.io 上的 `md-5` crate，别名映射为 `dep:md5`，**不是**同名的
     旧 `md5` crate）提供 `md5`/`md5_hex`/`md5_text`/`md5_hex_text`。
   - `aes` feature（聚合 `aes`/`aes-gcm`/`cbc`/`zeroize` 四个内部适配依赖）提供 `AesKey`、
-    `AesKeyBits`、`AesMode`（`Gcm`/`CbcPkcs7`）与 `aes_encrypt`/`aes_decrypt`/
-    `aes_encrypt_with_iv`/`aes_decrypt_with_iv`/`aes_encrypt_hex`/`aes_decrypt_hex`；同时启用
-    `aes` 与 `base64` 后额外提供 `aes_encrypt_base64`/`aes_decrypt_base64`。支持 AES-128/192/256、
-    随机 IV/nonce（容器布局为 `iv || 密文(|| tag)`）与调用方显式提供 IV/nonce 两条路径。
+    `AesKeyBits`、`AesMode`（`Gcm`/`CbcPkcs7`）和可独立销毁的 `AesCipher` 实例；同时提供
+    `CryptoUtils::aes_init`/`aes_init_from_bytes`/`aes_is_initialized`/`aes_mode` 一次初始化的
+    进程级 AES 入口，以及不再逐次传入密钥/模式的 `aes_encrypt`/`aes_decrypt`/
+    `aes_encrypt_with_iv`/`aes_decrypt_with_iv`/`aes_encrypt_hex`/`aes_decrypt_hex`。同时启用
+    `aes` 与 `base64` 后额外提供对应的 `aes_encrypt_base64`/`aes_decrypt_base64`。支持
+    AES-128/192/256、随机 IV/nonce（容器布局为 `iv || 密文(|| tag)`）与调用方显式提供 IV/nonce
+    两条路径；新增的 `CryptoError::NotInitialized`/`AlreadyInitialized` 仅在 `aes` 下导出。
   - `encoding_rs` feature 为 `TextEncoding` 追加 `Gbk`/`Gb18030`/`Big5`/`ShiftJis`/`EucKr`/
     `Windows1252` 六个 legacy 编码变体，供 Base64/MD5 的 `*_text` 入口使用。
 
 ### Changed
 
+- `CryptoUtils` 的 8 个 AES 方法改为使用一次初始化的进程级密钥与模式，不再接受显式密钥/模式
+  参数；这是破坏性 API 变更。多密钥、多模式或需要可控 `Drop` 清零的调用方应迁移到
+  `AesCipher` 实例，或在进程启动时调用 `aes_init`/`aes_init_from_bytes` 后使用新的无密钥参数
+  入口。`Base64Options` 仍逐次传入。
 - 最低支持 Rust 版本从 1.85 提升为 1.88。原因：新增的 YAML 后端 `serde-saphyr 1.0.0`
   （2026-07-31 发布）声明 `edition = "2024"` 并使用了 let-chains 语法，实测在 Rust 1.85 下无法
   编译（27 个 `E0658` 错误），Rust 1.88（let-chains 稳定化版本）起可正常编译；`toml`（自身要求
@@ -93,14 +100,18 @@
   原因；低于绝对最小长度的输入返回 `CryptoError::CiphertextTooShort`。
 - AES-GCM 随机 96-bit nonce 在同一密钥下的安全消息数上限约为 2^32；`aes_encrypt_with_iv`/
   `aes_decrypt_with_iv` 把 nonce/IV 唯一性责任交给调用方，重用 nonce 会破坏机密性与完整性。
-- `AesKey` 内部密钥字节在 `Drop` 时清零（`zeroize`），`Debug` 只输出密钥位数，不提供导出密钥
-  字节的公开方法；随机源仅使用操作系统随机源，失败返回 `CryptoError::RandomSource`，不 panic、
-  不回退到非密码学随机源。
-- `CryptoError` 不回显明文、密文、密钥、IV、摘要或原始文本内容，只包含长度、位置偏移和编码名称；
+- `AesKey` 内部密钥字节在 `Drop` 时清零（`zeroize`）；`AesCipher` 实例丢弃时会触发该清零，
+  `Debug` 只输出模式和密钥位数，不提供导出密钥字节的公开方法。`CryptoUtils` 的全局
+  `OnceLock` 与进程同寿命，正常退出前不会触发 `Drop`，全局密钥会常驻内存；需要可控密钥生命周期
+  的调用方必须使用 `AesCipher`。随机源仅使用操作系统随机源，失败返回 `CryptoError::RandomSource`，
+  不 panic、不回退到非密码学随机源。
+- `CryptoError` 不回显明文、密文、密钥、IV、摘要或原始文本内容，仅包含必要的初始化状态、长度、位置
+  偏移和编码名称等非敏感信息；
   Base64/十六进制/AES 的可检查输出长度溢出或分配失败统一返回 `CryptoError::OutputTooLarge`。
 - 修正 `TextEncodeUnmappable.position` 的语义为 `encoding_rs` 返回的已读取 UTF-8 字节数；AES
-  随机密钥材料、加解密临时缓冲和便捷编码路径中的中间密文在使用后或错误返回前清零，减少敏感数据
-  残留在可复用堆内存中的风险。
+  随机密钥材料、`AesCipher` 实例中的密钥、加解密临时缓冲和便捷编码路径中的中间密文在使用后
+  或错误返回前清零，减少敏感数据残留在可复用堆内存中的风险；`CryptoUtils` 全局单例是进程级
+  常驻状态，不承诺在进程退出前清零。
 - `TextEncoding` 的文本编解码严格失败，不做静默字符替换；`Gbk` 编码器无法输出 GB18030 的 4 字节
   序列，WHATWG 标准中 ISO-8859-1/Latin-1 映射为 `Windows1252`。
 - `.env` 的 `${VAR}` 插值优先使用文件中已解析的键，找不到时可选择性回退到进程环境变量（默认允许，

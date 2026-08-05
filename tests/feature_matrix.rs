@@ -184,15 +184,19 @@ fn verifies_crypto_feature_api_matrix_and_dependency_boundaries() {
         ("negative-none-base64", false, "base64_encode"),
         ("negative-none-md5", false, "md5"),
         ("negative-none-aes", false, "aeskey"),
+        ("negative-none-aescipher", false, "aescipher"),
         ("negative-none-legacy-encoding", false, "gbk"),
         ("negative-encoding-rs-only-base64", false, "base64_encode"),
         ("negative-encoding-rs-only-md5", false, "md5"),
         ("negative-encoding-rs-only-aes", false, "aeskey"),
+        ("negative-encoding-rs-only-aescipher", false, "aescipher"),
         ("negative-base64-only-md5", false, "md5"),
         ("negative-base64-only-aes", false, "aeskey"),
+        ("negative-base64-only-aescipher", false, "aescipher"),
         ("negative-base64-only-legacy-encoding", false, "gbk"),
         ("negative-md5-only-base64", false, "base64_encode"),
         ("negative-md5-only-aes", false, "aeskey"),
+        ("negative-md5-only-aescipher", false, "aescipher"),
         ("negative-md5-only-legacy-encoding", false, "gbk"),
         ("negative-aes-only-base64", false, "base64_encode"),
         ("negative-aes-only-md5", false, "md5"),
@@ -206,9 +210,16 @@ fn verifies_crypto_feature_api_matrix_and_dependency_boundaries() {
         ("negative-aes-base64-legacy-encoding", false, "gbk"),
         ("negative-base64-encoding-rs-md5", false, "md5"),
         ("negative-base64-encoding-rs-aes", false, "aeskey"),
+        ("negative-base64-encoding-rs-aescipher", false, "aescipher"),
         ("negative-base64-md5-aes", false, "aeskey"),
+        ("negative-base64-md5-aescipher", false, "aescipher"),
         ("negative-base64-md5-legacy-encoding", false, "gbk"),
         ("negative-base64-md5-encoding-rs", false, "aeskey"),
+        (
+            "negative-base64-md5-encoding-rs-aescipher",
+            false,
+            "aescipher",
+        ),
         ("negative-md5-aes-base64-combo", false, "aes_encrypt_base64"),
         ("negative-md5-aes-legacy-encoding", false, "gbk"),
         ("negative-md5-aes-encoding-rs", false, "base64_encode"),
@@ -219,6 +230,7 @@ fn verifies_crypto_feature_api_matrix_and_dependency_boundaries() {
         ),
         ("negative-md5-encoding-rs-base64", false, "base64_encode"),
         ("negative-md5-encoding-rs-aes", false, "aeskey"),
+        ("negative-md5-encoding-rs-aescipher", false, "aescipher"),
         (
             "negative-aes-encoding-rs-base64-combo",
             false,
@@ -243,6 +255,17 @@ fn verifies_crypto_feature_api_matrix_and_dependency_boundaries() {
             assert_expected_diagnostic(&output, diagnostic_token, feature);
         }
     }
+
+    let output = run_fixture(&fixture_manifest, &target_dir.0, "negative-none-aes-errors");
+    assert!(
+        !output.status.success(),
+        "fixture feature `negative-none-aes-errors` should fail to compile"
+    );
+    assert_expected_diagnostics(
+        &output,
+        &["notinitialized", "alreadyinitialized"],
+        "negative-none-aes-errors",
+    );
 
     assert_crypto_dependency_boundaries();
 }
@@ -367,6 +390,25 @@ fn assert_expected_diagnostic(output: &Output, token: &str, feature: &str) {
         diagnostics.contains("error") && diagnostics.contains(token),
         "fixture feature `{feature}` did not fail because the expected API was unavailable"
     );
+}
+
+fn assert_expected_diagnostics(output: &Output, tokens: &[&str], feature: &str) {
+    let diagnostics = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    )
+    .to_ascii_lowercase();
+    assert!(
+        diagnostics.contains("error"),
+        "fixture feature `{feature}` did not fail to compile"
+    );
+    for token in tokens {
+        assert!(
+            diagnostics.contains(token),
+            "fixture feature `{feature}` diagnostic did not contain `{token}`"
+        );
+    }
 }
 
 fn assert_dependency_boundaries() {

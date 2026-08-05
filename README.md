@@ -386,17 +386,31 @@ assert_eq!(CryptoUtils::md5_hex("abc"), "900150983cd24fb0d6963f7d28e17f72");
 ```
 
 启用 `aes` 后可以用 AES-GCM（推荐）或 AES-CBC+PKCS#7（仅用于旧系统互操作，**无完整性认证**）
-加解密；`aes_encrypt` 内部生成随机 nonce/IV 并前置到输出：
+加解密。`CryptoUtils` 的 AES 入口先初始化一次进程级密钥与模式，之后不再逐次传入密钥；全局
+密钥会常驻进程且不可轮换。需要多密钥或可控密钥生命周期时，使用 `AesCipher` 实例：
 
 ```rust
 # #[cfg(feature = "aes")]
 # fn main() {
-use axutils::{AesKey, AesMode, CryptoUtils};
+use axutils::{AesMode, CryptoUtils};
 
-let key = AesKey::from_bytes([0x00; 32]).unwrap();
-let ciphertext = CryptoUtils::aes_encrypt("hello world", &key, AesMode::Gcm).unwrap();
-let plaintext = CryptoUtils::aes_decrypt(&ciphertext, &key, AesMode::Gcm).unwrap();
+CryptoUtils::aes_init_from_bytes([0x00; 32], AesMode::Gcm).unwrap();
+let ciphertext = CryptoUtils::aes_encrypt("hello world").unwrap();
+let plaintext = CryptoUtils::aes_decrypt(&ciphertext).unwrap();
 assert_eq!(plaintext, b"hello world");
+# }
+# #[cfg(not(feature = "aes"))]
+# fn main() {}
+```
+
+```rust
+# #[cfg(feature = "aes")]
+# fn main() {
+use axutils::{AesCipher, AesMode};
+
+let cipher = AesCipher::from_key_bytes([0x00; 16], AesMode::Gcm).unwrap();
+let ciphertext = cipher.encrypt("hello world").unwrap();
+assert_eq!(cipher.decrypt(&ciphertext).unwrap(), b"hello world");
 # }
 # #[cfg(not(feature = "aes"))]
 # fn main() {}

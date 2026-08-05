@@ -69,7 +69,10 @@
 //! `base64`、`md5`（实际启用 crates.io 上的 `md-5` crate）、`aes` feature，`encoding_rs`
 //! feature 为 `TextEncoding` 追加六个 legacy 编码变体。AES 支持 GCM（推荐，带认证）与
 //! CBC+PKCS#7（**无完整性认证**，仅用于旧系统互操作）两种模式，随机 IV/nonce 只使用操作系统
-//! 随机源；同时启用 `aes` 与 `base64` 后额外提供 `aes_encrypt_base64`/`aes_decrypt_base64`。
+//! 随机源。`CryptoUtils` 的 AES 入口通过 `aes_init` 或 `aes_init_from_bytes` 初始化一次进程级
+//! 单例，密钥与模式随后不可修改且常驻进程内；需要多密钥或可控密钥生命周期时使用可独立销毁的
+//! `AesCipher` 实例。若同时启用 `aes` 与 `base64`，额外提供 `aes_encrypt_base64`/
+//! `aes_decrypt_base64`。
 //! MD5 是摘要算法，已存在实用碰撞攻击，**禁止**用于密码存储、数字签名或任何对抗性场景。
 //!
 //! ```toml
@@ -138,4 +141,4 @@ pub use utils::CryptoUtils;
 pub use crypto::{Base64Alphabet, Base64Options};
 
 #[cfg(feature = "aes")]
-pub use crypto::{AesKey, AesKeyBits, AesMode};
+pub use crypto::{AesCipher, AesKey, AesKeyBits, AesMode};

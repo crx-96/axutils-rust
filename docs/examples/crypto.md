@@ -15,7 +15,7 @@
 | 仅 `encoding_rs` | `TextEncoding` 追加 `Gbk`/`Gb18030`/`Big5`/`ShiftJis`/`EucKr`/`Windows1252` |
 | `base64` | `Base64Alphabet`、`Base64Options`、`base64_encode`/`base64_encode_text`/`base64_decode`/`base64_decode_text` |
 | `md5` | `md5`/`md5_hex`/`md5_text`/`md5_hex_text` |
-| `aes` | `AesKey`/`AesKeyBits`/`AesMode`、`aes_encrypt`/`aes_decrypt`/`aes_encrypt_with_iv`/`aes_decrypt_with_iv`/`aes_encrypt_hex`/`aes_decrypt_hex` |
+| `aes` | `AesKey`/`AesKeyBits`/`AesMode`/`AesCipher`、`CryptoUtils::aes_init`/`aes_init_from_bytes`/`aes_is_initialized`/`aes_mode` 与无密钥参数的 AES 方法 |
 | `aes` + `base64` | 以上全部，另加 `aes_encrypt_base64`/`aes_decrypt_base64` |
 | `base64`/`md5` + `encoding_rs` | 对应 `*_text` 方法可传入 legacy `TextEncoding` 变体 |
 | `--all-features` | 全部 |
@@ -24,8 +24,9 @@ MD5 是摘要算法，不是加密，不可逆；已存在实用碰撞攻击，*
 防篡改校验、内容寻址或任何对抗性场景，仅适用于与既有系统对接、且输入不受攻击者控制的非对抗性
 一致性校验（如内部缓存键、去重）。`AesMode::CbcPkcs7` **不提供完整性认证**，密文可被篡改且存在
 padding oracle 风险；新系统应使用 `AesMode::Gcm`，CBC 仅用于与旧系统互操作，且必须由上层协议
-自行提供认证。`CryptoError` 不回显明文、密文、密钥、IV、摘要或原始文本内容，只包含长度、位置
-偏移和编码名称。
+自行提供认证。`CryptoError` 不回显明文、密文、密钥、IV、摘要或原始文本内容，仅包含必要的初始化状态、长度、位置
+偏移和编码名称等非敏感信息。`CryptoUtils` 的 AES 路径是一次初始化的进程级单例；需要多密钥或可控密钥
+生命周期时使用 `AesCipher` 实例。
 
 ## 导出内容
 
@@ -41,18 +42,20 @@ padding oracle 风险；新系统应使用 `AesMode::Gcm`，CBC 仅用于与旧�
 - `axutils::utils::CryptoUtils`、`axutils::crypto_utils::CryptoUtils`、
   `axutils::utils::crypto_utils::CryptoUtils`。
 
-`Base64Alphabet`、`Base64Options`（`feature = "base64"`）与 `AesKey`、`AesKeyBits`、`AesMode`
-（`feature = "aes"`）同时支持 `axutils::*` 与 `axutils::crypto::*` 两条路径。`src/crypto/` 下的
-`error.rs`、`text.rs`、`hex.rs`、`base64.rs`、`md5.rs`、`aes.rs` 是私有实现文件，不是公共导入
-路径。
+`Base64Alphabet`、`Base64Options`（`feature = "base64"`）以及 `AesCipher`、`AesKey`、
+`AesKeyBits`、`AesMode`（`feature = "aes"`）同时支持 `axutils::*` 与 `axutils::crypto::*` 两条
+路径。`src/crypto/` 下的 `error.rs`、`text.rs`、`hex.rs`、`base64.rs`、`md5.rs`、`aes.rs`、
+`cipher.rs` 是私有实现文件，不是公共导入路径。
 
 `CryptoError` 标记 `#[non_exhaustive]`，实现 `Debug`、`Clone`、`PartialEq`、`Eq`、`Display` 和
 `std::error::Error`；匹配时应保留 `_` 通配分支。`TextEncoding`、`Base64Alphabet`、`AesKeyBits`、
 `AesMode` 同样标记 `#[non_exhaustive]`，实现 `Debug`、`Clone`、`Copy`、`PartialEq`、`Eq`。
 `Base64Options` 字段私有，实现 `Debug`、`Clone`、`Copy`、`PartialEq`、`Eq`。`AesKey` 字段私有，
 手动实现脱敏 `Debug`（只输出密钥位数）与清零 `Drop`，不实现 `Display`、`Clone`、`Copy` 或任何
-序列化 trait，也不提供导出密钥字节的公开方法。`CryptoUtils` 是无状态工具结构体，无公共字段和
-`new` 方法，实现 `Debug`、`Clone`、`Copy`、`Default`。本模块没有公共自由函数、trait、类型
+序列化 trait，也不提供导出密钥字节的公开方法。`AesCipher` 字段私有，手动实现只输出模式和
+密钥位数的脱敏 `Debug`，自动满足 `Send + Sync`，不实现 `Clone`、`Copy`、`Display` 或序列化
+trait。`CryptoUtils` 类型本身仍是零大小静态入口，实现 `Debug`、`Clone`、`Copy`、`Default`；
+但其 AES 关联能力使用私有进程级单例，其他能力无状态。本模块没有公共自由函数、trait、类型
 别名、静态项或宏。
 
 ## 安装与启用
@@ -115,6 +118,8 @@ axutils = { version = "0.1", features = ["encoding_rs"] }
 | `Decrypt` | 解密失败：认证失败、篡改或填充非法，**不区分具体原因**（避免 padding oracle） | `aes` |
 | `Encrypt` | 加密失败；不区分具体上游原因 | `aes` |
 | `RandomSource` | 操作系统随机源不可用（`AesKey::generate` 或随机 IV/nonce 生成） | `aes` |
+| `NotInitialized` | `CryptoUtils` 的 AES 全局单例尚未初始化 | `aes` |
+| `AlreadyInitialized` | AES 全局单例已经初始化，不能 reset/replace | `aes` |
 
 ```rust
 use axutils::CryptoUtils;
@@ -558,6 +563,308 @@ assert_eq!(AesMode::Gcm.as_str(), "AES-GCM");
 # fn main() {}
 ```
 
+### `AesCipher` 实例路径
+
+`AesCipher` 在 `feature = "aes"` 下提供独立的密钥/模式实例。它适合多密钥、多模式和可控
+生命周期场景；实例被丢弃时内部 `AesKey` 的 `Drop` 会清零密钥。它不提供读取、复制或轮换密钥
+的方法，也不实现 `Clone`、`Copy`、`Display` 或序列化 trait。与 `CryptoUtils` 的进程级单例不同，
+多个 `AesCipher` 可以在同一进程内共存。
+
+#### `AesCipher::new(key: AesKey, mode: AesMode) -> AesCipher`
+
+消费一个已验证的 `AesKey` 并固定模式；方法本身不会失败。
+
+```rust
+# #[cfg(feature = "aes")]
+# fn main() {
+use axutils::{AesCipher, AesKey, AesMode};
+
+let key = AesKey::from_bytes([0x00; 16]).unwrap();
+let cipher = AesCipher::new(key, AesMode::CbcPkcs7);
+assert_eq!(cipher.mode(), AesMode::CbcPkcs7);
+# }
+# #[cfg(not(feature = "aes"))]
+# fn main() {}
+```
+
+#### `AesCipher::from_key_bytes(key: impl AsRef<[u8]>, mode: AesMode) -> Result<AesCipher, CryptoError>`
+
+复制 16、24 或 32 字节密钥材料并固定模式；长度非法返回 `InvalidKeyLength`。调用方仍持有的
+数组或 `Vec<u8>` 副本需要自行清零。
+
+```rust
+# #[cfg(feature = "aes")]
+# fn main() {
+use axutils::{AesCipher, AesMode, CryptoError};
+
+let cipher = AesCipher::from_key_bytes([0x00; 24], AesMode::Gcm).unwrap();
+assert_eq!(cipher.key_bits().byte_length(), 24);
+assert!(matches!(
+    AesCipher::from_key_bytes([0x00; 15], AesMode::Gcm),
+    Err(CryptoError::InvalidKeyLength { length: 15 })
+));
+# }
+# #[cfg(not(feature = "aes"))]
+# fn main() {}
+```
+
+#### `AesCipher::mode(&self) -> AesMode`
+
+返回初始化时固定的模式，不泄露密钥。
+
+```rust
+# #[cfg(feature = "aes")]
+# fn main() {
+use axutils::{AesCipher, AesMode};
+
+let cipher = AesCipher::from_key_bytes([0x00; 16], AesMode::Gcm).unwrap();
+assert_eq!(cipher.mode(), AesMode::Gcm);
+# }
+# #[cfg(not(feature = "aes"))]
+# fn main() {}
+```
+
+#### `AesCipher::key_bits(&self) -> AesKeyBits`
+
+返回内部密钥位数，不返回密钥字节。
+
+```rust
+# #[cfg(feature = "aes")]
+# fn main() {
+use axutils::{AesCipher, AesKeyBits, AesMode};
+
+let cipher = AesCipher::from_key_bytes([0x00; 32], AesMode::Gcm).unwrap();
+assert_eq!(cipher.key_bits(), AesKeyBits::Aes256);
+# }
+# #[cfg(not(feature = "aes"))]
+# fn main() {}
+```
+
+#### `AesCipher::encrypt(plaintext: impl AsRef<[u8]>) -> Result<Vec<u8>, CryptoError>`
+
+随机生成 IV/nonce 并返回 `iv || 密文(|| tag)` 容器；随机源、加密或可检查的容量失败分别返回
+`RandomSource`、`Encrypt` 或 `OutputTooLarge`。
+
+```rust
+# #[cfg(feature = "aes")]
+# fn main() {
+use axutils::{AesCipher, AesMode};
+
+let cipher = AesCipher::from_key_bytes([0x00; 16], AesMode::Gcm).unwrap();
+let ciphertext = cipher.encrypt("hello").unwrap();
+assert_eq!(cipher.decrypt(&ciphertext).unwrap(), b"hello");
+# }
+# #[cfg(not(feature = "aes"))]
+# fn main() {}
+```
+
+#### `AesCipher::decrypt(input: impl AsRef<[u8]>) -> Result<Vec<u8>, CryptoError>`
+
+解密包含前置 IV/nonce 的容器。过短输入返回 `CiphertextTooShort`；认证失败、填充非法或篡改
+统一返回 `Decrypt`，不区分具体原因。
+
+```rust
+# #[cfg(feature = "aes")]
+# fn main() {
+use axutils::{AesCipher, AesMode, CryptoError};
+
+let cipher = AesCipher::from_key_bytes([0x00; 16], AesMode::Gcm).unwrap();
+assert!(matches!(
+    cipher.decrypt([0u8; 10]),
+    Err(CryptoError::CiphertextTooShort { minimum: 28, length: 10 })
+));
+# }
+# #[cfg(not(feature = "aes"))]
+# fn main() {}
+```
+
+#### `AesCipher::encrypt_with_iv(plaintext: impl AsRef<[u8]>, iv: &[u8]) -> Result<Vec<u8>, CryptoError>`
+
+使用调用方提供的 IV/nonce，输出不含 IV/nonce。GCM 下调用方必须保证同一密钥下 nonce 唯一；长度
+不符返回 `InvalidIvLength`。
+
+```rust
+# #[cfg(feature = "aes")]
+# fn main() {
+use axutils::{AesCipher, AesMode};
+
+let cipher = AesCipher::from_key_bytes([0x00; 16], AesMode::Gcm).unwrap();
+let nonce = [0x00; 12];
+let ciphertext = cipher.encrypt_with_iv("hello", &nonce).unwrap();
+assert_eq!(cipher.decrypt_with_iv(&ciphertext, &nonce).unwrap(), b"hello");
+# }
+# #[cfg(not(feature = "aes"))]
+# fn main() {}
+```
+
+#### `AesCipher::decrypt_with_iv(ciphertext: impl AsRef<[u8]>, iv: &[u8]) -> Result<Vec<u8>, CryptoError>`
+
+解密不包含 IV/nonce 的显式 IV 密文。错误语义为 `InvalidIvLength`、`CiphertextTooShort` 或统一的
+`Decrypt`。
+
+```rust
+# #[cfg(feature = "aes")]
+# fn main() {
+use axutils::{AesCipher, AesMode};
+
+let cipher = AesCipher::from_key_bytes([0x00; 16], AesMode::Gcm).unwrap();
+let nonce = [0x00; 12];
+let ciphertext = cipher.encrypt_with_iv("hello", &nonce).unwrap();
+assert_eq!(cipher.decrypt_with_iv(&ciphertext, &nonce).unwrap(), b"hello");
+# }
+# #[cfg(not(feature = "aes"))]
+# fn main() {}
+```
+
+#### `AesCipher::encrypt_hex(plaintext: impl AsRef<[u8]>) -> Result<String, CryptoError>`
+
+加密完整容器并编码为小写十六进制；除 `OutputTooLarge` 外，错误语义与 `encrypt` 相同。
+
+```rust
+# #[cfg(feature = "aes")]
+# fn main() {
+use axutils::{AesCipher, AesMode};
+
+let cipher = AesCipher::from_key_bytes([0x00; 16], AesMode::Gcm).unwrap();
+let encoded = cipher.encrypt_hex("hello").unwrap();
+assert_eq!(cipher.decrypt_hex(&encoded).unwrap(), b"hello");
+# }
+# #[cfg(not(feature = "aes"))]
+# fn main() {}
+```
+
+#### `AesCipher::decrypt_hex(input: &str) -> Result<Vec<u8>, CryptoError>`
+
+解码十六进制容器并解密；奇数长度/非法字符返回 `OddHexLength`/`InvalidHex`，中间密文在返回前
+清零，其余错误语义与 `decrypt` 相同。
+
+```rust
+# #[cfg(feature = "aes")]
+# fn main() {
+use axutils::{AesCipher, AesMode, CryptoError};
+
+let cipher = AesCipher::from_key_bytes([0x00; 16], AesMode::CbcPkcs7).unwrap();
+let encoded = cipher.encrypt_hex("hello").unwrap();
+assert_eq!(cipher.decrypt_hex(&encoded).unwrap(), b"hello");
+assert!(matches!(cipher.decrypt_hex("abc"), Err(CryptoError::OddHexLength { .. })));
+# }
+# #[cfg(not(feature = "aes"))]
+# fn main() {}
+```
+
+#### `AesCipher::encrypt_base64(plaintext: impl AsRef<[u8]>, options: Base64Options) -> Result<String, CryptoError>`
+
+仅在同时启用 `aes` 与 `base64` 时提供；逐次使用 `options` 选择标准/URL-safe 字母表和有/无填充。
+
+```rust
+# #[cfg(all(feature = "aes", feature = "base64"))]
+# fn main() {
+use axutils::{AesCipher, AesMode, Base64Options};
+
+let cipher = AesCipher::from_key_bytes([0x00; 16], AesMode::Gcm).unwrap();
+let encoded = cipher.encrypt_base64("hello", Base64Options::URL_SAFE_NO_PAD).unwrap();
+assert_eq!(
+    cipher.decrypt_base64(&encoded, Base64Options::URL_SAFE_NO_PAD).unwrap(),
+    b"hello"
+);
+# }
+# #[cfg(not(all(feature = "aes", feature = "base64")))]
+# fn main() {}
+```
+
+#### `AesCipher::decrypt_base64(input: &str, options: Base64Options) -> Result<Vec<u8>, CryptoError>`
+
+仅在同时启用 `aes` 与 `base64` 时提供；`options` 不匹配或输入非法时返回 `Base64Decode`，其余
+错误语义与 `decrypt` 相同。
+
+```rust
+# #[cfg(all(feature = "aes", feature = "base64"))]
+# fn main() {
+use axutils::{AesCipher, AesMode, Base64Options};
+
+let cipher = AesCipher::from_key_bytes([0x00; 16], AesMode::Gcm).unwrap();
+let encoded = cipher.encrypt_base64("hello", Base64Options::STANDARD).unwrap();
+assert_eq!(cipher.decrypt_base64(&encoded, Base64Options::STANDARD).unwrap(), b"hello");
+# }
+# #[cfg(not(all(feature = "aes", feature = "base64")))]
+# fn main() {}
+```
+
+### `CryptoUtils` 全局初始化路径
+
+`CryptoUtils` 的 AES 入口使用进程级单例。初始化成功一次后密钥和模式不可修改，没有 reset/replace
+或密钥读取方法；所有业务方法在未初始化时优先返回 `CryptoError::NotInitialized`，即使输入同时
+存在非法 IV、过短密文或非法编码。全局密钥与进程同寿命，正常退出前不会触发 `AesKey::Drop`，
+因此不会由本 crate 清零。
+
+#### `CryptoUtils::aes_init(key: AesKey, mode: AesMode) -> Result<(), CryptoError>`
+
+消费已验证的 `AesKey` 并固定全局模式；成功后重复调用或并发竞争失败返回
+`CryptoError::AlreadyInitialized`。
+
+```rust
+# #[cfg(feature = "aes")]
+# fn main() {
+use axutils::{AesKey, AesMode, CryptoUtils};
+
+CryptoUtils::aes_init(AesKey::from_bytes([0x00; 32]).unwrap(), AesMode::Gcm).unwrap();
+assert_eq!(CryptoUtils::aes_mode().unwrap(), AesMode::Gcm);
+# }
+# #[cfg(not(feature = "aes"))]
+# fn main() {}
+```
+
+#### `CryptoUtils::aes_init_from_bytes(key: impl AsRef<[u8]>, mode: AesMode) -> Result<(), CryptoError>`
+
+复制 16、24 或 32 字节密钥材料并初始化全局单例。调用方仍持有的数组或 `Vec<u8>` 副本需自行
+清零；已初始化时优先返回 `AlreadyInitialized`，未初始化且长度非法返回 `InvalidKeyLength`，
+且不会占用单例。
+
+```rust
+# #[cfg(feature = "aes")]
+# fn main() {
+use axutils::{AesMode, CryptoUtils};
+
+CryptoUtils::aes_init_from_bytes([0x00; 32], AesMode::Gcm).unwrap();
+assert!(CryptoUtils::aes_is_initialized());
+# }
+# #[cfg(not(feature = "aes"))]
+# fn main() {}
+```
+
+#### `CryptoUtils::aes_is_initialized() -> bool`
+
+返回全局单例是否已成功初始化；不会读取密钥。
+
+```rust
+# #[cfg(feature = "aes")]
+# fn main() {
+use axutils::{AesMode, CryptoUtils};
+
+assert!(!CryptoUtils::aes_is_initialized());
+CryptoUtils::aes_init_from_bytes([0x00; 16], AesMode::Gcm).unwrap();
+assert!(CryptoUtils::aes_is_initialized());
+# }
+# #[cfg(not(feature = "aes"))]
+# fn main() {}
+```
+
+#### `CryptoUtils::aes_mode() -> Result<AesMode, CryptoError>`
+
+返回初始化时固定的模式；未初始化时返回 `NotInitialized`。
+
+```rust
+# #[cfg(feature = "aes")]
+# fn main() {
+use axutils::{AesMode, CryptoUtils};
+
+CryptoUtils::aes_init_from_bytes([0x00; 16], AesMode::CbcPkcs7).unwrap();
+assert_eq!(CryptoUtils::aes_mode().unwrap(), AesMode::CbcPkcs7);
+# }
+# #[cfg(not(feature = "aes"))]
+# fn main() {}
+```
+
 ### 密文布局
 
 | 模式 | `aes_encrypt` 输出 | 最小长度 | `aes_encrypt_with_iv` 输出 | 最小长度（`_with_iv`） |
@@ -572,50 +879,52 @@ assert_eq!(AesMode::Gcm.as_str(), "AES-GCM");
 到输出末尾，与 Java 一致），`AES/CBC/PKCS5Padding` 对应 `AesMode::CbcPkcs7` 的 `_with_iv` 路径
 （Java 的 `PKCS5Padding` 在 AES 场景下与 PKCS#7 等价）。
 
-### `CryptoUtils::aes_encrypt(plaintext: impl AsRef<[u8]>, key: &AesKey, mode: AesMode) -> Result<Vec<u8>, CryptoError>`
+### `CryptoUtils::aes_encrypt(plaintext: impl AsRef<[u8]>) -> Result<Vec<u8>, CryptoError>`
 
-内部生成随机 IV/nonce，输出布局见上表。同一密钥下 GCM 随机 96-bit nonce 的安全消息数上限约为
-2^32；长期高频场景应自行轮换密钥。
+使用已初始化的全局密钥，内部生成随机 IV/nonce，输出布局见上表。未初始化时返回
+`CryptoError::NotInitialized`；同一全局密钥下 GCM 随机 96-bit nonce 的安全消息数约为 2^32，
+轮换需要重启进程或改用 `AesCipher`。
 
 ```rust
 # #[cfg(feature = "aes")]
 # fn main() {
-use axutils::{AesKey, AesMode, CryptoUtils};
+use axutils::{AesMode, CryptoUtils};
 
-let key = AesKey::from_bytes([0x00; 32]).unwrap();
-let ciphertext = CryptoUtils::aes_encrypt("hello world", &key, AesMode::Gcm).unwrap();
+CryptoUtils::aes_init_from_bytes([0x00; 32], AesMode::Gcm).unwrap();
+let ciphertext = CryptoUtils::aes_encrypt("hello world").unwrap();
 assert_eq!(ciphertext.len(), 12 + 11 + 16);
-let plaintext = CryptoUtils::aes_decrypt(&ciphertext, &key, AesMode::Gcm).unwrap();
+let plaintext = CryptoUtils::aes_decrypt(&ciphertext).unwrap();
 assert_eq!(plaintext, b"hello world");
 # }
 # #[cfg(not(feature = "aes"))]
 # fn main() {}
 ```
 
-### `CryptoUtils::aes_decrypt(input: impl AsRef<[u8]>, key: &AesKey, mode: AesMode) -> Result<Vec<u8>, CryptoError>`
+### `CryptoUtils::aes_decrypt(input: impl AsRef<[u8]>) -> Result<Vec<u8>, CryptoError>`
 
-输入必须是 `aes_encrypt` 的完整输出（含前置 IV）。直接传入 `&str` 时按其 UTF-8 字节处理，不会
-自动把十六进制/Base64 文本解码；文本密文应使用 `aes_decrypt_hex` 或（启用 `base64` 后）
-`aes_decrypt_base64`。解密到字符串时对结果调用 `TextEncoding::decode`。
+输入必须是全局 `aes_encrypt` 的完整输出（含前置 IV）。直接传入 `&str` 时按其 UTF-8 字节处理，
+不会自动把十六进制/Base64 文本解码；文本密文应使用 `aes_decrypt_hex` 或（启用 `base64` 后）
+`aes_decrypt_base64`。解密到字符串时对结果调用 `TextEncoding::decode`。未初始化时优先返回
+`NotInitialized`，不会先检查输入长度。
 
 ```rust
 # #[cfg(feature = "aes")]
 # fn main() {
-use axutils::{AesKey, AesMode, CryptoUtils};
+use axutils::{AesMode, CryptoUtils};
 
-let key = AesKey::from_bytes([0x00; 16]).unwrap();
-let ciphertext = CryptoUtils::aes_encrypt("secret", &key, AesMode::CbcPkcs7).unwrap();
-assert_eq!(CryptoUtils::aes_decrypt(&ciphertext, &key, AesMode::CbcPkcs7).unwrap(), b"secret");
+CryptoUtils::aes_init_from_bytes([0x00; 16], AesMode::CbcPkcs7).unwrap();
+let ciphertext = CryptoUtils::aes_encrypt("secret").unwrap();
+assert_eq!(CryptoUtils::aes_decrypt(&ciphertext).unwrap(), b"secret");
 assert!(matches!(
-    CryptoUtils::aes_decrypt(&[0u8; 10], &key, AesMode::Gcm),
-    Err(axutils::CryptoError::CiphertextTooShort { minimum: 28, length: 10 })
+    CryptoUtils::aes_decrypt(&[0u8; 10]),
+    Err(axutils::CryptoError::CiphertextTooShort { minimum: 32, length: 10 })
 ));
 # }
 # #[cfg(not(feature = "aes"))]
 # fn main() {}
 ```
 
-### `CryptoUtils::aes_encrypt_with_iv(plaintext: impl AsRef<[u8]>, key: &AesKey, iv: &[u8], mode: AesMode) -> Result<Vec<u8>, CryptoError>`
+### `CryptoUtils::aes_encrypt_with_iv(plaintext: impl AsRef<[u8]>, iv: &[u8]) -> Result<Vec<u8>, CryptoError>`
 
 互操作路径：IV/nonce 由调用方提供，输出**不含** IV。**警告：GCM 下重用 nonce 会破坏机密性与
 完整性，可能导致多条消息的明文恢复或伪造**；调用方必须自行保证每次调用的 `iv` 唯一。
@@ -623,14 +932,14 @@ assert!(matches!(
 ```rust
 # #[cfg(feature = "aes")]
 # fn main() {
-use axutils::{AesKey, AesMode, CryptoUtils};
+use axutils::{AesMode, CryptoUtils};
 
-let key = AesKey::from_bytes([0x00; 16]).unwrap();
+CryptoUtils::aes_init_from_bytes([0x00; 16], AesMode::Gcm).unwrap();
 let iv = [0x00; 12];
-let ciphertext = CryptoUtils::aes_encrypt_with_iv("hello", &key, &iv, AesMode::Gcm).unwrap();
+let ciphertext = CryptoUtils::aes_encrypt_with_iv("hello", &iv).unwrap();
 assert_eq!(ciphertext.len(), 5 + 16);
 assert!(matches!(
-    CryptoUtils::aes_encrypt_with_iv("x", &key, &[0u8; 11], AesMode::Gcm),
+    CryptoUtils::aes_encrypt_with_iv("x", &[0u8; 11]),
     Err(axutils::CryptoError::InvalidIvLength { expected: 12, length: 11 })
 ));
 # }
@@ -638,106 +947,107 @@ assert!(matches!(
 # fn main() {}
 ```
 
-### `CryptoUtils::aes_decrypt_with_iv(ciphertext: impl AsRef<[u8]>, key: &AesKey, iv: &[u8], mode: AesMode) -> Result<Vec<u8>, CryptoError>`
+### `CryptoUtils::aes_decrypt_with_iv(ciphertext: impl AsRef<[u8]>, iv: &[u8]) -> Result<Vec<u8>, CryptoError>`
 
 ```rust
 # #[cfg(feature = "aes")]
 # fn main() {
-use axutils::{AesKey, AesMode, CryptoUtils};
+use axutils::{AesMode, CryptoUtils};
 
-let key = AesKey::from_bytes([0x00; 16]).unwrap();
+CryptoUtils::aes_init_from_bytes([0x00; 16], AesMode::Gcm).unwrap();
 let iv = [0x00; 12];
-let ciphertext = CryptoUtils::aes_encrypt_with_iv("hello", &key, &iv, AesMode::Gcm).unwrap();
-let plaintext = CryptoUtils::aes_decrypt_with_iv(&ciphertext, &key, &iv, AesMode::Gcm).unwrap();
+let ciphertext = CryptoUtils::aes_encrypt_with_iv("hello", &iv).unwrap();
+let plaintext = CryptoUtils::aes_decrypt_with_iv(&ciphertext, &iv).unwrap();
 assert_eq!(plaintext, b"hello");
 # }
 # #[cfg(not(feature = "aes"))]
 # fn main() {}
 ```
 
-### `CryptoUtils::aes_encrypt_hex(plaintext: impl AsRef<[u8]>, key: &AesKey, mode: AesMode) -> Result<String, CryptoError>`
+### `CryptoUtils::aes_encrypt_hex(plaintext: impl AsRef<[u8]>) -> Result<String, CryptoError>`
 
 等价于 `hex_encode(aes_encrypt(..)?)`；使用随机 IV/nonce。
 
 ```rust
 # #[cfg(feature = "aes")]
 # fn main() {
-use axutils::{AesKey, AesMode, CryptoUtils};
+use axutils::{AesMode, CryptoUtils};
 
-let key = AesKey::from_bytes([0x00; 16]).unwrap();
-let hex = CryptoUtils::aes_encrypt_hex("hello", &key, AesMode::Gcm).unwrap();
-assert_eq!(CryptoUtils::aes_decrypt_hex(&hex, &key, AesMode::Gcm).unwrap(), b"hello");
+CryptoUtils::aes_init_from_bytes([0x00; 16], AesMode::Gcm).unwrap();
+let hex = CryptoUtils::aes_encrypt_hex("hello").unwrap();
+assert_eq!(CryptoUtils::aes_decrypt_hex(&hex).unwrap(), b"hello");
 # }
 # #[cfg(not(feature = "aes"))]
 # fn main() {}
 ```
 
-### `CryptoUtils::aes_decrypt_hex(input: &str, key: &AesKey, mode: AesMode) -> Result<Vec<u8>, CryptoError>`
+### `CryptoUtils::aes_decrypt_hex(input: &str) -> Result<Vec<u8>, CryptoError>`
 
 等价于 `aes_decrypt(hex_decode(..)?, ..)`。
 
 ```rust
 # #[cfg(feature = "aes")]
 # fn main() {
-use axutils::{AesKey, AesMode, CryptoUtils};
+use axutils::{AesMode, CryptoUtils};
 
-let key = AesKey::from_bytes([0x00; 16]).unwrap();
-let hex = CryptoUtils::aes_encrypt_hex("hello", &key, AesMode::CbcPkcs7).unwrap();
-assert_eq!(CryptoUtils::aes_decrypt_hex(&hex, &key, AesMode::CbcPkcs7).unwrap(), b"hello");
+CryptoUtils::aes_init_from_bytes([0x00; 16], AesMode::CbcPkcs7).unwrap();
+let hex = CryptoUtils::aes_encrypt_hex("hello").unwrap();
+assert_eq!(CryptoUtils::aes_decrypt_hex(&hex).unwrap(), b"hello");
 # }
 # #[cfg(not(feature = "aes"))]
 # fn main() {}
 ```
 
-### `CryptoUtils::aes_encrypt_base64(plaintext: impl AsRef<[u8]>, key: &AesKey, mode: AesMode, options: Base64Options) -> Result<String, CryptoError>`
+### `CryptoUtils::aes_encrypt_base64(plaintext: impl AsRef<[u8]>, options: Base64Options) -> Result<String, CryptoError>`
 
-仅在同时启用 `aes` 与 `base64` 时提供；等价于 `base64_encode(aes_encrypt(..)?, options)`。
+仅在同时启用 `aes` 与 `base64` 时提供；全局密钥和模式来自 `aes_init`，`options` 仍逐次传入。
 
 ```rust
 # #[cfg(all(feature = "aes", feature = "base64"))]
 # fn main() {
-use axutils::{AesKey, AesMode, Base64Options, CryptoUtils};
+use axutils::{AesMode, Base64Options, CryptoUtils};
 
-let key = AesKey::from_bytes([0x00; 16]).unwrap();
-let text =
-    CryptoUtils::aes_encrypt_base64("hello", &key, AesMode::Gcm, Base64Options::STANDARD).unwrap();
-let plaintext =
-    CryptoUtils::aes_decrypt_base64(&text, &key, AesMode::Gcm, Base64Options::STANDARD).unwrap();
+CryptoUtils::aes_init_from_bytes([0x00; 16], AesMode::Gcm).unwrap();
+let text = CryptoUtils::aes_encrypt_base64("hello", Base64Options::STANDARD).unwrap();
+let plaintext = CryptoUtils::aes_decrypt_base64(&text, Base64Options::STANDARD).unwrap();
 assert_eq!(plaintext, b"hello");
 # }
 # #[cfg(not(all(feature = "aes", feature = "base64")))]
 # fn main() {}
 ```
 
-### `CryptoUtils::aes_decrypt_base64(input: &str, key: &AesKey, mode: AesMode, options: Base64Options) -> Result<Vec<u8>, CryptoError>`
+### `CryptoUtils::aes_decrypt_base64(input: &str, options: Base64Options) -> Result<Vec<u8>, CryptoError>`
 
-仅在同时启用 `aes` 与 `base64` 时提供；等价于 `aes_decrypt(base64_decode(.., options)?, ..)`。
+仅在同时启用 `aes` 与 `base64` 时提供；`options` 必须与输入的字母表和填充形式一致，未初始化
+时优先返回 `NotInitialized`。
 
 ```rust
 # #[cfg(all(feature = "aes", feature = "base64"))]
 # fn main() {
-use axutils::{AesKey, AesMode, Base64Options, CryptoUtils};
+use axutils::{AesMode, Base64Options, CryptoUtils};
 
-let key = AesKey::from_bytes([0x00; 16]).unwrap();
-let text = CryptoUtils::aes_encrypt_base64(
-    "hello",
-    &key,
-    AesMode::Gcm,
-    Base64Options::STANDARD,
-)
-.unwrap();
-let plaintext = CryptoUtils::aes_decrypt_base64(
-    &text,
-    &key,
-    AesMode::Gcm,
-    Base64Options::STANDARD,
-)
-.unwrap();
+CryptoUtils::aes_init_from_bytes([0x00; 16], AesMode::Gcm).unwrap();
+let text = CryptoUtils::aes_encrypt_base64("hello", Base64Options::STANDARD).unwrap();
+let plaintext = CryptoUtils::aes_decrypt_base64(&text, Base64Options::STANDARD).unwrap();
 assert_eq!(plaintext, b"hello");
 # }
 # #[cfg(not(all(feature = "aes", feature = "base64")))]
 # fn main() {}
 ```
+
+### 从旧版显式密钥 API 迁移
+
+旧版 `CryptoUtils` 的 AES 方法每次调用都接收 `&AesKey` 和 `AesMode`。现在可按使用场景选择：
+
+| 旧调用形态 | 实例路径 | 全局路径 |
+| --- | --- | --- |
+| `aes_encrypt(plaintext, &key, mode)` / `aes_decrypt(input, &key, mode)` | `AesCipher::new(key, mode).encrypt(plaintext)` / `.decrypt(input)` | 先 `CryptoUtils::aes_init(key, mode)`，再 `CryptoUtils::aes_encrypt(plaintext)` / `.aes_decrypt(input)` |
+| `aes_encrypt_with_iv(plaintext, &key, iv, mode)` / `aes_decrypt_with_iv(ciphertext, &key, iv, mode)` | `cipher.encrypt_with_iv(plaintext, iv)` / `.decrypt_with_iv(ciphertext, iv)` | 初始化后 `CryptoUtils::aes_encrypt_with_iv(plaintext, iv)` / `.aes_decrypt_with_iv(ciphertext, iv)` |
+| `aes_encrypt_hex(plaintext, &key, mode)` / `aes_decrypt_hex(input, &key, mode)` | `cipher.encrypt_hex(plaintext)` / `.decrypt_hex(input)` | 初始化后 `CryptoUtils::aes_encrypt_hex(plaintext)` / `.aes_decrypt_hex(input)` |
+| `aes_encrypt_base64(plaintext, &key, mode, options)` / `aes_decrypt_base64(input, &key, mode, options)` | `cipher.encrypt_base64(plaintext, options)` / `.decrypt_base64(input, options)` | 初始化后 `CryptoUtils::aes_encrypt_base64(plaintext, options)` / `.aes_decrypt_base64(input, options)` |
+
+全局路径的密钥常驻进程且不能轮换；需要多密钥或可控 `Drop` 清零时应为每把密钥创建一个
+`AesCipher` 实例。
 
 ## 安全边界
 
@@ -751,19 +1061,21 @@ assert_eq!(plaintext, b"hello");
    数据场景触达。
 4. **不提供 KDF**：密钥必须是 16/24/32 字节高熵材料，推荐 `AesKey::generate`；口令派生需要
    调用方使用 Argon2/PBKDF2 等专用库。**不要**用 `CryptoUtils::md5(password)` 当作 AES 密钥。
-5. **密钥材料卫生**：`AesKey` 在 `Drop` 时清零、`Debug` 脱敏、不可导出、不实现序列化；中间
-   缓冲区（如调用方持有的明文 `Vec<u8>`）由调用方负责，本 crate 无法控制其生命周期。
+5. **密钥材料卫生**：`AesKey` 在 `Drop` 时清零、`Debug` 脱敏、不可导出、不实现序列化；
+   `AesCipher` 实例被丢弃时会触发该清零，而存放在 `CryptoUtils` 进程级 `OnceLock` 中的全局
+   实例在正常进程退出前不会被丢弃，密钥不会由本 crate 清零。中间缓冲区（如调用方持有的明文
+   `Vec<u8>`）由调用方负责，本 crate 无法控制其生命周期。
 6. **随机源**：只使用操作系统随机源；失败返回 `CryptoError::RandomSource`，不 panic、不降级到
    `RandomUtils`（`rand` feature）等非密码学 RNG；两者定位不同、无共用代码。
 7. **错误脱敏**：`CryptoError` 的 `Display`/`Debug` 都不包含明文、密文、密钥、IV、摘要或原始
-   文本片段，只包含长度、位置偏移和编码名称。
+   文本片段，仅包含必要的初始化状态、长度、位置偏移和编码名称等非敏感信息。
 8. **复杂度与内存**：全部 API 为输入长度的线性时间；输出规模为 hex = 2n、Base64 ≈ 4n/3
    （含填充向上取整）、AES-GCM = n + 28、AES-CBC ≤ n + 32。容量计算使用 checked 算术与
    `try_reserve`，可检查的溢出/预留失败返回 `CryptoError::OutputTooLarge`；底层分配器在真正
    OOM 时的 abort 不属于本 crate 可恢复的错误语义。首期不设硬性输入上限，对不可信输入应由
    调用方限制规模；本 crate 不提供流式接口。
-9. **无隐式副作用**：不读写文件、不访问网络、不读取环境变量、不使用全局可变状态、不缓存密钥；
-   除 `AesKey::generate`/随机 IV 生成外不消耗系统熵。
+9. **状态与副作用**：不读写文件、不访问网络、不读取环境变量；AES 全局路径会在进程级单例中持有
+   一把密钥，其余能力无状态且不缓存密钥；除 `AesKey::generate`/随机 IV 生成外不消耗系统熵。
 10. **不承诺常量时间**：除 `aes-gcm` 内部的 tag 校验外，本 crate 不承诺任何常量时间行为；
     十六进制/Base64 解码、`PartialEq` 比较都不是常量时间，不要用它们比较机密值。
 11. **依赖 unsafe 面**：`base64` 关闭 `simd-unsafe`；`encoding_rs` 不启用 `simd-accel`；
@@ -773,8 +1085,9 @@ assert_eq!(plaintext, b"hello");
 
 任何非对称密码学（RSA、ECDSA、Ed25519、X25519、证书、PKI）；其他摘要与 MAC（SHA 系列、
 BLAKE、HMAC-\*、CMAC、Poly1305 独立入口）；口令派生与口令哈希（PBKDF2、scrypt、Argon2、
-bcrypt）；密钥生命周期管理（生成策略、存储、轮换、封装、KMS/HSM、密钥文件格式）；流式/增量
-接口、文件加解密、`Read`/`Write` 适配器、异步接口；除 GCM 自带认证外的 AAD 参数，以及 SIV、
+bcrypt）；不提供密钥管理策略（生成策略、存储、轮换、封装、KMS/HSM、密钥文件格式），但
+`AesCipher` 提供实例级可控生命周期（实例 `Drop` 时清零）；不提供流式/增量接口、文件加解密、
+`Read`/`Write` 适配器或异步接口；除 GCM 自带认证外的 AAD 参数，以及 SIV、
 XTS、CCM、OCB、CFB、OFB、ECB（ECB 明确永不提供）；常量时间比较等侧信道加固的公共 API；
 Base64 的 MIME 换行变体、Base32、Base58、Base85、URL 百分号编码；编码探测/猜测。需要完整
 密码学能力的调用方应直接使用 RustCrypto 或 `ring`。

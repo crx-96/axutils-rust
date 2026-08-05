@@ -8,12 +8,16 @@
 //! `aes_encrypt_base64`/`aes_decrypt_base64`。
 //!
 //! 本模块只负责“把内存中的一段数据安全地编码/摘要/加解密”：不提供非对称密码学、口令派生、
-//! 密钥生命周期管理或流式/文件接口；错误不回显明文、密文、密钥、IV 或原始文本内容。
+//! 密钥存储/轮换/封装策略或流式/文件接口；启用 `aes` 后，`AesCipher` 提供实例级可控密钥
+//! 生命周期，`CryptoUtils` 的全局 AES 便捷入口则使用进程级单例。错误不回显明文、密文、密钥、
+//! IV 或原始文本内容。
 
 #[cfg(feature = "aes")]
 mod aes;
 #[cfg(feature = "base64")]
 mod base64;
+#[cfg(feature = "aes")]
+mod cipher;
 mod error;
 mod hex;
 #[cfg(feature = "md5")]
@@ -27,6 +31,8 @@ pub use text::TextEncoding;
 pub use aes::{AesKey, AesKeyBits, AesMode};
 #[cfg(feature = "base64")]
 pub use base64::{Base64Alphabet, Base64Options};
+#[cfg(feature = "aes")]
+pub use cipher::AesCipher;
 
 pub(crate) use hex::{
     decode as hex_decode, encode_lower as hex_encode_lower, encode_upper as hex_encode_upper,

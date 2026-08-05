@@ -63,6 +63,12 @@ pub enum CryptoError {
         /// 实际提供的 IV/nonce 长度。
         length: usize,
     },
+    /// 全局 AES 单例尚未初始化。
+    #[cfg(feature = "aes")]
+    NotInitialized,
+    /// 全局 AES 单例已经初始化，不能再次替换。
+    #[cfg(feature = "aes")]
+    AlreadyInitialized,
     /// 容器输入短于当前调用形态的绝对最小长度。
     #[cfg(feature = "aes")]
     CiphertextTooShort {
@@ -126,6 +132,10 @@ impl fmt::Display for CryptoError {
                 )
             }
             #[cfg(feature = "aes")]
+            Self::NotInitialized => write!(f, "AES cipher is not initialized"),
+            #[cfg(feature = "aes")]
+            Self::AlreadyInitialized => write!(f, "AES cipher is already initialized"),
+            #[cfg(feature = "aes")]
             Self::CiphertextTooShort { minimum, length } => {
                 write!(f, "ciphertext too short: {length} bytes, minimum {minimum}")
             }
@@ -161,5 +171,16 @@ mod tests {
     fn odd_hex_length_message_contains_length() {
         let err = CryptoError::OddHexLength { length: 3 };
         assert_eq!(format!("{err}"), "hex string has odd length 3");
+    }
+
+    #[cfg(feature = "aes")]
+    #[test]
+    fn aes_initialization_errors_do_not_echo_sentinel_content() {
+        for err in [CryptoError::NotInitialized, CryptoError::AlreadyInitialized] {
+            let display = format!("{err}");
+            let debug = format!("{err:?}");
+            assert!(!display.contains("SENTINEL_SECRET"));
+            assert!(!debug.contains("SENTINEL_SECRET"));
+        }
     }
 }
