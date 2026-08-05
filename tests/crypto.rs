@@ -1,6 +1,6 @@
 #![cfg(all(feature = "base64", feature = "md5", feature = "aes"))]
 
-use axutils::{AesCipher, AesMode, Base64Alphabet, Base64Options, CryptoUtils};
+use axutils::{AesCipher, AesKeyBits, AesMode, Base64Alphabet, Base64Options, CryptoUtils};
 
 fn hex_bytes(hex: &str) -> Vec<u8> {
     assert!(hex.len().is_multiple_of(2));
@@ -268,6 +268,35 @@ fn error_display_and_debug_never_echo_sentinel_secrets() {
 
     let bad_hex_err = CryptoUtils::hex_decode("zz").unwrap_err();
     assert!(!format!("{bad_hex_err}").contains("SENTINEL"));
+}
+
+#[test]
+fn aes_gcm_fixed_key_iv_output_matches_external_vector() {
+    // 与外部工具一致性的固定向量验证：密钥是 32 字节 ASCII 字符串，nonce 是 12 字节 ASCII
+    // 字符串，明文固定；输出（密文 || tag，不含 nonce）与独立计算的外部期望值逐字节对比。
+    // 期望值由 RustCrypto aes-gcm 0.11（与 axutils 的 NIST 向量测试同一权威实现）在 axutils
+    // 之外直接计算，可用于与网上在线 AES-GCM 加密工具核对：
+    //   key   = "0123456789abcdef0123456789abcdef"（32 字节）
+    //   nonce = "0123456789ab"（12 字节）
+    //   plain = "hello world"（11 字节）
+    const KEY: &str = "0123456789abcdef0123456789abcdef";
+    const NONCE: &str = "0123456789ab";
+    const PLAINTEXT: &str = "hello world";
+    const EXPECTED_HEX: &str = "f1cc8b562ceaef748769476639cb6b606e7e03cb967b5934b82f61";
+    const EXPECTED_BASE64: &str = "8cyLVizq73SHaUdmOctrYG5+A8uWe1k0uC9h";
+
+    let cipher = AesCipher::from_key_bytes(KEY, AesMode::Gcm).unwrap();
+    assert_eq!(cipher.key_bits(), AesKeyBits::Aes256);
+
+    let ciphertext = cipher.encrypt_with_iv(PLAINTEXT, NONCE.as_bytes()).unwrap();
+    // 显式 IV 路径的输出不含 nonce：密文 11 字节 + tag 16 字节。
+    assert_eq!(ciphertext.len(), PLAINTEXT.len() + 16);
+
+    assert_eq!(CryptoUtils::hex_encode(&ciphertext).unwrap(), EXPECTED_HEX);
+    assert_eq!(
+        CryptoUtils::base64_encode(&ciphertext, Base64Options::STANDARD).unwrap(),
+        EXPECTED_BASE64
+    );
 }
 
 #[test]
