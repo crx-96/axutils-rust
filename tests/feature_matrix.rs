@@ -2,6 +2,7 @@ use std::{
     env, fs,
     path::{Path, PathBuf},
     process::{Command, Output},
+    sync::atomic::{AtomicUsize, Ordering},
 };
 
 struct TemporaryTarget(PathBuf);
@@ -270,6 +271,62 @@ fn verifies_crypto_feature_api_matrix_and_dependency_boundaries() {
     assert_crypto_dependency_boundaries();
 }
 
+#[test]
+fn verifies_jwt_feature_api_matrix_and_dependency_boundaries() {
+    let fixture_manifest = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("fixtures")
+        .join("jwt_feature_matrix")
+        .join("Cargo.toml");
+    let target_dir = unique_target("axutils-jwt-feature-matrix");
+
+    for (feature, expected_success, diagnostic_token) in [
+        ("none", true, ""),
+        ("jwt-only", true, ""),
+        ("serde-only", true, ""),
+        ("jwt-serde", true, ""),
+        ("jwt-lettre", true, ""),
+        ("jwt-aes", true, ""),
+        ("jwt-tokio", true, ""),
+        ("jwt-regex", true, ""),
+        ("all", true, ""),
+        ("negative-none-jwt-module", false, "jwt"),
+        ("negative-none-jwt-algorithm", false, "jwtalgorithm"),
+        ("negative-none-jwt-signing-key", false, "jwtsigningkey"),
+        (
+            "negative-none-jwt-verification-key",
+            false,
+            "jwtverificationkey",
+        ),
+        ("negative-none-jwt-config", false, "jwtconfig"),
+        ("negative-none-jwt-validation", false, "jwtvalidation"),
+        ("negative-none-jwt-error", false, "jwterror"),
+        ("negative-none-jwt-utils", false, "jwtutils"),
+        ("negative-none-utils-jwt-utils", false, "jwtutils"),
+        ("negative-none-direct-jwt-utils", false, "jwtutils"),
+        ("negative-serde-only-jwt-module", false, "jwt"),
+        ("negative-jwt-only-config", false, "config"),
+        ("negative-jwt-only-config-loader", false, "configloader"),
+    ] {
+        let output = run_fixture(&fixture_manifest, &target_dir.0, feature);
+        if expected_success {
+            assert!(
+                output.status.success(),
+                "JWT fixture feature `{feature}` should compile successfully: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        } else {
+            assert!(
+                !output.status.success(),
+                "JWT fixture feature `{feature}` should fail to compile"
+            );
+            assert_expected_diagnostic(&output, diagnostic_token, feature);
+        }
+    }
+
+    assert_jwt_dependency_boundaries();
+}
+
 fn assert_crypto_dependency_boundaries() {
     let base64_tree = cargo_tree("base64");
     assert!(has_package(&base64_tree, "base64"));
@@ -379,6 +436,18 @@ fn run_fixture(manifest: &Path, target_dir: &Path, feature: &str) -> Output {
         .unwrap_or_else(|_| panic!("failed to run cargo for fixture feature `{feature}`"))
 }
 
+fn unique_target(prefix: &str) -> TemporaryTarget {
+    static TARGET_COUNTER: AtomicUsize = AtomicUsize::new(0);
+    for _ in 0..100 {
+        let counter = TARGET_COUNTER.fetch_add(1, Ordering::Relaxed);
+        let path = env::temp_dir().join(format!("{prefix}-{}-{counter}", std::process::id()));
+        if fs::create_dir(&path).is_ok() {
+            return TemporaryTarget(path);
+        }
+    }
+    panic!("failed to acquire an exclusive temporary target directory for `{prefix}`");
+}
+
 fn assert_expected_diagnostic(output: &Output, token: &str, feature: &str) {
     let diagnostics = format!(
         "{}{}",
@@ -431,6 +500,53 @@ fn assert_dependency_boundaries() {
     assert!(has_package(&combined_tree, "ring"));
     assert!(has_package(&combined_tree, "webpki-roots"));
     assert_forbidden_tls_packages(&combined_tree);
+}
+
+fn assert_jwt_dependency_boundaries() {
+    let no_feature_tree = cargo_tree("");
+    for package in [
+        "jsonwebtoken",
+        "rsa",
+        "p256",
+        "p384",
+        "ed25519-dalek",
+        "hmac",
+    ] {
+        assert!(!has_package(&no_feature_tree, package));
+    }
+
+    let jwt_tree = cargo_tree("jwt");
+    assert!(has_package(&jwt_tree, "jsonwebtoken"));
+    assert!(has_package(&jwt_tree, "rsa"));
+    assert!(has_package(&jwt_tree, "p256"));
+    assert!(has_package(&jwt_tree, "p384"));
+    assert!(has_package(&jwt_tree, "ed25519-dalek"));
+    assert!(has_package(&jwt_tree, "hmac"));
+    for package in [
+        "lettre",
+        "aes",
+        "aes-gcm",
+        "cbc",
+        "regex",
+        "toml",
+        "serde-saphyr",
+        "rust-ini",
+        "chrono",
+        "jiff",
+        "strfmt",
+        "minijinja",
+        "phonenumber",
+        "encoding_rs",
+        "md-5",
+    ] {
+        assert!(!has_package(&jwt_tree, package));
+    }
+    assert_forbidden_tls_packages(&jwt_tree);
+
+    let jwt_feature_tree = cargo_tree_with_edges("jwt", "normal,build,features");
+    assert!(jwt_feature_tree.contains("jsonwebtoken feature \"rust_crypto\""));
+    assert!(jwt_feature_tree.contains("jsonwebtoken feature \"use_pem\""));
+    assert!(!jwt_feature_tree.contains("jsonwebtoken feature \"aws_lc_rs\""));
 }
 
 fn cargo_tree(features: &str) -> String {

@@ -54,8 +54,12 @@
     `aes` 与 `base64` 后额外提供对应的 `aes_encrypt_base64`/`aes_decrypt_base64`。支持
     AES-128/192/256、随机 IV/nonce（容器布局为 `iv || 密文(|| tag)`）与调用方显式提供 IV/nonce
     两条路径；新增的 `CryptoError::NotInitialized`/`AlreadyInitialized` 仅在 `aes` 下导出。
-  - `encoding_rs` feature 为 `TextEncoding` 追加 `Gbk`/`Gb18030`/`Big5`/`ShiftJis`/`EucKr`/
-    `Windows1252` 六个 legacy 编码变体，供 Base64/MD5 的 `*_text` 入口使用。
+   - `encoding_rs` feature 为 `TextEncoding` 追加 `Gbk`/`Gb18030`/`Big5`/`ShiftJis`/`EucKr`/
+     `Windows1252` 六个 legacy 编码变体，供 Base64/MD5 的 `*_text` 入口使用。
+- 新增独立 `jwt` feature 下的 JWT JWS 能力：提供 `JwtAlgorithm`、拥有型
+  `JwtSigningKey`/`JwtVerificationKey`、`JwtConfig`、`JwtValidation`、脱敏 `JwtError` 和一次初始化的
+  `JwtUtils`；支持 HS256/384/512、RS256/384/512、PS256/384/512、ES256/384 与 Ed25519，支持泛型
+  claims、标准 `exp`/`nbf`/`aud`/`iss`/`sub` 验证以及明确的 token/claims/key 资源上限。
 
 ### Changed
 
@@ -77,6 +81,8 @@
   内部 panic。
 - 配置解析拒绝 JSON 根值后的尾随非空内容；INI section 构建遵守配置的嵌套深度上限；`.env` 插值
   变量名遵守 `[A-Za-z_][A-Za-z0-9_]*` 规则。
+- JWT 解码将空 payload 或空 signature 统一归类为 Header/三段结构错误，返回
+  `JwtError::InvalidHeader { field: "segments" }`，与其他三段结构错误保持一致。
 
 ### Security and compatibility
 
@@ -115,6 +121,11 @@
 - `TextEncoding` 的文本编解码严格失败，不做静默字符替换；`Gbk` 编码器无法输出 GB18030 的 4 字节
   序列，WHATWG 标准中 ISO-8859-1/Latin-1 映射为 `Windows1252`。
 - `.env` 的 `${VAR}` 插值优先使用文件中已解析的键，找不到时可选择性回退到进程环境变量（默认允许，
-  可通过 `ConfigLoader::with_env_substitution(false)` 关闭）；未定义变量返回错误而不会静默替换为
-  空字符串；本 crate 只读取文件与（可选）进程环境变量，不写入、不合并、不修改进程环境。这些语义与
-  `dotenv`/`dotenvy` 存在已知差异，不声称与其完全兼容。
+   可通过 `ConfigLoader::with_env_substitution(false)` 关闭）；未定义变量返回错误而不会静默替换为
+   空字符串；本 crate 只读取文件与（可选）进程环境变量，不写入、不合并、不修改进程环境。这些语义与
+   `dotenv`/`dotenvy` 存在已知差异，不声称与其完全兼容。
+- JWT 的 Header 只允许固定的 `typ`/`alg`，不支持 `none`、算法降级、动态 key 路由或 JWE 加密；
+  claims 在签名验证前后均受重复键、深度、成员、数组元素和大小限制。`JwtError`、key、config 和
+  全局 codec 不回显 token、claims、secret、PEM、私钥或第三方原始错误；全局 key 与进程同寿命且
+  不支持 reset、轮换、JWKS、撤销、黑名单或重放保护。`jwt` 自身只启用 `rust_crypto` backend；
+  通过 feature unification 引入第二个 jsonwebtoken backend 的 provider 竞争不在本 crate 保证范围内。

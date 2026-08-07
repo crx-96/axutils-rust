@@ -10,6 +10,7 @@
 //! `base64`/`md5`/`aes` feature，`encoding_rs` 为 `TextEncoding` 追加 legacy 编码变体。AES
 //! 静态入口在 `aes` feature 下需要先初始化一次进程级密钥与模式；多密钥或可控生命周期场景
 //! 应使用 `crate::AesCipher` 实例。
+//! JWT 的一次初始化全局入口需要 `jwt` feature；它只转发到 `crate::jwt` 的固定 codec。
 
 #[cfg(feature = "rand")]
 pub mod random_utils;
@@ -26,6 +27,9 @@ pub mod email_utils;
 
 #[cfg(feature = "serde")]
 pub mod config_utils;
+
+#[cfg(feature = "jwt")]
+pub mod jwt_utils;
 
 pub mod crypto_utils;
 
@@ -46,5 +50,8 @@ pub use email_utils::EmailUtils;
 
 #[cfg(feature = "serde")]
 pub use config_utils::ConfigUtils;
+
+#[cfg(feature = "jwt")]
+pub use jwt_utils::JwtUtils;
 
 pub use crypto_utils::CryptoUtils;

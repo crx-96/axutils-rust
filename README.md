@@ -155,6 +155,38 @@ axutils = { version = "0.1", features = ["encoding_rs"] }
 所有 feature 都可以同时启用；各后端仍须满足自己的组合前提。完整 API 和每个方法的可编译示例见
 下面对应的模块文档。
 
+## 使用 JWT
+
+启用独立的 `jwt` feature 后可使用固定算法的 JWS 签发/验证、泛型 claims 和一次初始化的
+`JwtUtils` 入口；它不会启用配置模块或其他 feature。JWT 签名只提供完整性和来源认证，不加密
+payload；全局 key 不支持 reset、replace 或热轮换。
+
+```toml
+[dependencies]
+axutils = { version = "0.1", features = ["jwt"] }
+serde = { version = "1", features = ["derive"] }
+```
+
+```rust
+# #[cfg(feature = "jwt")]
+# fn main() -> Result<(), axutils::JwtError> {
+use axutils::{JwtAlgorithm, JwtConfig, JwtSigningKey, JwtUtils, JwtValidation};
+
+let config = JwtConfig::new(
+    JwtAlgorithm::Hs256,
+    Some(JwtSigningKey::from_hmac_secret([0x11; 32])?),
+    None,
+    JwtValidation::new(),
+)?;
+let _ = (config, JwtUtils::is_initialized());
+# Ok(())
+# }
+# #[cfg(not(feature = "jwt"))]
+# fn main() {}
+```
+
+使用说明、key PEM/DER 格式、标准 claims 规则、完整导出路径和安全边界见 [JWT 使用文档](https://github.com/crx-96/axutils-rust/blob/main/docs/examples/jwt.md)。
+
 ## 使用 `PathUtils`
 
 `PathUtils` 提供平台相关的绝对路径判断、当前工作目录/可执行文件路径获取，以及不访问文件系统的

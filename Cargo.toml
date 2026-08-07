@@ -21,6 +21,7 @@ crate-type = ["lib"]
 
 [features]
 default = []
+jwt = ["dep:jsonwebtoken", "dep:serde", "dep:serde_json"]
 rand = ["dep:rand"]
 regex = ["dep:regex"]
 libphonenumber = ["dep:libphonenumber"]
@@ -41,6 +42,10 @@ aes = ["dep:aes", "dep:aes-gcm", "dep:cbc", "dep:zeroize"]
 encoding_rs = ["dep:encoding_rs"]
 
 [dependencies]
+jsonwebtoken = { version = "11.0.0", default-features = false, features = [
+    "rust_crypto",
+    "use_pem",
+], optional = true }
 rand = { version = "0.9", optional = true }
 regex = { version = "1", optional = true }
 libphonenumber = { package = "phonenumber", version = "0.3", optional = true }

@@ -80,8 +80,21 @@
 //! axutils = { version = "0.1", features = ["aes", "base64"] }
 //! ```
 
+//! JWT 能力需要显式启用 `jwt` feature。它提供固定算法的 JWS 签发/验证和泛型 claims；
+//! JWT payload 不是加密内容，`JwtUtils` 的全局入口只能成功初始化一次且不支持热轮换。
+//! 详细的算法、key 格式、claims 验证和安全边界见
+//! [`JWT 使用文档`](https://github.com/crx-96/axutils-rust/blob/main/docs/examples/jwt.md)。
+//!
+//! ```toml
+//! [dependencies]
+//! axutils = { version = "0.1", features = ["jwt"] }
+//! ```
+
 mod time;
 pub mod utils;
+
+#[cfg(feature = "jwt")]
+pub mod jwt;
 
 #[cfg(feature = "regex")]
 pub use utils::reg_utils;
@@ -136,6 +149,14 @@ pub mod crypto;
 pub use crypto::{CryptoError, TextEncoding};
 pub use utils::crypto_utils;
 pub use utils::CryptoUtils;
+
+#[cfg(feature = "jwt")]
+pub use jwt::{
+    JwtAlgorithm, JwtConfig, JwtError, JwtSigningKey, JwtValidation, JwtVerificationKey,
+};
+
+#[cfg(feature = "jwt")]
+pub use utils::JwtUtils;
 
 #[cfg(feature = "base64")]
 pub use crypto::{Base64Alphabet, Base64Options};

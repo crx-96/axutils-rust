@@ -1,0 +1,41 @@
+[package]
+name = "axutils-jwt-feature-matrix"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[features]
+none = []
+jwt-only = ["axutils/jwt"]
+serde-only = ["axutils/serde"]
+jwt-serde = ["axutils/jwt", "axutils/serde"]
+jwt-lettre = ["axutils/jwt", "axutils/lettre"]
+jwt-aes = ["axutils/jwt", "axutils/aes"]
+jwt-tokio = ["axutils/jwt", "axutils/tokio"]
+jwt-regex = ["axutils/jwt", "axutils/regex"]
+all = [
+    "axutils/jwt",
+    "axutils/serde",
+    "axutils/lettre",
+    "axutils/tokio",
+    "axutils/aes",
+    "axutils/regex",
+]
+
+negative-none-jwt-module = []
+negative-none-jwt-algorithm = []
+negative-none-jwt-signing-key = []
+negative-none-jwt-verification-key = []
+negative-none-jwt-config = []
+negative-none-jwt-validation = []
+negative-none-jwt-error = []
+negative-none-jwt-utils = []
+negative-none-utils-jwt-utils = []
+negative-none-direct-jwt-utils = []
+negative-serde-only-jwt-module = ["axutils/serde"]
+negative-jwt-only-config = ["axutils/jwt"]
+negative-jwt-only-config-loader = ["axutils/jwt"]
+
+[dependencies]
+axutils = { path = "../../..", default-features = false }
+serde = { version = "1", features = ["derive"] }

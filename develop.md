@@ -35,6 +35,18 @@
         └── crypto_utils.rs # CryptoUtils 静态入口（十六进制/TextEncoding 默认可用）
 ```
 
+JWT 子树：
+
+```text
+src/
++-- jwt/                  # JWS algorithm/key/config/claims/codec/error
++-- utils/
+    +-- jwt_utils.rs      # 一次初始化的 JwtUtils 全局转发
+```
+
+项目结构中 JWT 相关路径为 `src/jwt/`（算法、key、配置、Header、claims、clock、codec、错误）和
+`src/utils/jwt_utils.rs`（一次初始化的全局转发），均仅在 `jwt` feature 下编译。
+
 ## 本地开发
 
 项目当前最低支持 Rust 1.88，要求 Rust 工具链满足 `Cargo.toml` 中声明的
@@ -66,6 +78,12 @@ cargo check --no-default-features --features aes
 cargo check --no-default-features --features aes,base64
 cargo check --no-default-features --features base64,md5,aes,encoding_rs
 cargo test --no-default-features --features base64,md5,aes,encoding_rs
+cargo check --no-default-features --features jwt
+cargo test --no-default-features --features jwt
+cargo test --no-default-features --features jwt --test jwt_global -- --test-threads=1
+cargo test --no-default-features --features jwt --test feature_matrix
+cargo tree --no-default-features --features jwt -e normal,build
+cargo tree --no-default-features --features jwt -e normal,build,features
 cargo tree --no-default-features --features tokio -e normal,build
 cargo tree --no-default-features --features serde,tokio -e normal,build
 cargo tree --no-default-features --features tokio -e features
@@ -130,7 +148,7 @@ crate，与 `PathUtils` 同类）；`base64`/`md5`/`aes` 各自解锁对应算�
    cargo package --allow-dirty --list
    ```
 
-   输出应包含 `README.md`、`CHANGELOG.md`、`src/` 和 `docs/examples/`，逐项确认 8 份模块文档均在；
+   输出应包含 `README.md`、`CHANGELOG.md`、`src/` 和 `docs/examples/`，逐项确认 9 份模块文档均在；
    不应包含 `develop.md`、`AGENTS.md`、`CLAUDE.md`、`docs/plans/`、`docs/status/` 或 `docs/skills/`。
 
 6. 先执行发布 dry-run：
@@ -176,6 +194,7 @@ base64 = ["dep:base64"]
 md5 = ["dep:md5"]
 aes = ["dep:aes", "dep:aes-gcm", "dep:cbc", "dep:zeroize"]
 encoding_rs = ["dep:encoding_rs"]
+jwt = ["dep:jsonwebtoken", "dep:serde", "dep:serde_json"]
 ```
 
 调用方直接依赖 `axutils = "0.1"` 即可使用 `PathUtils` 和 `TimeUtils`；需要
@@ -220,3 +239,11 @@ dev-dependency。`lettre` 最低版本为经核验的 `0.11.22`，使用 Cargo �
 和 stable 环境中自行执行；当前仓库只提供不连接 SMTP relay 的测试和 feature/依赖边界验证，不会连接
 SMTP relay。`axutils` 是 library crate，不新增 Dockerfile；README 中的 Debian/Ubuntu 与 Alpine Docker
 内容只是消费方替换占位符后的说明性模板。
+
+JWT 使用 `jsonwebtoken 11.0.0` 的 `rust_crypto` 与 `use_pem` features，依赖声明为 optional，
+crate 自身不启用 `aws_lc_rs`。`jwt` feature 直接启用 `dep:jsonwebtoken`、`dep:serde` 和
+`dep:serde_json`，但不引用项目已有的 `serde` feature，因此仅启用 `jwt` 时不导出配置模块。
+JWT 的领域实现必须留在 `src/jwt/`，`src/utils/jwt_utils.rs` 只负责 `OnceLock` 生命周期和转发。
+`tests/fixtures/jwt_feature_matrix/` 负责公共路径与 feature 边界，`tests/jwt_codec.rs` 通过测试编译时
+源码模块复用覆盖 fixture 依赖的私有 codec/非对称算法，`tests/jwt_global.rs` 只有一个全局单例测试入口；
+fixture 和 `tests/` 不进入发布包。
