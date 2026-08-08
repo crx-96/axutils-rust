@@ -759,10 +759,10 @@ fn read_sync_response(
         if read == 0 {
             break;
         }
-        body.extend_from_slice(&buffer[..read]);
-        if body.len() > limit {
+        if read > limit.saturating_sub(body.len()) {
             return Err(AttemptError::Local(HttpError::ResponseTooLarge { limit }));
         }
+        body.extend_from_slice(&buffer[..read]);
     }
     Ok(HttpResponse::new(status, headers, body, attempts))
 }
@@ -792,10 +792,10 @@ async fn read_async_response(
         .await
         .map_err(|error| AttemptError::Transport(map_reqwest_error(&error)))?
     {
-        body.extend_from_slice(&chunk);
-        if body.len() > limit {
+        if chunk.len() > limit.saturating_sub(body.len()) {
             return Err(AttemptError::Local(HttpError::ResponseTooLarge { limit }));
         }
+        body.extend_from_slice(&chunk);
     }
     Ok(HttpResponse::new(status, headers, body, attempts))
 }

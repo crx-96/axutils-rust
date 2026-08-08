@@ -57,6 +57,9 @@ fn map_error(error: &serde_saphyr::Error, max_depth: usize) -> ConfigError {
 
     match classify_marker(&error.to_string()) {
         ErrorMarker::DepthLimitExceeded => ConfigError::DepthLimitExceeded { limit: max_depth },
+        ErrorMarker::DuplicateKey(key) => ConfigError::DuplicateKey {
+            key: key.to_owned(),
+        },
         ErrorMarker::ValueOutOfRange(key) => ConfigError::ValueOutOfRange {
             key: key.to_owned(),
         },

@@ -23,6 +23,9 @@ pub(crate) fn parse<T: DeserializeOwned>(text: &str) -> Result<T, ConfigError> {
 fn map_value_error(text: &str, error: &::toml::de::Error, max_depth: usize) -> ConfigError {
     match classify_marker(error.message()) {
         ErrorMarker::DepthLimitExceeded => ConfigError::DepthLimitExceeded { limit: max_depth },
+        ErrorMarker::DuplicateKey(key) => ConfigError::DuplicateKey {
+            key: key.to_owned(),
+        },
         ErrorMarker::ValueOutOfRange(key) => ConfigError::ValueOutOfRange {
             key: key.to_owned(),
         },
@@ -135,5 +138,26 @@ mod tests {
         let text = "a = 1\na = 2\n";
         let error = parse_value(text, 64).expect_err("duplicate key should fail");
         assert!(matches!(error, ConfigError::Parse { format: "toml", .. }));
+    }
+
+    #[test]
+    fn datetime_marker_does_not_discard_other_fields_in_the_same_table() {
+        let text =
+            "[metadata]\n\"!first\" = \"value\"\n\"$__toml_private_datetime\" = \"literal\"\n";
+        let value = parse_value(text, 64).expect("table should retain all fields");
+        let metadata = value
+            .get("metadata")
+            .and_then(|value| value.as_table())
+            .expect("metadata should remain a table");
+        assert_eq!(
+            metadata.get("!first").and_then(|value| value.as_str()),
+            Some("value")
+        );
+        assert_eq!(
+            metadata
+                .get("$__toml_private_datetime")
+                .and_then(|value| value.as_str()),
+            Some("literal")
+        );
     }
 }

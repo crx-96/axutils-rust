@@ -16,6 +16,8 @@ const MAX_DEPTH_CEILING: usize = 256;
 const TOML_DATETIME_FIELD: &str = "$__toml_private_datetime";
 
 const DEPTH_MARKER: &str = "\u{0}axutils:config:depth\u{0}";
+const DUPLICATE_KEY_MARKER_PREFIX: &str = "\u{0}axutils:config:duplicate:";
+const DUPLICATE_KEY_MARKER_SUFFIX: char = '\u{0}';
 const OUT_OF_RANGE_MARKER_PREFIX: &str = "\u{0}axutils:config:range:";
 const OUT_OF_RANGE_MARKER_SUFFIX: char = '\u{0}';
 
@@ -23,6 +25,8 @@ const OUT_OF_RANGE_MARKER_SUFFIX: char = '\u{0}';
 pub(crate) enum ErrorMarker<'a> {
     /// 超过深度上限。
     DepthLimitExceeded,
+    /// 同一作用域内出现重复键，附带重复键名。
+    DuplicateKey(&'a str),
     /// 整数超出 `i64` 可表示范围，附带触发字段的键名（可能为空）。
     ValueOutOfRange(&'a str),
     /// 不是本 crate 注入的标记，调用方应按后端自身的错误处理。
@@ -38,6 +42,22 @@ pub(crate) fn classify_marker(message: &str) -> ErrorMarker<'_> {
     if message.contains(DEPTH_MARKER) {
         return ErrorMarker::DepthLimitExceeded;
     }
+    if let Some(start) = message.find(DUPLICATE_KEY_MARKER_PREFIX) {
+        let rest = &message[start + DUPLICATE_KEY_MARKER_PREFIX.len()..];
+        if let Some(separator) = rest.find(':') {
+            let key_start = separator + 1;
+            if let Ok(key_length) = rest[..separator].parse::<usize>() {
+                if let Some(key_end) = key_start.checked_add(key_length) {
+                    if key_end <= rest.len()
+                        && rest.is_char_boundary(key_end)
+                        && rest[key_end..].starts_with(DUPLICATE_KEY_MARKER_SUFFIX)
+                    {
+                        return ErrorMarker::DuplicateKey(&rest[key_start..key_end]);
+                    }
+                }
+            }
+        }
+    }
     if let Some(start) = message.find(OUT_OF_RANGE_MARKER_PREFIX) {
         let rest = &message[start + OUT_OF_RANGE_MARKER_PREFIX.len()..];
         if let Some(end) = rest.find(OUT_OF_RANGE_MARKER_SUFFIX) {
@@ -49,6 +69,13 @@ pub(crate) fn classify_marker(message: &str) -> ErrorMarker<'_> {
 
 fn depth_limit_error<E: de::Error>() -> E {
     E::custom(DEPTH_MARKER)
+}
+
+pub(crate) fn duplicate_key_error_for_deserializer<E: de::Error>(key: &str) -> E {
+    E::custom(format!(
+        "{DUPLICATE_KEY_MARKER_PREFIX}{}:{key}{DUPLICATE_KEY_MARKER_SUFFIX}",
+        key.len()
+    ))
 }
 
 fn out_of_range_error<E: de::Error>(key: &str) -> E {
@@ -398,9 +425,8 @@ impl<'de> Visitor<'de> for ConfigValueVisitor {
 
         let mut table = BTreeMap::new();
         while let Some(key) = map.next_key::<String>()? {
-            if self.detect_toml_datetime && key == TOML_DATETIME_FIELD {
-                let raw: String = map.next_value()?;
-                return Ok(ConfigValue::String(raw));
+            if table.contains_key(&key) {
+                return Err(duplicate_key_error_for_deserializer(&key));
             }
             let value = map.next_value_seed(ConfigValueSeed {
                 remaining_depth,
@@ -408,6 +434,15 @@ impl<'de> Visitor<'de> for ConfigValueVisitor {
                 detect_toml_datetime: self.detect_toml_datetime,
             })?;
             table.insert(key, value);
+        }
+
+        // `toml_datetime` exposes a datetime as a one-field pseudo-table. Consume the
+        // complete map before converting it so a user table containing the marker together
+        // with another field cannot cause the already-read fields to be discarded.
+        if self.detect_toml_datetime && table.len() == 1 {
+            if let Some(ConfigValue::String(raw)) = table.remove(TOML_DATETIME_FIELD) {
+                return Ok(ConfigValue::String(raw));
+            }
         }
         Ok(ConfigValue::Table(table))
     }
