@@ -168,7 +168,7 @@ fn sync_serde_methods_encode_queries_bodies_and_decode_json_or_bytes() {
                 .expect("accept header")
                 .with_timeout(Duration::from_secs(1))
                 .expect("timeout")
-                .with_max_retries(0)
+                .with_max_retries(1)
                 .expect("retry count"),
         )
     };
@@ -239,6 +239,43 @@ fn sync_serde_methods_encode_queries_bodies_and_decode_json_or_bytes() {
             .expect("PATCH JSON"),
         serde_json::json!({"value": "payload"})
     );
+}
+
+#[test]
+fn serde_shortcuts_validate_missing_base_urls_and_prefer_absolute_urls() {
+    let no_base_client = HttpClient::new(HttpConfig::default()).expect("client");
+    let error = no_base_client
+        .get::<Reply, _>("/relative", None::<()>, None)
+        .expect_err("relative URL without base URL must fail");
+    assert_eq!(error, axutils::HttpError::InvalidUrl);
+
+    let (address, requests, server) = spawn_server(2);
+    let absolute_url = format!("{address}/absolute");
+    let reply: Reply = no_base_client
+        .get(absolute_url.clone(), None::<()>, None)
+        .expect("absolute URL without base URL");
+    assert_eq!(reply, Reply { ok: true });
+
+    let configured_client = HttpClient::new(
+        HttpConfig::builder()
+            .base_url("http://127.0.0.1:1/")
+            .expect("base URL")
+            .build()
+            .expect("config"),
+    )
+    .expect("client");
+    let reply: Reply = configured_client
+        .get(absolute_url, None::<()>, None)
+        .expect("absolute URL must take precedence over base URL");
+    assert_eq!(reply, Reply { ok: true });
+
+    server.join().expect("server thread");
+    let requests = requests
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    assert_eq!(requests.len(), 2);
+    assert!(request_line(&requests[0]).starts_with("GET /absolute HTTP/1.1"));
+    assert!(request_line(&requests[1]).starts_with("GET /absolute HTTP/1.1"));
 }
 
 #[test]

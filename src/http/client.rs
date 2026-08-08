@@ -258,7 +258,7 @@ impl HttpClient {
                 Ok(response) => {
                     let status = response.status().as_u16();
                     if prepared.retry_policy.can_retry_method(&prepared.method)
-                        && retries < prepared.retry_policy.max_retries()
+                        && attempts < prepared.retry_policy.max_retries()
                         && prepared.retry_policy.should_retry_status(status)
                     {
                         drop(response);
@@ -275,7 +275,7 @@ impl HttpClient {
                         Err(AttemptError::Local(error)) => return Err(error),
                         Err(AttemptError::Transport(kind)) => {
                             if prepared.retry_policy.can_retry_method(&prepared.method)
-                                && retries < prepared.retry_policy.max_retries()
+                                && attempts < prepared.retry_policy.max_retries()
                             {
                                 retries += 1;
                                 self.wait_for_retry(
@@ -290,7 +290,7 @@ impl HttpClient {
                                 kind,
                                 attempts,
                                 !prepared.retry_policy.can_retry_method(&prepared.method)
-                                    || retries >= prepared.retry_policy.max_retries(),
+                                    || attempts >= prepared.retry_policy.max_retries(),
                             ));
                         }
                     }
@@ -298,7 +298,7 @@ impl HttpClient {
                 Err(AttemptError::Local(error)) => return Err(error),
                 Err(AttemptError::Transport(kind)) => {
                     if prepared.retry_policy.can_retry_method(&prepared.method)
-                        && retries < prepared.retry_policy.max_retries()
+                        && attempts < prepared.retry_policy.max_retries()
                     {
                         retries += 1;
                         self.wait_for_retry(&prepared.retry_policy, retries, deadline, attempts)?;
@@ -308,7 +308,7 @@ impl HttpClient {
                         kind,
                         attempts,
                         !prepared.retry_policy.can_retry_method(&prepared.method)
-                            || retries >= prepared.retry_policy.max_retries(),
+                            || attempts >= prepared.retry_policy.max_retries(),
                     ));
                 }
             }
@@ -396,7 +396,7 @@ impl HttpClient {
                 Ok(response) => {
                     let status = response.status().as_u16();
                     if prepared.retry_policy.can_retry_method(&prepared.method)
-                        && retries < prepared.retry_policy.max_retries()
+                        && attempts < prepared.retry_policy.max_retries()
                         && prepared.retry_policy.should_retry_status(status)
                     {
                         drop(response);
@@ -421,7 +421,7 @@ impl HttpClient {
                         Err(AttemptError::Local(error)) => return Err(error),
                         Err(AttemptError::Transport(kind)) => {
                             if prepared.retry_policy.can_retry_method(&prepared.method)
-                                && retries < prepared.retry_policy.max_retries()
+                                && attempts < prepared.retry_policy.max_retries()
                             {
                                 retries += 1;
                                 self.wait_for_retry_async(
@@ -437,7 +437,7 @@ impl HttpClient {
                                 kind,
                                 attempts,
                                 !prepared.retry_policy.can_retry_method(&prepared.method)
-                                    || retries >= prepared.retry_policy.max_retries(),
+                                    || attempts >= prepared.retry_policy.max_retries(),
                             ));
                         }
                     }
@@ -445,7 +445,7 @@ impl HttpClient {
                 Err(AttemptError::Local(error)) => return Err(error),
                 Err(AttemptError::Transport(kind)) => {
                     if prepared.retry_policy.can_retry_method(&prepared.method)
-                        && retries < prepared.retry_policy.max_retries()
+                        && attempts < prepared.retry_policy.max_retries()
                     {
                         retries += 1;
                         self.wait_for_retry_async(
@@ -461,7 +461,7 @@ impl HttpClient {
                         kind,
                         attempts,
                         !prepared.retry_policy.can_retry_method(&prepared.method)
-                            || retries >= prepared.retry_policy.max_retries(),
+                            || attempts >= prepared.retry_policy.max_retries(),
                     ));
                 }
             }

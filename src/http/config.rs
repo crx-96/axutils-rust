@@ -275,6 +275,9 @@ impl fmt::Debug for HttpConfigBuilder {
 
 impl HttpConfigBuilder {
     /// 设置相对请求解析使用的 HTTP/HTTPS 基地址。
+    ///
+    /// 不调用此方法时基地址保持为空；此时请求仍可使用完整的绝对 HTTP/HTTPS URL，
+    /// 但相对 URL 会在执行时返回 [`HttpError::InvalidUrl`]。
     pub fn base_url(mut self, value: impl AsRef<str>) -> Result<Self, HttpError> {
         let url = Url::parse(value.as_ref()).map_err(|_| HttpError::InvalidUrl)?;
         validate_absolute_url(&url)?;
@@ -361,6 +364,10 @@ impl HttpConfigBuilder {
     }
 
     /// 完成并校验配置。
+    ///
+    /// 所有 builder 字段都是可选的。未设置时使用有限默认值：请求总超时 30 秒、连接
+    /// 超时 10 秒、请求/响应体上限 1 MiB、空闲连接超时 60 秒，以及包含首次请求在内的
+    /// 3 次最大网络尝试。未设置 `base_url` 时只允许执行绝对 URL。
     pub fn build(self) -> Result<HttpConfig, HttpError> {
         let request_timeout = self.request_timeout.unwrap_or(Duration::from_secs(30));
         let connect_timeout = self

@@ -5,13 +5,13 @@ use std::time::Duration;
 use super::error::HttpError;
 use super::request::HttpMethod;
 
-const MAX_RETRIES: u32 = 16;
+const MAX_ATTEMPTS: u32 = 16;
 const MAX_DELAY: Duration = Duration::from_secs(60);
 
 /// 请求重试策略。
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct RetryPolicy {
-    max_retries: u32,
+    max_attempts: u32,
     base_delay: Duration,
     max_delay: Duration,
     statuses: Vec<u16>,
@@ -21,7 +21,7 @@ pub struct RetryPolicy {
 impl Default for RetryPolicy {
     fn default() -> Self {
         Self {
-            max_retries: 3,
+            max_attempts: 3,
             base_delay: Duration::from_millis(100),
             max_delay: Duration::from_secs(2),
             statuses: vec![408, 425, 429, 500, 502, 503, 504],
@@ -36,14 +36,16 @@ impl RetryPolicy {
         Self::default()
     }
 
-    /// 设置额外重试次数。总网络尝试次数为 `max_retries + 1`。
-    pub fn with_max_retries(mut self, max_retries: u32) -> Result<Self, HttpError> {
-        if max_retries > MAX_RETRIES {
+    /// 设置一次调用允许的最大总网络尝试次数，包括首次请求。
+    ///
+    /// `1` 表示只发送首次请求并禁用自动重试；默认值为 `3`，不是三次额外重试。
+    pub fn with_max_retries(mut self, max_attempts: u32) -> Result<Self, HttpError> {
+        if !(1..=MAX_ATTEMPTS).contains(&max_attempts) {
             return Err(HttpError::InvalidConfig {
                 field: "max_retries",
             });
         }
-        self.max_retries = max_retries;
+        self.max_attempts = max_attempts;
         Ok(self)
     }
 
@@ -88,9 +90,11 @@ impl RetryPolicy {
         self
     }
 
-    /// 返回额外重试次数。
+    /// 返回一次调用允许的最大总网络尝试次数，包括首次请求。
+    ///
+    /// 方法名沿用 `max_retries` 以保持现有 API 路径；返回值不是额外重试次数。
     pub fn max_retries(&self) -> u32 {
-        self.max_retries
+        self.max_attempts
     }
 
     /// 返回初始退避时间。

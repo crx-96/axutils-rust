@@ -357,9 +357,13 @@ client.send(message)?;
 
 ## 使用 HTTP 能力
 
-启用 `http` 后可使用同步 `HttpClient`；异步入口需要同时启用 `tokio`，并由应用提供 runtime。
+启用 `http` 后可使用同步 `HttpClient`；`HttpConfig::default()` 或
+`HttpConfig::builder().build()` 可以不传 `base_url`、超时和重试配置，异步入口需要同时启用
+`tokio`，并由应用提供 runtime。
 客户端默认不读取系统代理、不跟随重定向、不协商压缩，也不会隐式重试非幂等方法；请求和响应均有
-有限大小与总时间预算。下面的 `no_run` 示例只编译，不会访问网络：
+有限大小与总时间预算。默认最多进行 3 次网络尝试（包括首次请求），设置为 1 可禁用自动重试。
+不配置 `base_url` 时只能使用绝对 HTTP/HTTPS URL；配置了 `base_url` 时，请求自身的绝对 URL 优先。
+下面的 `no_run` 示例只编译，不会访问网络：
 
 ```rust,no_run
 # #[cfg(feature = "http")]

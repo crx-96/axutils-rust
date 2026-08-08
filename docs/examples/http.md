@@ -56,14 +56,15 @@ HTTP 模块可从以下路径访问：
 
 ## 安全默认值和执行语义
 
-- 只接受 `http` 和 `https`，拒绝 URL 用户信息、片段、控制字符和不安全的 scheme；相对 URL
-  必须通过 `HttpConfig::builder().base_url(...)` 提供基地址。
+- 只接受 `http` 和 `https`，拒绝 URL 用户信息、片段、控制字符和不安全的 scheme；不设置
+  `base_url` 时仍可执行完整的绝对 URL，相对 URL 会返回 `HttpError::InvalidUrl`。如果同时
+  设置了 `base_url`，请求自身的绝对 URL 仍优先于配置基地址。
 - Header 名称必须是 HTTP token，值拒绝控制字符；Header 数量、单值和总大小均有限制。
   `Authorization`、`Cookie` 和 `Set-Cookie` 不允许通过公开 `append` 形成重复项，默认 Header
   与请求 Header 发生敏感冲突时返回错误。
 - 默认请求总时间预算为 30 秒、连接预算为 10 秒、请求体和响应体上限均为 1 MiB。
-  `max_retries` 表示额外尝试次数，默认值 3，因此默认最多 4 次网络尝试；退避是有限的指数
-  退避，不带随机抖动且受总时间预算约束。
+  `max_retries` 沿用现有方法名，但表示包括首次请求在内的最大总网络尝试次数；默认值为 3，
+  `1` 表示禁用自动重试。退避是有限的指数退避，不带随机抖动且受总时间预算约束。
 - 默认只对无体 `GET`、`HEAD`、`OPTIONS` 做 single-flight。`POST`、`PUT`、`PATCH`、
   `DELETE` 和带体请求只有在请求级显式设置去重策略后才允许合并。leader 取消或异常退出时，
   follower 收到 `CoalescedRequestCancelled`；follower 自己超时不会取消 leader。
@@ -298,9 +299,10 @@ assert_eq!(method.to_string(), "PATCH");
 
 ## `RetryPolicy`
 
-`RetryPolicy` 实现 `Clone + Debug + Eq + Hash + PartialEq`。默认值为 3 次额外重试、100 ms 初始
-退避、2 s 最大退避和状态码 `408/425/429/500/502/503/504`；延迟没有随机抖动，且最终受请求
-总时间预算约束。`max_retries` 是额外次数，不是总尝试次数。
+`RetryPolicy` 实现 `Clone + Debug + Eq + Hash + PartialEq`。默认值为最多 3 次总网络尝试、100 ms
+初始退避、2 s 最大退避和状态码 `408/425/429/500/502/503/504`；延迟没有随机抖动，且最终受
+请求总时间预算约束。`max_retries` 方法名沿用现有 API，但参数和返回值均表示总尝试次数，包括首次请求。
+传入 `1` 可禁用自动重试。
 
 ### `RetryPolicy::new`
 
@@ -558,8 +560,9 @@ let _ = policy.max_cached_body_bytes();
 
 ## `HttpConfig` 和 `HttpConfigBuilder`
 
-`HttpConfig` 实现 `Clone + Debug + Default + Eq + PartialEq`。默认配置没有基地址，因而只能执行
-绝对 URL 请求；配置错误发生在构造阶段，不会写入全局 `OnceLock`。`Debug` 不显示基地址本身，
+`HttpConfig` 实现 `Clone + Debug + Default + Eq + PartialEq`。默认配置没有基地址，因而只能执行绝对
+URL 请求；对相对 URL 返回 `InvalidUrl`。如果配置了基地址，请求自身的绝对 URL 仍优先。配置错误
+发生在构造阶段，不会写入全局 `OnceLock`。`Debug` 不显示基地址本身，
 只显示是否配置；默认 Header 值也不显示。
 
 ### `HttpConfig::builder`
@@ -575,6 +578,9 @@ let _ = builder;
 ```
 
 ### `HttpConfigBuilder::base_url`
+
+此方法是可选的。不调用时基地址为 `None`，绝对 HTTP/HTTPS URL 仍可直接执行，相对 URL
+会在执行时返回 `HttpError::InvalidUrl`；即使调用了此方法，请求自身的绝对 URL 仍优先。
 
 ```rust
 # #[cfg(feature = "http")]
@@ -724,6 +730,9 @@ let _ = builder;
 ```
 
 ### `HttpConfigBuilder::build`
+
+所有配置项都可以省略。空 builder 会填充有限默认值：请求总超时 30 秒、连接超时 10 秒、
+请求/响应体上限 1 MiB、空闲连接超时 60 秒，以及包括首次请求在内的最多 3 次网络尝试。
 
 ```rust
 # #[cfg(feature = "http")]
@@ -1405,8 +1414,9 @@ assert_eq!(client.config().max_request_body_bytes(), 1024 * 1024);
 
 ### `HttpClient::execute`
 
-同步入口可执行绝对 URL；相对 URL 需要配置基地址。如果启用了 `tokio` feature，当前线程
-位于 runtime 时同步入口返回 `BlockingInAsyncRuntime`。
+同步入口可执行绝对 URL；没有基地址时相对 URL 返回 `InvalidUrl`，配置了基地址时相对 URL
+按基地址解析，而请求自身的绝对 URL 优先。如果启用了 `tokio` feature，当前线程位于 runtime
+时同步入口返回 `BlockingInAsyncRuntime`。
 
 ```rust,no_run
 # #[cfg(feature = "http")]
@@ -2476,7 +2486,8 @@ async fn main() -> Result<(), axutils::HttpError> {
 
 HttpRequestOptions 是三参数 JSON/字节快捷方法的第三个参数。它只覆盖当前调用的 Header、
 timeout、RetryPolicy 和 DeduplicationPolicy；普通 Header 未提供时继续使用客户端配置，敏感
-Header 与客户端默认值冲突时返回 `DuplicateSensitiveHeader`。它实现
+Header 与客户端默认值冲突时返回 `DuplicateSensitiveHeader`。其中 `with_max_retries` 的值是
+包括首次请求在内的最大总尝试次数，`1` 表示不重试。它实现
 Clone + Debug + Default + Eq + PartialEq，Debug 不显示 Header 值。
 
 ### HttpRequestOptions::new

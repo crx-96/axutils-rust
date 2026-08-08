@@ -74,6 +74,13 @@
 
 ### Changed
 
+- HTTP 配置 builder 的字段均可省略；`HttpConfig::default()` 和空 builder 可以直接构造配置，
+  默认提供 30 秒请求总超时、10 秒连接超时和最多 3 次（包括首次请求）网络尝试。未设置
+  `base_url` 时，相对 URL 会返回 `HttpError::InvalidUrl`；即使配置了基地址，请求自身的绝对
+  HTTP/HTTPS URL 也始终优先。
+- `RetryPolicy::with_max_retries`、`RetryPolicy::max_retries` 和
+  `HttpRequestOptions::with_max_retries` 的数值语义改为“包括首次请求的最大总网络尝试次数”，
+  方法名保持不变以兼容现有调用路径；默认值为 3，设置为 1 表示不自动重试，0 不再是有效值。
 - `CryptoUtils` 的 8 个 AES 方法改为使用一次初始化的进程级密钥与模式，不再接受显式密钥/模式
   参数；这是破坏性 API 变更。多密钥、多模式或需要可控 `Drop` 清零的调用方应迁移到
   `AesCipher` 实例，或在进程启动时调用 `aes_init`/`aes_init_from_bytes` 后使用新的无密钥参数

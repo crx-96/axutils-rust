@@ -91,10 +91,12 @@
 //! ```
 
 //! HTTP 能力需要显式启用 `http` feature；它提供关闭代理、重定向、压缩和隐式重试的
-//! 同步客户端。若同时启用 `tokio`，还会提供异步执行入口；调用方必须自行提供 Tokio
-//! runtime。再显式启用 `serde` 后，`HttpClient`/`HttpUtils` 提供 URL、可选 query 或
-//! JSON body、可选单次配置的三参数快捷方法，默认返回 JSON，并以 `*_bytes` 返回原始字节。
-//! 请求去重、完成缓存、重试策略和大小限制均通过 `HttpConfig` 显式配置。
+//! 同步客户端。`HttpConfig` 的 `base_url`、超时和重试配置均可省略；不设置 `base_url` 时
+//! 只能使用绝对 HTTP/HTTPS URL，配置了 `base_url` 时请求自身的绝对 URL 优先。默认最多
+//! 进行 3 次网络尝试（包括首次请求）。若同时启用 `tokio`，还会提供异步执行入口；调用方
+//! 必须自行提供 Tokio runtime。再显式启用 `serde` 后，`HttpClient`/`HttpUtils` 提供 URL、可选
+//! query 或 JSON body、可选单次配置的三参数快捷方法，默认返回 JSON，并以 `*_bytes` 返回原始
+//! 字节。请求去重、完成缓存、重试策略和大小限制均通过 `HttpConfig` 显式配置。
 //! 详细 API、feature 矩阵和安全边界见 [`HTTP 使用文档`](https://github.com/crx-96/axutils-rust/blob/main/docs/examples/http.md)。
 //!
 //! ```toml

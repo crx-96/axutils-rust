@@ -106,13 +106,18 @@ fn sync_returns_http_errors_as_responses_and_retries_transient_statuses() {
             delay: Duration::ZERO,
         },
         TestResponse {
+            status: 503,
+            body: b"temporary",
+            delay: Duration::ZERO,
+        },
+        TestResponse {
             status: 200,
             body: b"ok",
             delay: Duration::ZERO,
         },
     ]);
     let retry = RetryPolicy::new()
-        .with_max_retries(1)
+        .with_max_retries(3)
         .expect("retry count")
         .with_backoff(Duration::from_millis(1), Duration::from_millis(2))
         .expect("backoff");
@@ -131,7 +136,77 @@ fn sync_returns_http_errors_as_responses_and_retries_transient_statuses() {
 
     assert_eq!(response.status(), 200);
     assert_eq!(response.text().expect("UTF-8 response"), "ok");
-    assert_eq!(response.attempts(), 2);
+    assert_eq!(response.attempts(), 3);
+    server.join().expect("server thread");
+}
+
+#[test]
+fn default_config_requires_absolute_urls_without_a_base_url() {
+    let config = HttpConfig::builder().build().expect("default config");
+    assert_eq!(config.base_url(), None);
+    assert_eq!(config.request_timeout(), Duration::from_secs(30));
+    assert_eq!(config.connect_timeout(), Duration::from_secs(10));
+    assert_eq!(config.retry_policy().max_retries(), 3);
+    assert_eq!(
+        RetryPolicy::new().with_max_retries(0),
+        Err(HttpError::InvalidConfig {
+            field: "max_retries"
+        })
+    );
+
+    let error = HttpClient::new(config)
+        .expect("client")
+        .execute(HttpRequest::new(HttpMethod::Get, "/relative").expect("request"))
+        .expect_err("relative URL without base URL must fail");
+    assert_eq!(error, HttpError::InvalidUrl);
+}
+
+#[test]
+fn one_total_attempt_disables_automatic_retries() {
+    let (address, server) = spawn_server(vec![TestResponse {
+        status: 503,
+        body: b"one attempt",
+        delay: Duration::ZERO,
+    }]);
+    let retry = RetryPolicy::new()
+        .with_max_retries(1)
+        .expect("one total attempt");
+    let config = HttpConfig::builder()
+        .base_url(&address)
+        .expect("base URL")
+        .retry_policy(retry)
+        .build()
+        .expect("config");
+    let response = HttpClient::new(config)
+        .expect("client")
+        .execute(HttpRequest::new(HttpMethod::Get, "/one-attempt").expect("request"))
+        .expect("final HTTP response");
+
+    assert_eq!(response.status(), 503);
+    assert_eq!(response.attempts(), 1);
+    server.join().expect("server thread");
+}
+
+#[test]
+fn absolute_request_url_takes_precedence_over_configured_base_url() {
+    let (address, server) = spawn_server(vec![TestResponse {
+        status: 200,
+        body: b"absolute",
+        delay: Duration::ZERO,
+    }]);
+    let config = HttpConfig::builder()
+        .base_url("http://127.0.0.1:1/")
+        .expect("base URL")
+        .build()
+        .expect("config");
+    let response = HttpClient::new(config)
+        .expect("client")
+        .execute(
+            HttpRequest::new(HttpMethod::Get, format!("{address}/absolute"))
+                .expect("absolute request"),
+        )
+        .expect("absolute URL should be used");
+    assert_eq!(response.body(), b"absolute");
     server.join().expect("server thread");
 }
 
@@ -359,6 +434,38 @@ async fn sync_entry_rejects_tokio_runtime_and_async_entry_works() {
     ));
     let response = client.execute_async(request).await.expect("async response");
     assert_eq!(response.body(), b"async");
+    server.join().expect("server thread");
+}
+
+#[cfg(feature = "tokio")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn async_retry_attempt_count_includes_initial_request() {
+    let (address, server) = spawn_server(vec![
+        TestResponse {
+            status: 503,
+            body: b"temporary",
+            delay: Duration::ZERO,
+        },
+        TestResponse {
+            status: 503,
+            body: b"temporary",
+            delay: Duration::ZERO,
+        },
+        TestResponse {
+            status: 200,
+            body: b"async-ok",
+            delay: Duration::ZERO,
+        },
+    ]);
+    let client = client(&address);
+    let response = client
+        .execute_async(HttpRequest::new(HttpMethod::Get, "/async-retry").expect("request"))
+        .await
+        .expect("async response");
+
+    assert_eq!(response.status(), 200);
+    assert_eq!(response.body(), b"async-ok");
+    assert_eq!(response.attempts(), 3);
     server.join().expect("server thread");
 }
 

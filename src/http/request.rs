@@ -228,7 +228,7 @@ impl HttpRequest {
         let resolved = match &self.target {
             RequestTarget::Absolute(url) => url.clone(),
             RequestTarget::Relative(value) => base_url
-                .ok_or(HttpError::InvalidRequest { field: "base_url" })?
+                .ok_or(HttpError::InvalidUrl)?
                 .join(value)
                 .map_err(|_| HttpError::InvalidUrl)?,
         };
