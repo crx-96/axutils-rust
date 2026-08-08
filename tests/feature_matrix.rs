@@ -57,6 +57,52 @@ fn verifies_feature_api_matrix_and_dependency_boundaries() {
 }
 
 #[test]
+fn verifies_http_feature_api_matrix_and_dependency_boundaries() {
+    let fixture_manifest = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("fixtures")
+        .join("http_feature_matrix")
+        .join("Cargo.toml");
+    let target_dir = unique_target("axutils-http-feature-matrix");
+
+    for (feature, expected_success, diagnostic_token) in [
+        ("", true, ""),
+        ("tokio-only", true, ""),
+        ("http", true, ""),
+        ("http-tokio", true, ""),
+        ("serde-only", true, ""),
+        ("http-serde", true, ""),
+        ("http-tokio-serde", true, ""),
+        ("negative-http-module", false, "http"),
+        ("negative-http-client", false, "httpclient"),
+        ("negative-http-utils", false, "httputils"),
+        ("negative-http-tokio-module", false, "http"),
+        ("negative-http-tokio-client", false, "httpclient"),
+        ("negative-http-tokio-utils", false, "httputils"),
+        ("negative-http-async", false, "execute_async"),
+        ("negative-http-serde", false, "get"),
+        ("negative-http-tokio-serde", false, "get_async"),
+    ] {
+        let output = run_fixture(&fixture_manifest, &target_dir.0, feature);
+        if expected_success {
+            assert!(
+                output.status.success(),
+                "HTTP fixture feature `{feature}` should compile successfully: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        } else {
+            assert!(
+                !output.status.success(),
+                "HTTP fixture feature `{feature}` should fail to compile"
+            );
+            assert_expected_diagnostic(&output, diagnostic_token, feature);
+        }
+    }
+
+    assert_http_dependency_boundaries();
+}
+
+#[test]
 fn verifies_format_template_feature_api_matrix() {
     let fixture_manifest = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests")
@@ -500,6 +546,45 @@ fn assert_dependency_boundaries() {
     assert!(has_package(&combined_tree, "ring"));
     assert!(has_package(&combined_tree, "webpki-roots"));
     assert_forbidden_tls_packages(&combined_tree);
+}
+
+fn assert_http_dependency_boundaries() {
+    let no_feature_tree = cargo_tree("");
+    assert!(!has_package(&no_feature_tree, "ureq"));
+    assert!(!has_package(&no_feature_tree, "reqwest"));
+    assert!(!has_package(&no_feature_tree, "url"));
+
+    let tokio_tree = cargo_tree("tokio");
+    assert!(has_package(&tokio_tree, "tokio"));
+    assert!(!has_package(&tokio_tree, "ureq"));
+    assert!(!has_package(&tokio_tree, "reqwest"));
+
+    let http_tree = cargo_tree("http");
+    assert!(has_package(&http_tree, "ureq"));
+    assert!(has_package(&http_tree, "reqwest"));
+    assert!(has_package(&http_tree, "url"));
+    assert!(!has_package(&http_tree, "lettre"));
+    assert_forbidden_tls_packages(&http_tree);
+
+    let http_tokio_tree = cargo_tree("http,tokio");
+    assert!(has_package(&http_tokio_tree, "ureq"));
+    assert!(has_package(&http_tokio_tree, "reqwest"));
+    assert!(has_package(&http_tokio_tree, "tokio"));
+    assert!(!has_package(&http_tokio_tree, "lettre"));
+    assert_forbidden_tls_packages(&http_tokio_tree);
+
+    let http_serde_tree = cargo_tree("http,serde");
+    assert!(has_package(&http_serde_tree, "ureq"));
+    assert!(has_package(&http_serde_tree, "reqwest"));
+    assert!(has_package(&http_serde_tree, "serde"));
+    assert!(has_package(&http_serde_tree, "serde_json"));
+    assert!(has_package(&http_serde_tree, "serde_urlencoded"));
+
+    let http_feature_tree = cargo_tree_with_edges("http", "normal,build,features");
+    assert!(http_feature_tree.contains("ureq feature \"rustls\""));
+    assert!(http_feature_tree.contains("reqwest feature \"rustls-tls-webpki-roots\""));
+    assert!(!http_feature_tree.contains("ureq feature \"gzip\""));
+    assert!(!http_feature_tree.contains("reqwest feature \"native-tls\""));
 }
 
 fn assert_jwt_dependency_boundaries() {

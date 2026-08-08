@@ -25,13 +25,14 @@ jwt = ["dep:jsonwebtoken", "dep:serde", "dep:serde_json"]
 rand = ["dep:rand"]
 regex = ["dep:regex"]
 libphonenumber = ["dep:libphonenumber"]
-serde = ["dep:serde", "dep:serde_json"]
+serde = ["dep:serde", "dep:serde_json", "dep:serde_urlencoded"]
 strfmt = ["dep:strfmt"]
 minijinja = ["dep:minijinja"]
 chrono = ["dep:chrono"]
 time = ["dep:time"]
 jiff = ["dep:jiff"]
 lettre = ["dep:lettre"]
+http = ["dep:ureq", "dep:reqwest", "dep:url"]
 tokio = ["dep:tokio", "lettre?/tokio1-rustls"]
 toml = ["dep:toml"]
 serde-saphyr = ["dep:serde-saphyr"]
@@ -51,6 +52,7 @@ regex = { version = "1", optional = true }
 libphonenumber = { package = "phonenumber", version = "0.3", optional = true }
 serde = { version = "1", features = ["derive"], optional = true }
 serde_json = { version = "1", optional = true }
+serde_urlencoded = { version = "0.7.1", optional = true }
 strfmt = { version = "0.2", optional = true }
 minijinja = { version = "2", default-features = false, features = ["serde"], optional = true }
 chrono = { version = "0.4.45", default-features = false, optional = true }
@@ -64,7 +66,10 @@ lettre = { version = "0.11.22", default-features = false, optional = true, featu
     "ring",
     "webpki-roots",
 ] }
-tokio = { version = "1.53.1", default-features = false, features = ["fs", "io-util"], optional = true }
+ureq = { version = "3.3.0", default-features = false, features = ["rustls"], optional = true }
+reqwest = { version = "0.12.24", default-features = false, features = ["rustls-tls-webpki-roots"], optional = true }
+url = { version = "2.5.8", default-features = false, features = ["std"], optional = true }
+tokio = { version = "1.53.1", default-features = false, features = ["fs", "io-util", "rt", "sync", "time"], optional = true }
 toml = { version = "1.1.4", default-features = false, features = ["parse", "serde", "std"], optional = true }
 serde-saphyr = { version = "1.0.0", default-features = false, features = ["deserialize"], optional = true }
 rust-ini = { version = "0.21.3", default-features = false, optional = true }

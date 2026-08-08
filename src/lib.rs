@@ -90,6 +90,27 @@
 //! axutils = { version = "0.1", features = ["jwt"] }
 //! ```
 
+//! HTTP 能力需要显式启用 `http` feature；它提供关闭代理、重定向、压缩和隐式重试的
+//! 同步客户端。若同时启用 `tokio`，还会提供异步执行入口；调用方必须自行提供 Tokio
+//! runtime。再显式启用 `serde` 后，`HttpClient`/`HttpUtils` 提供 URL、可选 query 或
+//! JSON body、可选单次配置的三参数快捷方法，默认返回 JSON，并以 `*_bytes` 返回原始字节。
+//! 请求去重、完成缓存、重试策略和大小限制均通过 `HttpConfig` 显式配置。
+//! 详细 API、feature 矩阵和安全边界见 [`HTTP 使用文档`](https://github.com/crx-96/axutils-rust/blob/main/docs/examples/http.md)。
+//!
+//! ```toml
+//! [dependencies]
+//! axutils = { version = "0.1", features = ["http"] }
+//!
+//! JSON/query/字节快捷方法需要：
+//!
+//! ~~~toml
+//! [dependencies]
+//! axutils = { version = "0.1", features = ["http", "serde"] }
+//! ~~~
+//!
+//! # 异步 HTTP 改为 features = ["http", "tokio"]。
+//! ```
+
 mod time;
 pub mod utils;
 
@@ -143,6 +164,19 @@ pub use config::{ConfigError, ConfigFormat, ConfigLoader, ConfigValue};
 
 #[cfg(feature = "serde")]
 pub use utils::ConfigUtils;
+
+#[cfg(feature = "http")]
+pub mod http;
+
+#[cfg(feature = "http")]
+pub use http::{
+    DeduplicationMode, DeduplicationPolicy, HttpClient, HttpConfig, HttpConfigBuilder, HttpError,
+    HttpHeaders, HttpMethod, HttpRequest, HttpRequestBuilder, HttpRequestOptions, HttpResponse,
+    HttpTransportErrorKind, RetryPolicy,
+};
+
+#[cfg(feature = "http")]
+pub use utils::HttpUtils;
 
 pub mod crypto;
 

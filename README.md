@@ -14,6 +14,11 @@
 邮件能力使用 Rustls 强制 SMTPS/STARTTLS，不提供明文或机会式降级；配置文件读取统一限制文件大小，
 错误不回显配置值。真实凭据只能由调用方在本地安全管理，不能硬编码或提交到 Git。
 
+HTTP 能力通过独立的 `http` feature 提供；默认关闭系统代理、自动重定向、自动压缩和隐式重试，
+并限制请求/响应体大小。需要三参数的 Serde JSON/query/字节快捷方法时再启用 `serde`；异步
+HTTP 还需要同时启用 `tokio`，且必须运行在调用方提供的 Tokio runtime 中。详细的请求、重试、
+去重、缓存和便捷方法边界见 HTTP 使用文档。
+
 ## 安装
 
 在项目的 `Cargo.toml` 中添加默认依赖：
@@ -100,7 +105,7 @@ tokio = { version = "1.53.1", features = ["macros", "rt-multi-thread"] }
 ```
 
 `axutils` 的 Tokio 依赖只提供异步文件 I/O 和邮件传输所需能力，不会创建 runtime 或调用
-`block_on`；只启用 `tokio` 不会导出邮件 API。
+`block_on`；只启用 `tokio` 不会导出邮件或 HTTP API。
 
 配置读取启用 `serde` 后提供 JSON 和 `.env`；YAML、TOML、INI 分别额外启用
 `serde-saphyr`、`toml`、`rust-ini`：
@@ -349,6 +354,66 @@ client.send(message)?;
 暂不支持，也不能通过关闭证书校验绕过；邮件凭据、授权码和真实收件地址不得写入源码或日志。
 
 完整示例与边界说明见 [Email 使用文档](https://github.com/crx-96/axutils-rust/blob/main/docs/examples/email.md)。
+
+## 使用 HTTP 能力
+
+启用 `http` 后可使用同步 `HttpClient`；异步入口需要同时启用 `tokio`，并由应用提供 runtime。
+客户端默认不读取系统代理、不跟随重定向、不协商压缩，也不会隐式重试非幂等方法；请求和响应均有
+有限大小与总时间预算。下面的 `no_run` 示例只编译，不会访问网络：
+
+```rust,no_run
+# #[cfg(feature = "http")]
+# fn main() -> Result<(), axutils::HttpError> {
+use axutils::{HttpClient, HttpConfig, HttpMethod, HttpRequest};
+
+let config = HttpConfig::builder()
+    .base_url("https://api.example.com/")?
+    .build()?;
+let client = HttpClient::new(config)?;
+let request = HttpRequest::new(HttpMethod::Get, "/health")?;
+let response = client.execute(request)?;
+assert!(response.status() >= 100);
+# Ok(())
+# }
+# #[cfg(not(feature = "http"))]
+# fn main() {}
+```
+
+`HttpUtils` 是一次初始化的全局便捷入口，不能 reset 或替换；异步执行仍要求 `http,tokio` 和已有
+runtime。HTTP 不承诺 SSRF 防护，调用方必须自行限制目标 URL、网络出口和业务认证信息。
+
+启用 `http,serde` 后可以用三个参数调用常用动词：URL、可选 query 或 JSON body、可选
+`HttpRequestOptions`。返回类型实现 `serde::Deserialize` 即可；默认按 JSON 解码，`*_bytes`
+方法返回原始字节。异步快捷方法需要 `http,serde,tokio`：
+
+~~~toml
+[dependencies]
+axutils = { version = "0.1", features = ["http", "serde"] }
+serde = { version = "1", features = ["derive"] }
+~~~
+
+~~~rust,no_run
+# #[cfg(all(feature = "http", feature = "serde"))]
+# fn main() -> Result<(), axutils::HttpError> {
+use axutils::{HttpClient, HttpConfig};
+use serde::Deserialize;
+
+#[derive(Deserialize)]
+struct Reply {
+    ok: bool,
+}
+
+let client = HttpClient::new(HttpConfig::default())?;
+let reply: Reply = client.get("https://api.example.com/health", None::<()>, None)?;
+assert!(reply.ok);
+let _bytes = client.get_bytes("https://api.example.com/image", None::<()>, None)?;
+# Ok(())
+# }
+# #[cfg(not(all(feature = "http", feature = "serde")))]
+# fn main() {}
+~~~
+
+完整 API、每个公开方法的示例、feature 矩阵和安全边界见 [HTTP 使用文档](https://github.com/crx-96/axutils-rust/blob/main/docs/examples/http.md)。
 
 ## 使用配置文件读取能力
 

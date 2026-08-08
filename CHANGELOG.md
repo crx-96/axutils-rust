@@ -60,6 +60,17 @@
   `JwtSigningKey`/`JwtVerificationKey`、`JwtConfig`、`JwtValidation`、脱敏 `JwtError` 和一次初始化的
   `JwtUtils`；支持 HS256/384/512、RS256/384/512、PS256/384/512、ES256/384 与 Ed25519，支持泛型
   claims、标准 `exp`/`nbf`/`aud`/`iss`/`sub` 验证以及明确的 token/claims/key 资源上限。
+- 新增独立 `http` feature 下的 HTTP 客户端能力：提供同步 `HttpClient`、`HttpUtils`、请求/响应、
+  Header、重试和去重策略类型；同步使用 Rustls `ureq`，同时启用 `tokio` 后追加基于 Rustls 的异步
+  `reqwest` 入口。客户端默认关闭系统代理、自动重定向、自动压缩和隐式重试，执行总时间与请求/响应
+  大小受限，并提供安全方法默认 single-flight 与显式完成缓存。
+
+- 新增 `http + serde` 下的三参数 Serde 便捷 HTTP 方法：`get`、`post`、`delete`、`patch`、
+  `put`、`options`、`head` 及对应的 `*_bytes` 原始字节入口；方法支持可选 query/JSON body
+  和 `HttpRequestOptions` 单次配置，异步版本要求同时启用 `tokio`。
+- 新增 HTTP JSON/query 失败的稳定 `HttpError::JsonSerialize`、`QuerySerialize`、
+  `JsonDeserialize` 错误分类，以及 `HttpResponse::into_body` 和受 `serde` feature 守卫的
+  `HttpResponse::json`。
 
 ### Changed
 
@@ -73,6 +84,10 @@
   1.85）与 `rust-ini`（自身要求 1.64）不受影响。
 - 邮件传输固定使用 Rustls、`ring` 和 `webpki-roots`，支持强制 SMTPS 或强制 STARTTLS，不使用
   native-tls/OpenSSL。
+- `tokio` feature 的生产依赖增加 `rt`、`sync` 和 `time`，用于 HTTP 异步客户端的 runtime 检测、
+  single-flight 通知和受总时间预算约束的异步退避；crate 仍不创建 runtime 或调用 `block_on`。
+- `serde` feature 追加可选的 `serde_urlencoded 0.7.1`，用于 HTTP 快捷方法的 query 编码；
+  `http` 不会自动启用 `serde`，因此不改变仅启用 HTTP 时的公共 API 和依赖边界。
 
 ### Fixed
 
@@ -88,6 +103,10 @@
 
 - 邮件配置、邮件头和正文执行大小及控制字符校验；错误信息不会回显密码、主题、正文、用户名、完整主机名
   或地址。
+- HTTP 只接受 HTTP/HTTPS URL，拒绝用户信息、Header 注入和超限请求/响应；同步入口拒绝在 Tokio runtime
+  中阻塞，异步入口要求调用方提供 runtime；错误不回显 URL、Header 值、请求体、响应体或第三方传输文本。
+- HTTP 默认关闭代理、重定向、压缩和隐式重试；默认只对 GET/HEAD/OPTIONS 重试有限的传输失败与瞬态
+  状态码，非幂等方法必须显式允许。完成缓存只保存满足安全 Header 与响应缓存指令约束的 2xx GET/HEAD。
 - 不支持明文 SMTP、机会式 STARTTLS、跳过证书校验、自签名证书、企业私有 CA relay、附件、抄送/密送、
   DKIM、OAuth2、自动重试、后台队列或邮件接收。
 - `RandomUtils` 不承诺密码学安全随机数，不应用于密码、令牌或密钥生成；不可信输入的随机字符串长度应由调用方限制。

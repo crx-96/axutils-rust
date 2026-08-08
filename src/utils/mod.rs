@@ -11,6 +11,7 @@
 //! 静态入口在 `aes` feature 下需要先初始化一次进程级密钥与模式；多密钥或可控生命周期场景
 //! 应使用 `crate::AesCipher` 实例。
 //! JWT 的一次初始化全局入口需要 `jwt` feature；它只转发到 `crate::jwt` 的固定 codec。
+//! HTTP 客户端需要 `http` feature；异步 HTTP 入口还需要同时启用 `tokio`。
 
 #[cfg(feature = "rand")]
 pub mod random_utils;
@@ -30,6 +31,9 @@ pub mod config_utils;
 
 #[cfg(feature = "jwt")]
 pub mod jwt_utils;
+
+#[cfg(feature = "http")]
+pub mod http_utils;
 
 pub mod crypto_utils;
 
@@ -53,5 +57,8 @@ pub use config_utils::ConfigUtils;
 
 #[cfg(feature = "jwt")]
 pub use jwt_utils::JwtUtils;
+
+#[cfg(feature = "http")]
+pub use http_utils::HttpUtils;
 
 pub use crypto_utils::CryptoUtils;

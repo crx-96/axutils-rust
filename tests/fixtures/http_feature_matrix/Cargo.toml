@@ -1,0 +1,26 @@
+[package]
+name = "axutils-http-feature-matrix"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[features]
+http = ["axutils/http"]
+http-tokio = ["axutils/http", "axutils/tokio"]
+http-serde = ["axutils/http", "axutils/serde"]
+http-tokio-serde = ["axutils/http", "axutils/tokio", "axutils/serde"]
+tokio-only = ["axutils/tokio"]
+serde-only = ["axutils/serde"]
+negative-http-module = []
+negative-http-client = []
+negative-http-utils = []
+negative-http-tokio-module = ["axutils/tokio"]
+negative-http-tokio-client = ["axutils/tokio"]
+negative-http-tokio-utils = ["axutils/tokio"]
+negative-http-async = ["axutils/http"]
+negative-http-serde = ["axutils/http"]
+negative-http-tokio-serde = ["axutils/http", "axutils/tokio"]
+
+[dependencies]
+axutils = { path = "../../..", default-features = false }
+serde = { version = "1", features = ["derive"] }
