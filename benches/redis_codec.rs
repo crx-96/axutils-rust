@@ -2,7 +2,17 @@
 use criterion::{criterion_group, criterion_main};
 
 #[cfg(feature = "redis")]
+#[allow(dead_code, unused_imports)]
+#[path = "../src/redis/codec.rs"]
+mod codec;
+#[cfg(feature = "redis")]
+#[allow(dead_code, unused_imports)]
+#[path = "../src/redis/error.rs"]
+mod error;
+
+#[cfg(feature = "redis")]
 mod enabled {
+    use super::codec;
     use criterion::{Criterion, Throughput};
     use serde::{Deserialize, Serialize};
     use std::hint::black_box;
@@ -41,21 +51,23 @@ mod enabled {
         let mut group = criterion.benchmark_group("redis_messagepack");
         for size in [16, 256, 4096] {
             let payload = payload(size);
-            let bytes = rmp_serde::to_vec(&payload).expect("encode benchmark payload");
+            let bytes =
+                codec::encode(&payload, 16 * 1024 * 1024).expect("encode benchmark payload");
             let encoded_size = bytes.len();
             let label = format!("{size}b_{encoded_size}out");
             group.throughput(Throughput::Bytes(encoded_size as u64));
 
             group.bench_function(format!("encode_{label}"), |bencher| {
                 bencher.iter(|| {
-                    let encoded = rmp_serde::to_vec(black_box(&payload)).expect("encode");
+                    let encoded =
+                        codec::encode(black_box(&payload), 16 * 1024 * 1024).expect("encode");
                     black_box(encoded);
                 });
             });
             group.bench_function(format!("decode_{label}"), |bencher| {
                 bencher.iter(|| {
                     let decoded: Payload =
-                        rmp_serde::from_slice(black_box(&bytes)).expect("decode");
+                        codec::decode(black_box(&bytes), 16 * 1024 * 1024).expect("decode");
                     black_box(decoded);
                 });
             });

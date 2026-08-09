@@ -209,6 +209,10 @@ impl HttpRequest {
         self.body.as_deref()
     }
 
+    pub(crate) fn into_body(self) -> Option<Vec<u8>> {
+        self.body
+    }
+
     /// 返回请求级时间预算。
     pub fn timeout(&self) -> Option<Duration> {
         self.timeout

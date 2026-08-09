@@ -35,9 +35,11 @@ axutils = { version = "0.1", features = ["http", "serde", "tokio"] }
 tokio = { version = "1.53.1", features = ["macros", "rt-multi-thread"] }
 ```
 
-客户端使用 Rustls；同步后端为 `ureq`，异步后端为 `reqwest`。两者都关闭系统代理、自动重定向、
-自动压缩和后端隐式重试。库只保证客户端侧约束，不承诺 SSRF 防护；调用方仍须自行限制目标
-主机、出口网络、DNS 重绑定风险以及业务认证信息。
+客户端使用 Rustls；同步后端为 `ureq`，异步后端为 `reqwest`。当前 `http` feature 为保持
+`http + tokio` 的组合式异步 API 契约，会同时编译两个可选后端；只调用同步 API 的项目也会承担
+`reqwest` 及其传递依赖的编译成本。两者都关闭系统代理、自动重定向、自动压缩和后端隐式重试。
+库只保证客户端侧约束，不承诺 SSRF 防护；调用方仍须自行限制目标主机、出口网络、DNS 重绑定
+风险以及业务认证信息。
 
 ## 公共导出路径
 
@@ -45,14 +47,27 @@ HTTP 模块可从以下路径访问：
 
 | 项目 | 推荐路径 | 兼容/次级路径 | feature |
 | --- | --- | --- | --- |
-| HTTP 领域类型 | `axutils::http::HttpClient` 等 | `axutils::HttpClient` 等 | `http` |
-| 单次调用配置 | `axutils::http::HttpRequestOptions` | `axutils::HttpRequestOptions` | `http` |
+| `HttpClient` | `axutils::http::HttpClient` | `axutils::HttpClient` | `http` |
+| `HttpConfig` | `axutils::http::HttpConfig` | `axutils::HttpConfig` | `http` |
+| `HttpConfigBuilder` | `axutils::http::HttpConfigBuilder` | `axutils::HttpConfigBuilder` | `http` |
+| `HttpHeaders` | `axutils::http::HttpHeaders` | `axutils::HttpHeaders` | `http` |
+| `HttpMethod` | `axutils::http::HttpMethod` | `axutils::HttpMethod` | `http` |
+| `HttpRequest` | `axutils::http::HttpRequest` | `axutils::HttpRequest` | `http` |
+| `HttpRequestBuilder` | `axutils::http::HttpRequestBuilder` | `axutils::HttpRequestBuilder` | `http` |
+| `HttpRequestOptions` | `axutils::http::HttpRequestOptions` | `axutils::HttpRequestOptions` | `http` |
+| `HttpResponse` | `axutils::http::HttpResponse` | `axutils::HttpResponse` | `http` |
+| `HttpError` | `axutils::http::HttpError` | `axutils::HttpError` | `http` |
+| `HttpTransportErrorKind` | `axutils::http::HttpTransportErrorKind` | `axutils::HttpTransportErrorKind` | `http` |
+| `RetryPolicy` | `axutils::http::RetryPolicy` | `axutils::RetryPolicy` | `http` |
+| `DeduplicationPolicy` | `axutils::http::DeduplicationPolicy` | `axutils::DeduplicationPolicy` | `http` |
+| `DeduplicationMode` | `axutils::http::DeduplicationMode` | `axutils::DeduplicationMode` | `http` |
 | 全局入口 | `axutils::HttpUtils` | `axutils::utils::HttpUtils`、`axutils::utils::http_utils::HttpUtils` | `http` |
 | JSON/query/字节快捷方法 | `HttpClient::{get,post,delete,patch,put,options}` 等 | `HttpUtils` 同名静态方法 | `http` + `serde` |
 | 异步方法 | `HttpClient::execute_async`、`HttpUtils::execute_async` 及 `_async` 快捷方法 | 无同步别名 | `http` + `tokio`；Serde 快捷方法还要求 `serde` |
 
-`axutils::http::client`、`config`、`headers`、`request`、`response`、`retry` 和 `coalesce`
-是实现文件，不是公开子模块。HTTP 不提供公开常量、trait、类型别名或宏。
+`axutils::http::client`、`coalesce`、`config`、`error`、`headers`、`options`、`request`、
+`response`、`retry` 和 `serde_api` 是实现文件，不是公开子模块。HTTP 不提供公开常量、trait、
+类型别名或宏。
 
 ## 安全默认值和执行语义
 
@@ -61,7 +76,8 @@ HTTP 模块可从以下路径访问：
   设置了 `base_url`，请求自身的绝对 URL 仍优先于配置基地址。
 - Header 名称必须是 HTTP token，值拒绝控制字符；Header 数量、单值和总大小均有限制。
   `Authorization`、`Cookie` 和 `Set-Cookie` 不允许通过公开 `append` 形成重复项，默认 Header
-  与请求 Header 发生敏感冲突时返回错误。
+  与请求 Header 发生敏感冲突时返回错误。配置了 `base_url` 时，跨 origin 的绝对请求 URL
+  不继承默认敏感 Header；请求对象上显式设置的敏感 Header 仍会发送，调用方必须自行确认目标。
 - 默认请求总时间预算为 30 秒、连接预算为 10 秒、请求体和响应体上限均为 1 MiB。
   `max_retries` 沿用现有方法名，但表示包括首次请求在内的最大总网络尝试次数；默认值为 3，
   `1` 表示禁用自动重试。退避是有限的指数退避，不带随机抖动且受总时间预算约束。
@@ -1316,7 +1332,8 @@ let _ = bytes;
 
 ### `HttpResponse::into_body`
 
-消费 `HttpResponse` 并复制出拥有型 `Vec<u8>`。响应状态、Header 和尝试次数在消费后不再可访问。
+消费 `HttpResponse` 并返回拥有型 `Vec<u8>`。响应体没有被缓存或 single-flight 共享时直接取回
+底层缓冲区，存在其他共享者时才复制；响应状态、Header 和尝试次数在消费后不再可访问。
 
 ~~~rust,no_run
 # #[cfg(feature = "http")]

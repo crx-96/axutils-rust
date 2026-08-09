@@ -7,16 +7,18 @@
 //! [`ConfigError::UndefinedVariable`]，不会静默替换为空字符串。这些语义与 `dotenv`/`dotenvy`
 //! 存在已知差异，本 crate 不声称与其完全兼容。
 
-use std::collections::BTreeMap;
+use std::{borrow::Cow, collections::BTreeMap};
 
 use super::{error::ConfigError, value::ConfigValue};
 
 pub(crate) fn parse_value(
     text: &str,
     allow_env_fallback: bool,
+    max_expanded_bytes: usize,
 ) -> Result<ConfigValue, ConfigError> {
     let mut scanner = Scanner::new(text);
     let mut table: BTreeMap<String, String> = BTreeMap::new();
+    let mut expanded_bytes = 0usize;
 
     loop {
         skip_blank_and_comment_lines(&mut scanner);
@@ -31,7 +33,25 @@ pub(crate) fn parse_value(
         expect_char(&mut scanner, '=', line)?;
         skip_horizontal_ws(&mut scanner);
 
-        let value = parse_value_token(&mut scanner, &table, allow_env_fallback)?;
+        let remaining = max_expanded_bytes
+            .checked_sub(expanded_bytes)
+            .and_then(|remaining| remaining.checked_sub(key.len()))
+            .ok_or(ConfigError::ExpandedValueTooLarge {
+                limit: max_expanded_bytes,
+            })?;
+        let value = parse_value_token(
+            &mut scanner,
+            &table,
+            allow_env_fallback,
+            remaining,
+            max_expanded_bytes,
+        )?;
+        expanded_bytes = expanded_bytes
+            .checked_add(key.len())
+            .and_then(|total| total.checked_add(value.len()))
+            .ok_or(ConfigError::ExpandedValueTooLarge {
+                limit: max_expanded_bytes,
+            })?;
 
         if table.contains_key(&key) {
             return Err(ConfigError::DuplicateKey { key });
@@ -186,15 +206,27 @@ fn parse_value_token(
     scanner: &mut Scanner,
     table: &BTreeMap<String, String>,
     allow_env_fallback: bool,
+    remaining_bytes: usize,
+    configured_limit: usize,
 ) -> Result<String, ConfigError> {
     match scanner.peek() {
-        Some('"') => parse_double_quoted(scanner, table, allow_env_fallback),
-        Some('\'') => parse_single_quoted(scanner),
-        _ => Ok(parse_unquoted(scanner)),
+        Some('"') => parse_double_quoted(
+            scanner,
+            table,
+            allow_env_fallback,
+            remaining_bytes,
+            configured_limit,
+        ),
+        Some('\'') => parse_single_quoted(scanner, remaining_bytes, configured_limit),
+        _ => parse_unquoted(scanner, remaining_bytes, configured_limit),
     }
 }
 
-fn parse_unquoted(scanner: &mut Scanner) -> String {
+fn parse_unquoted(
+    scanner: &mut Scanner,
+    remaining_bytes: usize,
+    configured_limit: usize,
+) -> Result<String, ConfigError> {
     let start = scanner.pos;
     while !matches!(scanner.peek(), None | Some('\n') | Some('\r')) {
         scanner.bump();
@@ -204,17 +236,33 @@ fn parse_unquoted(scanner: &mut Scanner) -> String {
         Some(index) => &raw[..index],
         None => raw,
     };
-    content.trim_end_matches([' ', '\t']).to_owned()
+    let content = content.trim_end_matches([' ', '\t']);
+    if content.len() > remaining_bytes {
+        return Err(ConfigError::ExpandedValueTooLarge {
+            limit: configured_limit,
+        });
+    }
+    Ok(content.to_owned())
 }
 
-fn parse_single_quoted(scanner: &mut Scanner) -> Result<String, ConfigError> {
+fn parse_single_quoted(
+    scanner: &mut Scanner,
+    remaining_bytes: usize,
+    configured_limit: usize,
+) -> Result<String, ConfigError> {
     let line = scanner.line;
     scanner.bump(); // opening '
     let start = scanner.pos;
     loop {
         match scanner.peek() {
             Some('\'') => {
-                let content = scanner.text[start..scanner.pos].to_owned();
+                let content = &scanner.text[start..scanner.pos];
+                if content.len() > remaining_bytes {
+                    return Err(ConfigError::ExpandedValueTooLarge {
+                        limit: configured_limit,
+                    });
+                }
+                let content = content.to_owned();
                 scanner.bump(); // closing '
                 return Ok(content);
             }
@@ -230,6 +278,8 @@ fn parse_double_quoted(
     scanner: &mut Scanner,
     table: &BTreeMap<String, String>,
     allow_env_fallback: bool,
+    remaining_bytes: usize,
+    configured_limit: usize,
 ) -> Result<String, ConfigError> {
     let line = scanner.line;
     scanner.bump(); // opening "
@@ -246,34 +296,34 @@ fn parse_double_quoted(
                 scanner.bump();
                 match scanner.peek() {
                     Some('n') => {
-                        result.push('\n');
+                        push_char_bounded(&mut result, '\n', remaining_bytes, configured_limit)?;
                         scanner.bump();
                     }
                     Some('r') => {
-                        result.push('\r');
+                        push_char_bounded(&mut result, '\r', remaining_bytes, configured_limit)?;
                         scanner.bump();
                     }
                     Some('t') => {
-                        result.push('\t');
+                        push_char_bounded(&mut result, '\t', remaining_bytes, configured_limit)?;
                         scanner.bump();
                     }
                     Some('\\') => {
-                        result.push('\\');
+                        push_char_bounded(&mut result, '\\', remaining_bytes, configured_limit)?;
                         scanner.bump();
                     }
                     Some('"') => {
-                        result.push('"');
+                        push_char_bounded(&mut result, '"', remaining_bytes, configured_limit)?;
                         scanner.bump();
                     }
                     Some('$') => {
-                        result.push('$');
+                        push_char_bounded(&mut result, '$', remaining_bytes, configured_limit)?;
                         scanner.bump();
                     }
                     Some(other) => {
                         // Unrecognized escape sequences are not defined by the doc; keep both
                         // characters literally rather than silently dropping the backslash.
-                        result.push('\\');
-                        result.push(other);
+                        push_char_bounded(&mut result, '\\', remaining_bytes, configured_limit)?;
+                        push_char_bounded(&mut result, other, remaining_bytes, configured_limit)?;
                         scanner.bump();
                     }
                     None => return Err(parse_error(line)),
@@ -296,39 +346,77 @@ fn parse_double_quoted(
                 }
                 scanner.bump(); // }
 
-                result.push_str(&resolve_variable(
-                    &name,
-                    table,
-                    allow_env_fallback,
-                    interpolation_line,
-                )?);
+                push_str_bounded(
+                    &mut result,
+                    &resolve_variable(&name, table, allow_env_fallback, interpolation_line)?,
+                    remaining_bytes,
+                    configured_limit,
+                )?;
             }
             Some(ch) => {
-                result.push(ch);
+                push_char_bounded(&mut result, ch, remaining_bytes, configured_limit)?;
                 scanner.bump();
             }
         }
     }
 }
 
-fn resolve_variable(
+fn resolve_variable<'a>(
     name: &str,
-    table: &BTreeMap<String, String>,
+    table: &'a BTreeMap<String, String>,
     allow_env_fallback: bool,
     line: usize,
-) -> Result<String, ConfigError> {
+) -> Result<Cow<'a, str>, ConfigError> {
     if let Some(value) = table.get(name) {
-        return Ok(value.clone());
+        return Ok(Cow::Borrowed(value));
     }
     if allow_env_fallback {
         if let Ok(value) = std::env::var(name) {
-            return Ok(value);
+            return Ok(Cow::Owned(value));
         }
     }
     Err(ConfigError::UndefinedVariable {
         key: name.to_owned(),
         line,
     })
+}
+
+fn push_char_bounded(
+    output: &mut String,
+    value: char,
+    remaining_bytes: usize,
+    configured_limit: usize,
+) -> Result<(), ConfigError> {
+    if output
+        .len()
+        .checked_add(value.len_utf8())
+        .is_none_or(|length| length > remaining_bytes)
+    {
+        return Err(ConfigError::ExpandedValueTooLarge {
+            limit: configured_limit,
+        });
+    }
+    output.push(value);
+    Ok(())
+}
+
+fn push_str_bounded(
+    output: &mut String,
+    value: &str,
+    remaining_bytes: usize,
+    configured_limit: usize,
+) -> Result<(), ConfigError> {
+    if output
+        .len()
+        .checked_add(value.len())
+        .is_none_or(|length| length > remaining_bytes)
+    {
+        return Err(ConfigError::ExpandedValueTooLarge {
+            limit: configured_limit,
+        });
+    }
+    output.push_str(value);
+    Ok(())
 }
 
 /// 序列化所有会读写进程环境变量的测试，避免与同一测试二进制内并行运行的其他测试竞争。
@@ -339,8 +427,17 @@ pub(crate) mod env_test_lock {
 
 #[cfg(test)]
 mod tests {
-    use super::{env_test_lock::LOCK, parse_value};
+    use super::{env_test_lock::LOCK, parse_value as parse_value_inner};
     use crate::ConfigError;
+
+    const TEST_MAX_BYTES: usize = 1024 * 1024;
+
+    fn parse_value(
+        text: &str,
+        allow_env_fallback: bool,
+    ) -> Result<crate::ConfigValue, ConfigError> {
+        parse_value_inner(text, allow_env_fallback, TEST_MAX_BYTES)
+    }
 
     fn table_of(
         value: &crate::ConfigValue,
@@ -483,5 +580,14 @@ mod tests {
             table_of(&value).get("KEY").and_then(|v| v.as_str()),
             Some("$NOT_INTERPOLATED")
         );
+    }
+
+    #[test]
+    fn bounds_cumulative_interpolation_output() {
+        let text = "A=1234\nB=\"${A}${A}\"\nC=\"${B}${B}\"\n";
+        assert!(matches!(
+            parse_value_inner(text, false, 20),
+            Err(ConfigError::ExpandedValueTooLarge { limit: 20 })
+        ));
     }
 }

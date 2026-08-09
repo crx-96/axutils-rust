@@ -34,7 +34,8 @@
 - 新增 `serde,tokio` feature 组合下的异步配置文件读取：`ConfigLoader` 提供
   `load_value_async`/`load_async`，`ConfigUtils` 提供 `load_value_async`/`load_async`/
   `load_value_as_async`/`load_as_async`；异步读取复用现有格式解析、大小上限、BOM、UTF-8、深度、
-  `.env` 回退和错误脱敏语义，Tokio 生产依赖仅增加 `fs`/`io-util` 能力，不创建 runtime。
+  `.env` 回退和错误脱敏语义；配置读取本身使用 Tokio 的 `fs`/`io-util` 能力，共享的 `tokio`
+  feature 还因 HTTP/Redis 使用 `rt`/`sync`/`time`，crate 不创建 runtime。
 - 新增 `CryptoUtils`（`src/utils/crypto_utils.rs`）与 `crypto` 模块（`src/crypto/`），提供内存
   数据的十六进制、Base64、MD5 和 AES 编码/摘要/加解密能力。十六进制编解码
   （`hex_encode`/`hex_encode_upper`/`hex_decode`）与 `TextEncoding::Utf8` 文本编解码不依赖任何
@@ -54,7 +55,7 @@
     `aes` 与 `base64` 后额外提供对应的 `aes_encrypt_base64`/`aes_decrypt_base64`。支持
     AES-128/192/256、随机 IV/nonce（容器布局为 `iv || 密文(|| tag)`）与调用方显式提供 IV/nonce
     两条路径；新增的 `CryptoError::NotInitialized`/`AlreadyInitialized` 仅在 `aes` 下导出。
-   - `encoding_rs` feature 为 `TextEncoding` 追加 `Gbk`/`Gb18030`/`Big5`/`ShiftJis`/`EucKr`/
+  - `encoding_rs` feature 为 `TextEncoding` 追加 `Gbk`/`Gb18030`/`Big5`/`ShiftJis`/`EucKr`/
      `Windows1252` 六个 legacy 编码变体，供 Base64/MD5 的 `*_text` 入口使用。
 - 新增独立 `jwt` feature 下的 JWT JWS 能力：提供 `JwtAlgorithm`、拥有型
   `JwtSigningKey`/`JwtVerificationKey`、`JwtConfig`、`JwtValidation`、脱敏 `JwtError` 和一次初始化的
@@ -103,11 +104,24 @@
   single-flight 通知和受总时间预算约束的异步退避；crate 仍不创建 runtime 或调用 `block_on`。
 - `serde` feature 追加可选的 `serde_urlencoded 0.7.1`，用于 HTTP 快捷方法的 query 编码；
   `http` 不会自动启用 `serde`，因此不改变仅启用 HTTP 时的公共 API 和依赖边界。
+- `redis` 单 feature 只启用同步连接池与 Cluster 所需的 redis-rs 子 feature；异步
+  `cluster-async`、`connection-manager`、`tokio-comp` 子 feature 改由 `tokio` 对 Redis 的弱依赖
+  映射在 `redis + tokio` 组合下启用，避免同步用户编译无公共 API 可用的异步依赖。
+- HTTP 准备请求时直接移出调用方已经拥有的请求体，同步发送尝试借用同一缓冲区；
+  `HttpResponse::into_body` 在响应体未被缓存或 single-flight 共享时直接取回底层 `Vec<u8>`，仅在
+  确有共享引用时复制，降低大请求/响应的峰值内存和复制开销。
 - Redis `ValueTooLarge` 的错误文本不再把批量项数或事务命令数误标为字节，`limit` 的单位改为
   随具体操作语义解释。
 
 ### Fixed
 
+- HTTP 配置存在 `base_url` 且请求使用跨 origin 绝对 URL 时，不再继承默认
+  `Authorization`、`Cookie` 或 `Set-Cookie`，避免把默认凭据发送到另一个 origin；请求上显式设置
+  的敏感 Header 仍按调用方意图发送。
+- `.env` 插值的逐次追加和解析后累计 key/value 现在受 `max_bytes` 限制，超限返回新增的
+  `ConfigError::ExpandedValueTooLarge`，避免短配置通过链式重复引用产生指数级 CPU/内存占用。
+- Redis 同步/异步事务遇到已完整读取的普通服务端命令错误时保留健康连接，只在协议、网络、
+  连接、超时或关闭状态下淘汰连接，避免可重复的 `WRONGTYPE` 等错误造成持续重连。
 - 配置无类型 JSON 与有类型 JSON 均拒绝任意嵌套层级的重复对象键；TOML 无类型转换在遇到内部日期时间伪表时先完整消费当前映射，不再因提前返回丢弃同层字段。
 - HTTP 同步与异步响应读取在追加数据块前检查响应体上限，避免超限数据造成上限之外的瞬时缓冲区扩容。
 - 配置读取的 YAML 后端显式固定有限的别名回放预算（总回放事件最多 1,000,000 次、单个 anchor

@@ -40,11 +40,14 @@ redis = [
     "dep:rmp-serde",
     "redis/r2d2",
     "redis/cluster",
-    "redis/cluster-async",
-    "redis/connection-manager",
-    "redis/tokio-comp",
 ]
-tokio = ["dep:tokio", "lettre?/tokio1-rustls"]
+tokio = [
+    "dep:tokio",
+    "lettre?/tokio1-rustls",
+    "redis?/cluster-async",
+    "redis?/connection-manager",
+    "redis?/tokio-comp",
+]
 toml = ["dep:toml"]
 serde-saphyr = ["dep:serde-saphyr"]
 rust-ini = ["dep:rust-ini"]

@@ -391,7 +391,8 @@ client.send(message)?;
 `tokio`，并由应用提供 runtime。
 客户端默认不读取系统代理、不跟随重定向、不协商压缩，也不会隐式重试非幂等方法；请求和响应均有
 有限大小与总时间预算。默认最多进行 3 次网络尝试（包括首次请求），设置为 1 可禁用自动重试。
-不配置 `base_url` 时只能使用绝对 HTTP/HTTPS URL；配置了 `base_url` 时，请求自身的绝对 URL 优先。
+不配置 `base_url` 时只能使用绝对 HTTP/HTTPS URL；配置了 `base_url` 时，请求自身的绝对 URL 优先，
+但跨 origin 的绝对 URL 不会继承配置中的默认 `Authorization`、`Cookie` 或 `Set-Cookie`。
 下面的 `no_run` 示例只编译，不会访问网络：
 
 ```rust,no_run
@@ -470,7 +471,8 @@ assert_eq!(value.get("server.port").and_then(|value| value.as_i64()), Some(8080)
 ```
 
 异步文件入口需要 `serde,tokio`，并且只异步化文件 I/O；调用方必须自行提供 runtime、限制并发和
-总内存。配置值可能包含凭据，不要把整棵 `ConfigValue` 或反序列化结果写入日志。
+总内存。文件读取及 `.env` 插值后的累计内容受同一个可配置字节上限约束。配置值可能包含凭据，
+不要把整棵 `ConfigValue` 或反序列化结果写入日志。
 
 完整示例与边界说明见 [Config 使用文档](https://github.com/crx-96/axutils-rust/blob/main/docs/examples/config.md)。
 

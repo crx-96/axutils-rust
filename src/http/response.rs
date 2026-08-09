@@ -11,7 +11,7 @@ use super::HttpError;
 pub struct HttpResponse {
     status: u16,
     headers: HttpHeaders,
-    body: Arc<[u8]>,
+    body: Arc<Vec<u8>>,
     attempts: u32,
 }
 
@@ -20,7 +20,7 @@ impl HttpResponse {
         Self {
             status,
             headers,
-            body: Arc::from(body),
+            body: Arc::new(body),
             attempts,
         }
     }
@@ -52,7 +52,8 @@ impl HttpResponse {
 
     /// 消费响应并返回拥有型响应体字节。
     ///
-    /// 该方法适合字节快捷 API；响应头、状态码和尝试次数在消费后不再保留。
+    /// 该方法适合字节快捷 API；响应头、状态码和尝试次数在消费后不再保留。响应体没有被
+    /// 缓存或 single-flight 共享时直接取回底层缓冲区，存在其他共享者时才复制。
     ///
     /// # Examples
     ///
@@ -71,7 +72,7 @@ impl HttpResponse {
     /// # fn main() {}
     /// ```
     pub fn into_body(self) -> Vec<u8> {
-        self.body.to_vec()
+        Arc::try_unwrap(self.body).unwrap_or_else(|body| (*body).clone())
     }
 
     /// 将响应体按严格 UTF-8 解码。

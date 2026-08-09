@@ -184,8 +184,30 @@ impl HttpClient {
 
     fn prepare(&self, request: HttpRequest) -> Result<PreparedRequest, HttpError> {
         let url = request.resolve(self.config.base_url_ref())?;
-        let headers = HttpHeaders::merge(self.config.default_headers(), request.headers())?;
-        let body = request.body().map(ToOwned::to_owned);
+        let filtered_defaults;
+        let defaults = if self
+            .config
+            .base_url_ref()
+            .is_some_and(|base_url| !same_origin(base_url, &url))
+        {
+            filtered_defaults = self.config.default_headers().without_sensitive();
+            &filtered_defaults
+        } else {
+            self.config.default_headers()
+        };
+        let headers = HttpHeaders::merge(defaults, request.headers())?;
+        let method = request.method().clone();
+        let timeout = request.timeout().unwrap_or(self.config.request_timeout());
+        let retry_policy = request
+            .retry_policy()
+            .cloned()
+            .unwrap_or_else(|| self.config.retry_policy().clone());
+        let deduplication_policy = request
+            .deduplication_policy()
+            .cloned()
+            .unwrap_or_else(|| self.config.deduplication_policy().clone());
+        let deduplication_opt_in = request.deduplication_policy().is_some();
+        let body = request.into_body();
         if let Some(body) = &body {
             if body.len() > self.config.max_request_body_bytes() {
                 return Err(HttpError::RequestBodyTooLarge {
@@ -195,19 +217,13 @@ impl HttpClient {
         }
         Ok(PreparedRequest {
             url,
-            method: request.method().clone(),
+            method,
             headers,
             body,
-            timeout: request.timeout().unwrap_or(self.config.request_timeout()),
-            retry_policy: request
-                .retry_policy()
-                .cloned()
-                .unwrap_or_else(|| self.config.retry_policy().clone()),
-            deduplication_policy: request
-                .deduplication_policy()
-                .cloned()
-                .unwrap_or_else(|| self.config.deduplication_policy().clone()),
-            deduplication_opt_in: request.deduplication_policy().is_some(),
+            timeout,
+            retry_policy,
+            deduplication_policy,
+            deduplication_opt_in,
         })
     }
 
@@ -325,7 +341,7 @@ impl HttpClient {
                 &prepared.method,
                 &prepared.url,
                 &prepared.headers,
-                body.clone(),
+                body.as_slice(),
             )?;
             request
                 .with_agent(&self.sync_agent)
@@ -578,6 +594,12 @@ impl HttpClient {
         state.in_flight.remove(key);
         flight.publish(result.clone());
     }
+}
+
+fn same_origin(left: &Url, right: &Url) -> bool {
+    left.scheme() == right.scheme()
+        && left.host_str() == right.host_str()
+        && left.port_or_known_default() == right.port_or_known_default()
 }
 
 impl fmt::Debug for HttpClient {
@@ -905,4 +927,49 @@ fn recover_lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     mutex
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::HttpClient;
+    use crate::{HttpConfig, HttpMethod, HttpRequest};
+
+    #[test]
+    fn cross_origin_absolute_urls_drop_only_sensitive_default_headers() {
+        let config = HttpConfig::builder()
+            .base_url("https://api.example.com/v1/")
+            .unwrap()
+            .with_default_header("authorization", "Bearer default-secret")
+            .unwrap()
+            .with_default_header("x-client", "axutils")
+            .unwrap()
+            .build()
+            .unwrap();
+        let client = HttpClient::new(config).unwrap();
+
+        let same_origin = client
+            .prepare(HttpRequest::new(HttpMethod::Get, "/users").unwrap())
+            .unwrap();
+        assert_eq!(
+            same_origin.headers.get("authorization"),
+            Some(b"Bearer default-secret".as_slice())
+        );
+
+        let cross_origin = client
+            .prepare(
+                HttpRequest::new(HttpMethod::Get, "https://other.example/data")
+                    .unwrap()
+                    .with_header("authorization", "Bearer explicit-secret")
+                    .unwrap(),
+            )
+            .unwrap();
+        assert_eq!(
+            cross_origin.headers.get("authorization"),
+            Some(b"Bearer explicit-secret".as_slice())
+        );
+        assert_eq!(
+            cross_origin.headers.get("x-client"),
+            Some(b"axutils".as_slice())
+        );
+    }
 }

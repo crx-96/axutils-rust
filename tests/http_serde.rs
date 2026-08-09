@@ -1,10 +1,11 @@
 #![cfg(all(feature = "http", feature = "serde"))]
 
+use std::io::ErrorKind;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use axutils::{HttpClient, HttpConfig, HttpRequestOptions};
 use serde::{Deserialize, Serialize};
@@ -29,12 +30,28 @@ type CapturedRequests = Arc<Mutex<Vec<Vec<u8>>>>;
 
 fn spawn_server(expected_requests: usize) -> (String, CapturedRequests, thread::JoinHandle<()>) {
     let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind test server");
+    listener
+        .set_nonblocking(true)
+        .expect("set test listener nonblocking");
     let address = format!("http://{}", listener.local_addr().expect("server address"));
     let requests = Arc::new(Mutex::new(Vec::new()));
     let captured = Arc::clone(&requests);
     let handle = thread::spawn(move || {
-        for _ in 0..expected_requests {
-            let (mut stream, _) = listener.accept().expect("accept request");
+        for received in 0..expected_requests {
+            let deadline = Instant::now() + Duration::from_secs(5);
+            let mut stream = loop {
+                match listener.accept() {
+                    Ok((stream, _)) => break stream,
+                    Err(error) if error.kind() == ErrorKind::WouldBlock => {
+                        assert!(
+                            Instant::now() < deadline,
+                            "test server received {received} of {expected_requests} expected requests"
+                        );
+                        thread::sleep(Duration::from_millis(5));
+                    }
+                    Err(error) => panic!("accept test request: {error}"),
+                }
+            };
             let request = read_request(&mut stream);
             let is_bytes = request
                 .split(|byte| *byte == b'\n')

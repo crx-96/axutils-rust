@@ -1,10 +1,11 @@
 #![cfg(feature = "http")]
 
+use std::io::ErrorKind;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::Arc;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use axutils::{
     DeduplicationPolicy, HttpClient, HttpConfig, HttpError, HttpHeaders, HttpMethod, HttpRequest,
@@ -19,10 +20,27 @@ struct TestResponse {
 
 fn spawn_server(responses: Vec<TestResponse>) -> (String, thread::JoinHandle<()>) {
     let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind test server");
+    listener
+        .set_nonblocking(true)
+        .expect("set test listener nonblocking");
     let address = format!("http://{}", listener.local_addr().expect("server address"));
     let handle = thread::spawn(move || {
-        for response in responses {
-            let (mut stream, _) = listener.accept().expect("accept test request");
+        let expected = responses.len();
+        for (received, response) in responses.into_iter().enumerate() {
+            let deadline = Instant::now() + Duration::from_secs(5);
+            let mut stream = loop {
+                match listener.accept() {
+                    Ok((stream, _)) => break stream,
+                    Err(error) if error.kind() == ErrorKind::WouldBlock => {
+                        assert!(
+                            Instant::now() < deadline,
+                            "test server received {received} of {expected} expected requests"
+                        );
+                        thread::sleep(Duration::from_millis(5));
+                    }
+                    Err(error) => panic!("accept test request: {error}"),
+                }
+            };
             read_request(&mut stream);
             if !response.delay.is_zero() {
                 thread::sleep(response.delay);

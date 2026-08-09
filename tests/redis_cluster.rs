@@ -2,6 +2,19 @@
 
 use axutils::{RedisClient, RedisConfig, RedisError};
 
+const CLUSTER_LIVE_ENV: &str = "AXUTILS_REDIS_CLUSTER_LIVE_TEST";
+
+fn cluster_live_authorized(value: Option<&std::ffi::OsStr>) -> bool {
+    value == Some(std::ffi::OsStr::new("1"))
+}
+
+fn require_cluster_live_authorization() {
+    assert!(
+        cluster_live_authorized(std::env::var_os(CLUSTER_LIVE_ENV).as_deref()),
+        "set {CLUSTER_LIVE_ENV}=1 before running Redis Cluster live tests"
+    );
+}
+
 fn cluster_client() -> RedisClient {
     RedisClient::new(
         RedisConfig::cluster([
@@ -27,8 +40,9 @@ fn cluster_transaction_is_rejected_without_network_access() {
 }
 
 #[test]
-#[ignore = "requires local Redis Cluster on 127.0.0.1:7000-7002"]
+#[ignore = "requires local Redis Cluster on 127.0.0.1:7000-7002 and explicit AXUTILS_REDIS_CLUSTER_LIVE_TEST=1"]
 fn cluster_live_fixture_covers_routing_and_cross_slot_boundaries() {
+    require_cluster_live_authorization();
     let client = cluster_client();
     let namespace = format!("axutils:cluster:{}", std::process::id());
     let shared_a = format!("{namespace}:{{same}}:a");
@@ -77,8 +91,9 @@ fn cluster_live_fixture_covers_routing_and_cross_slot_boundaries() {
 
 #[cfg(all(feature = "redis", feature = "tokio"))]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "requires local Redis Cluster on 127.0.0.1:7000-7002"]
+#[ignore = "requires local Redis Cluster on 127.0.0.1:7000-7002 and explicit AXUTILS_REDIS_CLUSTER_LIVE_TEST=1"]
 async fn cluster_async_fixture_covers_routing() {
+    require_cluster_live_authorization();
     let client = cluster_client();
     let key = format!("axutils:cluster:{{async}}:{}", std::process::id());
     client
@@ -96,4 +111,13 @@ async fn cluster_async_fixture_covers_routing() {
         .delete_async(&key)
         .await
         .expect("cluster async cleanup");
+}
+
+#[test]
+fn cluster_live_authorization_requires_exact_opt_in() {
+    assert!(!cluster_live_authorized(None));
+    assert!(!cluster_live_authorized(Some(std::ffi::OsStr::new(""))));
+    assert!(!cluster_live_authorized(Some(std::ffi::OsStr::new("0"))));
+    assert!(!cluster_live_authorized(Some(std::ffi::OsStr::new("true"))));
+    assert!(cluster_live_authorized(Some(std::ffi::OsStr::new("1"))));
 }

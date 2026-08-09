@@ -107,7 +107,8 @@ let _new_loader = loader.with_format(ConfigFormat::Env);
 ### `ConfigLoader::with_max_bytes(self, max_bytes: usize) -> Result<ConfigLoader, ConfigError>`
 
 - **feature**：`serde`。
-- **参数**：文件读取字节上限，允许 `1 KiB..=16 MiB`。
+- **参数**：文件读取字节上限，也是 `.env` 插值后所有 key/value 累计内容的字节上限，允许
+  `1 KiB..=16 MiB`。
 - **返回值**：成功返回消费后的 loader；越界返回 `ConfigError::InvalidLimit`，调用方必须
   处理 `Result`。
 - **示例**：
@@ -833,12 +834,13 @@ INI 无类型值以字符串为主；section 和 key 的深度、重复键以及
 
 ## `ConfigError` 错误类型
 
-`ConfigError` 当前有以下 12 个变体；字段是诊断元数据，不应被当作可回显配置内容：
+`ConfigError` 当前有以下 13 个变体；字段是诊断元数据，不应被当作可回显配置内容：
 
 | 变体 | 字段与语义 |
 | --- | --- |
 | `Io` | `path: PathBuf`、`kind: io::ErrorKind`；打开或读取失败 |
 | `FileTooLarge` | `path: PathBuf`、`limit: usize`；超过文件字节上限 |
+| `ExpandedValueTooLarge` | `limit: usize`；`.env` 插值后的累计内容超过字节上限 |
 | `NotUtf8` | `path: PathBuf`；文件不是合法 UTF-8 |
 | `UnknownExtension` | 无字段；无法从路径推断格式 |
 | `FormatNotEnabled` | `extension: String`；已知格式后端未启用 |
@@ -872,7 +874,9 @@ assert_eq!(description, "json");
 ## 使用场景、资源与限制
 
 文件读取统一使用 1 KiB–16 MiB 的可配置上限（默认 1 MiB），通过 `take(max_bytes + 1)` 检测
-超限；无类型 YAML/JSON/TOML/INI 及 YAML/INI 有类型读取受嵌套深度限制，默认 64、允许 1–256。
+超限；`.env` 解析在每次追加普通字符或插值内容前检查同一上限，所有解析后 key/value 的累计
+字节数也不能超过该上限，避免短输入通过重复插值产生指数级内存占用。无类型
+YAML/JSON/TOML/INI 及 YAML/INI 有类型读取受嵌套深度限制，默认 64、允许 1–256。
 每个异步并发读取最多约占用 `max_bytes + 1` 字节独立缓冲区，crate 不提供全局并发或总内存
 配额；调用方应限制路径来源、任务数、文件总量、解析调度和日志内容。解析阶段仍在当前 Tokio
 任务同步执行，如需 CPU 隔离由调用方自行设计 `spawn_blocking` 和并发上限。

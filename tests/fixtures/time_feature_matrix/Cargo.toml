@@ -1,0 +1,39 @@
+[package]
+name = "axutils-time-feature-matrix"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[features]
+none = []
+chrono-only = ["axutils/chrono", "dep:chrono"]
+time-only = ["axutils/time", "dep:time"]
+jiff-only = ["axutils/jiff", "dep:jiff"]
+chrono-time = ["axutils/chrono", "axutils/time", "dep:chrono", "dep:time"]
+chrono-jiff = ["axutils/chrono", "axutils/jiff", "dep:chrono", "dep:jiff"]
+time-jiff = ["axutils/time", "axutils/jiff", "dep:time", "dep:jiff"]
+all = [
+    "axutils/chrono",
+    "axutils/time",
+    "axutils/jiff",
+    "dep:chrono",
+    "dep:time",
+    "dep:jiff",
+]
+negative-chrono-time-alias = ["axutils/chrono", "axutils/time", "dep:chrono", "dep:time"]
+negative-chrono-jiff-alias = ["axutils/chrono", "axutils/jiff", "dep:chrono", "dep:jiff"]
+negative-time-jiff-alias = ["axutils/time", "axutils/jiff", "dep:time", "dep:jiff"]
+negative-all-alias = [
+    "axutils/chrono",
+    "axutils/time",
+    "axutils/jiff",
+    "dep:chrono",
+    "dep:time",
+    "dep:jiff",
+]
+
+[dependencies]
+axutils = { path = "../../..", default-features = false }
+chrono = { version = "0.4.45", default-features = false, optional = true }
+time = { version = "0.3.36", default-features = false, optional = true }
+jiff = { version = "0.2.35", default-features = false, optional = true }

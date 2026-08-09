@@ -100,7 +100,8 @@ impl ConfigLoader {
         self
     }
 
-    /// 设置文件大小上限（字节），允许范围为 1 KiB 到 16 MiB（含边界）。
+    /// 设置文件与 `.env` 插值后累计内容的大小上限（字节），允许范围为 1 KiB 到 16 MiB
+    ///（含边界）。
     ///
     /// # Errors
     ///
@@ -339,7 +340,7 @@ impl ConfigLoader {
     ) -> Result<ConfigValue, ConfigError> {
         match format {
             ConfigFormat::Json => json::parse_value(text, self.max_depth),
-            ConfigFormat::Env => env::parse_value(text, self.env_substitution),
+            ConfigFormat::Env => env::parse_value(text, self.env_substitution, self.max_bytes),
             #[cfg(feature = "serde-saphyr")]
             ConfigFormat::Yaml => yaml::parse_value(text, self.max_depth),
             #[cfg(feature = "toml")]
@@ -381,7 +382,7 @@ impl ConfigLoader {
         match format {
             ConfigFormat::Json => json::parse(text),
             ConfigFormat::Env => {
-                let value = env::parse_value(text, self.env_substitution)?;
+                let value = env::parse_value(text, self.env_substitution, self.max_bytes)?;
                 de::deserialize(&value)
             }
             #[cfg(feature = "serde-saphyr")]

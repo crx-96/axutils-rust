@@ -145,6 +145,23 @@ impl HttpHeaders {
         Ok(merged)
     }
 
+    pub(crate) fn without_sensitive(&self) -> Self {
+        let entries = self
+            .entries
+            .iter()
+            .filter(|entry| !is_sensitive_name(&entry.name))
+            .cloned()
+            .collect::<Vec<_>>();
+        let total_bytes = entries
+            .iter()
+            .map(|entry| entry.name.len() + entry.value.len())
+            .sum();
+        Self {
+            entries,
+            total_bytes,
+        }
+    }
+
     pub(crate) fn total_bytes(&self) -> usize {
         self.total_bytes
     }

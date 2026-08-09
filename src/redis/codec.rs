@@ -76,8 +76,7 @@ impl std::io::Write for LimitedWriter {
 mod tests {
     use serde::{Deserialize, Serialize};
 
-    use super::{decode, encode, raw};
-    use crate::redis::RedisError;
+    use super::{decode, encode, raw, RedisError};
 
     #[derive(Debug, PartialEq, Serialize, Deserialize)]
     enum Kind {

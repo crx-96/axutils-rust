@@ -5,6 +5,7 @@ use std::time::Duration;
 
 use super::config::DeduplicationPolicy;
 use super::headers::HttpHeaders;
+#[cfg(feature = "serde")]
 use super::request::HttpRequest;
 use super::retry::RetryPolicy;
 use super::HttpError;
@@ -237,6 +238,7 @@ impl HttpRequestOptions {
         self.deduplication_policy.as_ref()
     }
 
+    #[cfg(feature = "serde")]
     pub(crate) fn apply_to_request(
         &self,
         mut request: HttpRequest,

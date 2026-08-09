@@ -31,10 +31,10 @@ fn verifies_feature_api_matrix_and_dependency_boundaries() {
         ("tokio-only", true, ""),
         ("sync", true, ""),
         ("all", true, ""),
-        ("negative-email-module", false, "email"),
+        ("negative-email-module", false, "emailclient"),
         ("negative-email-client", false, "emailclient"),
         ("negative-email-utils", false, "emailutils"),
-        ("negative-tokio-email-module", false, "email"),
+        ("negative-tokio-email-module", false, "emailclient"),
         ("negative-tokio-email-client", false, "emailclient"),
         ("negative-tokio-email-utils", false, "emailutils"),
         ("negative-async", false, "send_async"),
@@ -75,10 +75,10 @@ fn verifies_http_feature_api_matrix_and_dependency_boundaries() {
         ("serde-only", true, ""),
         ("http-serde", true, ""),
         ("http-tokio-serde", true, ""),
-        ("negative-http-module", false, "http"),
+        ("negative-http-module", false, "httpclient"),
         ("negative-http-client", false, "httpclient"),
         ("negative-http-utils", false, "httputils"),
-        ("negative-http-tokio-module", false, "http"),
+        ("negative-http-tokio-module", false, "httpclient"),
         ("negative-http-tokio-client", false, "httpclient"),
         ("negative-http-tokio-utils", false, "httputils"),
         ("negative-http-async", false, "execute_async"),
@@ -154,6 +154,62 @@ fn verifies_format_template_feature_api_matrix() {
 
 #[test]
 #[ignore = "慢速 feature/依赖契约矩阵；使用 cargo test --no-default-features --test feature_matrix -- --ignored 执行"]
+fn verifies_time_backend_feature_api_matrix_and_dependency_boundaries() {
+    let fixture_manifest = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("fixtures")
+        .join("time_feature_matrix")
+        .join("Cargo.toml");
+    let target_dir = unique_target("axutils-time-feature-matrix");
+
+    for feature in [
+        "none",
+        "chrono-only",
+        "time-only",
+        "jiff-only",
+        "chrono-time",
+        "chrono-jiff",
+        "time-jiff",
+        "all",
+    ] {
+        let output = run_fixture(&fixture_manifest, &target_dir.0, feature);
+        assert!(
+            output.status.success(),
+            "time fixture feature `{feature}` should compile successfully: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    for feature in [
+        "negative-chrono-time-alias",
+        "negative-chrono-jiff-alias",
+        "negative-time-jiff-alias",
+        "negative-all-alias",
+    ] {
+        let output = run_fixture(&fixture_manifest, &target_dir.0, feature);
+        assert!(
+            !output.status.success(),
+            "time fixture feature `{feature}` should fail to compile"
+        );
+        assert_expected_diagnostics(
+            &output,
+            &[
+                "format_date",
+                "format_option_date",
+                "format_datetime",
+                "format_option_datetime",
+                "format_datetime_with_offset",
+                "format_option_datetime_with_offset",
+            ],
+            feature,
+        );
+    }
+
+    assert_time_dependency_boundaries();
+}
+
+#[test]
+#[ignore = "慢速 feature/依赖契约矩阵；使用 cargo test --no-default-features --test feature_matrix -- --ignored 执行"]
 fn verifies_config_feature_api_matrix_and_dependency_boundaries() {
     let fixture_manifest = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests")
@@ -173,7 +229,7 @@ fn verifies_config_feature_api_matrix_and_dependency_boundaries() {
         ("serde-tokio", true, ""),
         ("all", true, ""),
         ("serde-tokio-all", true, ""),
-        ("negative-config-module-no-serde", false, "config"),
+        ("negative-config-module-no-serde", false, "configloader"),
         ("negative-config-utils-no-serde", false, "configutils"),
         ("negative-tokio-config-no-serde", false, "configutils"),
         ("negative-toml-only-no-serde", false, "configutils"),
@@ -342,7 +398,7 @@ fn verifies_jwt_feature_api_matrix_and_dependency_boundaries() {
         ("jwt-tokio", true, ""),
         ("jwt-regex", true, ""),
         ("all", true, ""),
-        ("negative-none-jwt-module", false, "jwt"),
+        ("negative-none-jwt-module", false, "jwtalgorithm"),
         ("negative-none-jwt-algorithm", false, "jwtalgorithm"),
         ("negative-none-jwt-signing-key", false, "jwtsigningkey"),
         (
@@ -356,8 +412,8 @@ fn verifies_jwt_feature_api_matrix_and_dependency_boundaries() {
         ("negative-none-jwt-utils", false, "jwtutils"),
         ("negative-none-utils-jwt-utils", false, "jwtutils"),
         ("negative-none-direct-jwt-utils", false, "jwtutils"),
-        ("negative-serde-only-jwt-module", false, "jwt"),
-        ("negative-jwt-only-config", false, "config"),
+        ("negative-serde-only-jwt-module", false, "jwtalgorithm"),
+        ("negative-jwt-only-config", false, "configloader"),
         ("negative-jwt-only-config-loader", false, "configloader"),
     ] {
         let output = run_fixture(&fixture_manifest, &target_dir.0, feature);
@@ -397,15 +453,15 @@ fn verifies_redis_feature_api_matrix_and_dependency_boundaries() {
         ("redis-serde", true, ""),
         ("redis-tokio-serde", true, ""),
         ("all", true, ""),
-        ("negative-no-redis-module", false, "redis"),
+        ("negative-no-redis-module", false, "redisclient"),
         ("negative-no-redis-root", false, "redisclient"),
         ("negative-no-redis-utils", false, "redisutils"),
-        ("negative-tokio-redis-module", false, "redis"),
+        ("negative-tokio-redis-module", false, "redisclient"),
         ("negative-tokio-redis-root", false, "redisclient"),
         ("negative-tokio-redis-utils", false, "redisutils"),
         ("negative-redis-async", false, "get_async"),
         ("negative-redis-utils-async", false, "get_async"),
-        ("negative-redis-config", false, "config"),
+        ("negative-redis-config", false, "configloader"),
     ] {
         let output = run_fixture(&fixture_manifest, &target_dir.0, feature);
         if expected_success {
@@ -516,15 +572,17 @@ fn assert_config_dependency_boundaries() {
 }
 
 fn run_fixture(manifest: &Path, target_dir: &Path, feature: &str) -> Output {
+    let (_fixture, temporary_manifest) = copy_fixture_to_temporary_directory(manifest);
     let mut command = Command::new("cargo");
     command
         .arg("check")
         .arg("--manifest-path")
-        .arg(manifest)
+        .arg(&temporary_manifest)
         .arg("--target-dir")
         .arg(target_dir)
         .arg("--no-default-features")
         .arg("--offline")
+        .arg("--message-format=json")
         .env("CARGO_TERM_COLOR", "never");
     if !feature.is_empty() {
         command.arg("--features").arg(feature);
@@ -533,6 +591,66 @@ fn run_fixture(manifest: &Path, target_dir: &Path, feature: &str) -> Output {
     command
         .output()
         .unwrap_or_else(|_| panic!("failed to run cargo for fixture feature `{feature}`"))
+}
+
+fn copy_fixture_to_temporary_directory(manifest: &Path) -> (TemporaryTarget, PathBuf) {
+    let source = manifest
+        .parent()
+        .unwrap_or_else(|| panic!("fixture manifest has no parent: {}", manifest.display()));
+    let destination = unique_target("axutils-feature-fixture");
+    copy_fixture_directory(source, &destination.0);
+
+    let copied_manifest = destination.0.join("Cargo.toml");
+    let manifest_text = fs::read_to_string(&copied_manifest).unwrap_or_else(|_| {
+        panic!(
+            "failed to read copied fixture: {}",
+            copied_manifest.display()
+        )
+    });
+    let repository = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .to_string_lossy()
+        .replace('\\', "/");
+    let manifest_text =
+        manifest_text.replace("path = \"../../..\"", &format!("path = \"{repository}\""));
+    fs::write(&copied_manifest, manifest_text).unwrap_or_else(|_| {
+        panic!(
+            "failed to write temporary fixture: {}",
+            copied_manifest.display()
+        )
+    });
+
+    (destination, copied_manifest)
+}
+
+fn copy_fixture_directory(source: &Path, destination: &Path) {
+    fs::create_dir_all(destination).unwrap_or_else(|_| {
+        panic!(
+            "failed to create temporary fixture directory: {}",
+            destination.display()
+        )
+    });
+    for entry in fs::read_dir(source)
+        .unwrap_or_else(|_| panic!("failed to read fixture directory: {}", source.display()))
+    {
+        let entry = entry.expect("failed to read fixture entry");
+        let name = entry.file_name();
+        if name == "Cargo.lock" || name == "target" {
+            continue;
+        }
+        let source_path = entry.path();
+        let destination_path = destination.join(name);
+        if entry.file_type().expect("fixture entry type").is_dir() {
+            copy_fixture_directory(&source_path, &destination_path);
+        } else {
+            fs::copy(&source_path, &destination_path).unwrap_or_else(|_| {
+                panic!(
+                    "failed to copy fixture file {} to {}",
+                    source_path.display(),
+                    destination_path.display()
+                )
+            });
+        }
+    }
 }
 
 fn unique_target(prefix: &str) -> TemporaryTarget {
@@ -548,35 +666,59 @@ fn unique_target(prefix: &str) -> TemporaryTarget {
 }
 
 fn assert_expected_diagnostic(output: &Output, token: &str, feature: &str) {
-    let diagnostics = format!(
-        "{}{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    )
-    .to_ascii_lowercase();
+    let diagnostics = rust_error_diagnostics(output);
+    let token = normalize_diagnostic(token);
     assert!(
-        diagnostics.contains("error") && diagnostics.contains(token),
-        "fixture feature `{feature}` did not fail because the expected API was unavailable"
+        diagnostics
+            .iter()
+            .any(|diagnostic| normalize_diagnostic(diagnostic).contains(&token)),
+        "fixture feature `{feature}` did not produce a target Rust API diagnostic for `{token}`"
     );
 }
 
 fn assert_expected_diagnostics(output: &Output, tokens: &[&str], feature: &str) {
-    let diagnostics = format!(
-        "{}{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    )
-    .to_ascii_lowercase();
+    let diagnostics = rust_error_diagnostics(output);
     assert!(
-        diagnostics.contains("error"),
-        "fixture feature `{feature}` did not fail to compile"
+        !diagnostics.is_empty(),
+        "fixture feature `{feature}` did not emit a supported Rust compiler error"
     );
     for token in tokens {
+        let normalized_token = normalize_diagnostic(token);
         assert!(
-            diagnostics.contains(token),
+            diagnostics
+                .iter()
+                .any(|diagnostic| { normalize_diagnostic(diagnostic).contains(&normalized_token) }),
             "fixture feature `{feature}` diagnostic did not contain `{token}`"
         );
     }
+}
+
+fn rust_error_diagnostics(output: &Output) -> Vec<&str> {
+    const EXPECTED_API_ERROR_CODES: [&str; 6] =
+        ["E0412", "E0425", "E0432", "E0433", "E0599", "E0603"];
+    let stdout = std::str::from_utf8(&output.stdout).expect("cargo JSON output should be UTF-8");
+    stdout
+        .lines()
+        .filter_map(|line| {
+            let is_target_api_error = line.contains(r#""reason":"compiler-message""#)
+                && line.contains(r#""level":"error""#)
+                && EXPECTED_API_ERROR_CODES
+                    .iter()
+                    .any(|code| line.contains(&format!(r#""code":"{code}""#)));
+            is_target_api_error
+                .then(|| line.find(r#""message":{"#))
+                .flatten()
+                .map(|message_start| &line[message_start..])
+        })
+        .collect()
+}
+
+fn normalize_diagnostic(value: &str) -> String {
+    value
+        .chars()
+        .filter(|character| character.is_ascii_alphanumeric())
+        .flat_map(char::to_lowercase)
+        .collect()
 }
 
 fn assert_dependency_boundaries() {
@@ -687,6 +829,30 @@ fn assert_jwt_dependency_boundaries() {
     assert!(!jwt_feature_tree.contains("jsonwebtoken feature \"aws_lc_rs\""));
 }
 
+fn assert_time_dependency_boundaries() {
+    let no_feature_tree = cargo_tree("");
+    for package in ["chrono", "time", "jiff"] {
+        assert!(!has_package(&no_feature_tree, package));
+    }
+
+    for (feature, expected, forbidden) in [
+        ("chrono", "chrono", ["time", "jiff"]),
+        ("time", "time", ["chrono", "jiff"]),
+        ("jiff", "jiff", ["chrono", "time"]),
+    ] {
+        let tree = cargo_tree(feature);
+        assert!(has_package(&tree, expected));
+        for package in forbidden {
+            assert!(!has_package(&tree, package));
+        }
+    }
+
+    let all_tree = cargo_tree("chrono,time,jiff");
+    for package in ["chrono", "time", "jiff"] {
+        assert!(has_package(&all_tree, package));
+    }
+}
+
 fn assert_redis_dependency_boundaries() {
     let no_feature_tree = cargo_tree("");
     assert!(!has_package(&no_feature_tree, "redis"));
@@ -703,7 +869,16 @@ fn assert_redis_dependency_boundaries() {
     assert!(has_package(&redis_tree, "redis"));
     assert!(has_package(&redis_tree, "r2d2"));
     assert!(has_package(&redis_tree, "rmp-serde"));
+    assert!(!has_package(&redis_tree, "tokio"));
     assert!(!has_package(&redis_tree, "serde_json"));
+
+    let redis_feature_tree = cargo_feature_tree_inverted("redis", "redis");
+    for feature in ["tokio-comp", "cluster-async", "connection-manager"] {
+        assert!(
+            !redis_feature_tree.contains(&format!("redis feature \"{feature}\"")),
+            "redis alone unexpectedly enables async redis feature `{feature}`"
+        );
+    }
 
     let serde_tree = cargo_tree("serde");
     assert!(has_package(&serde_tree, "serde_json"));
@@ -722,6 +897,14 @@ fn assert_redis_dependency_boundaries() {
     assert!(has_package(&redis_tokio_tree, "r2d2"));
     assert!(has_package(&redis_tokio_tree, "rmp-serde"));
     assert!(has_package(&redis_tokio_tree, "tokio"));
+
+    let redis_tokio_feature_tree = cargo_feature_tree_inverted("redis,tokio", "redis");
+    for feature in ["tokio-comp", "cluster-async", "connection-manager"] {
+        assert!(
+            redis_tokio_feature_tree.contains(&format!("redis feature \"{feature}\"")),
+            "redis+tokio does not enable required async redis feature `{feature}`"
+        );
+    }
 }
 
 fn cargo_tree(features: &str) -> String {
@@ -745,6 +928,29 @@ fn cargo_tree_with_edges(features: &str, edges: &str) -> String {
     assert!(
         output.status.success(),
         "cargo tree failed for feature `{features}`"
+    );
+    String::from_utf8(output.stdout).expect("cargo tree output should be UTF-8")
+}
+
+fn cargo_feature_tree_inverted(features: &str, package: &str) -> String {
+    let output = Command::new("cargo")
+        .arg("tree")
+        .arg("--manifest-path")
+        .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml"))
+        .arg("--no-default-features")
+        .arg("--features")
+        .arg(features)
+        .arg("--offline")
+        .arg("--edges")
+        .arg("features")
+        .arg("--invert")
+        .arg(package)
+        .env("CARGO_TERM_COLOR", "never")
+        .output()
+        .unwrap_or_else(|_| panic!("failed to run inverted cargo tree for `{package}`"));
+    assert!(
+        output.status.success(),
+        "inverted cargo tree failed for feature `{features}` and package `{package}`"
     );
     String::from_utf8(output.stdout).expect("cargo tree output should be UTF-8")
 }

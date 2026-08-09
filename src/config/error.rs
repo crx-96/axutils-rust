@@ -23,6 +23,11 @@ pub enum ConfigError {
         /// 生效的字节数上限。
         limit: usize,
     },
+    /// `.env` 插值后的累计内容超过 [`crate::config::ConfigLoader`] 配置的字节上限。
+    ExpandedValueTooLarge {
+        /// 生效的字节数上限。
+        limit: usize,
+    },
     /// 文件内容不是合法 UTF-8。
     NotUtf8 {
         /// 调用方传入的文件路径。
@@ -91,6 +96,10 @@ impl fmt::Display for ConfigError {
                 formatter,
                 "config file {} exceeds the {limit}-byte size limit",
                 path.display()
+            ),
+            Self::ExpandedValueTooLarge { limit } => write!(
+                formatter,
+                "expanded env config exceeds the {limit}-byte size limit"
             ),
             Self::NotUtf8 { path } => {
                 write!(
@@ -213,6 +222,7 @@ mod tests {
                 path: PathBuf::from("config.toml"),
                 limit: 1024,
             },
+            ConfigError::ExpandedValueTooLarge { limit: 1024 },
             ConfigError::NotUtf8 {
                 path: PathBuf::from("config.toml"),
             },

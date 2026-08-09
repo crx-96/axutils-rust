@@ -2356,7 +2356,9 @@ impl RedisClient {
         match pipeline.exec(&mut *connection) {
             Ok(()) => Ok(()),
             Err(error) => {
-                connection.mark_broken();
+                if should_discard_transaction_connection(&error, connection.is_open()) {
+                    connection.mark_broken();
+                }
                 Err(RedisError::transaction_failure(&error))
             }
         }
@@ -2474,7 +2476,8 @@ impl RedisClient {
     /// 异步执行单机 MULTI/EXEC 事务。
     ///
     /// 事务 callback 是一次性的同步排队闭包，不接受 async callback，也不会被重放。专用
-    /// multiplexed connection 与普通命令分离；future 取消或事务失败时该连接会被丢弃。
+    /// multiplexed connection 与普通命令分离；future 取消或连接状态不再可靠时该连接会被丢弃。
+    /// 已完整读取响应的普通 Redis 服务端命令错误不会淘汰健康连接。
     ///
     /// # Examples
     ///
@@ -2537,7 +2540,12 @@ impl RedisClient {
                 *slot.lock().await = Some(connection);
                 Ok(())
             }
-            Err(error) => Err(RedisError::transaction_failure(&error)),
+            Err(error) => {
+                if !should_discard_transaction_connection(&error, true) {
+                    *slot.lock().await = Some(connection);
+                }
+                Err(RedisError::transaction_failure(&error))
+            }
         }
     }
 }
@@ -2823,6 +2831,10 @@ fn should_discard_connection(error: &RedisError, is_open: bool) -> bool {
         )
 }
 
+fn should_discard_transaction_connection(error: &::redis::RedisError, is_open: bool) -> bool {
+    should_discard_connection(&RedisError::from_upstream(error), is_open)
+}
+
 fn parse_manager_error_kind(value: &str) -> Option<RedisTransportErrorKind> {
     match value {
         "connection" => Some(RedisTransportErrorKind::Connection),
@@ -2847,7 +2859,8 @@ fn compile_assertions() {
 mod tests {
     use super::{
         check_optional_values, collect_keys, collect_raw_pairs, decode_collection,
-        decode_hash_entries, should_discard_connection, RedisClient,
+        decode_hash_entries, should_discard_connection, should_discard_transaction_connection,
+        RedisClient,
     };
     use crate::redis::{RedisConfig, RedisError, RedisTransportErrorKind};
 
@@ -2951,6 +2964,21 @@ mod tests {
             &RedisError::Transport(RedisTransportErrorKind::Server),
             false
         ));
+    }
+
+    #[test]
+    fn transaction_discards_only_connections_with_unreliable_state() {
+        let server_error = ::redis::RedisError::from((
+            ::redis::ErrorKind::Server(::redis::ServerErrorKind::ResponseError),
+            "server error",
+            "WRONGTYPE operation against a key holding the wrong kind of value".to_owned(),
+        ));
+        assert!(!should_discard_transaction_connection(&server_error, true));
+        assert!(should_discard_transaction_connection(&server_error, false));
+
+        let protocol_error =
+            ::redis::RedisError::from((::redis::ErrorKind::Parse, "invalid Redis response"));
+        assert!(should_discard_transaction_connection(&protocol_error, true));
     }
 
     #[cfg(all(feature = "redis", feature = "tokio"))]

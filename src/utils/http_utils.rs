@@ -2,9 +2,10 @@
 
 use std::sync::OnceLock;
 
-use crate::http::{
-    HttpClient, HttpConfig, HttpError, HttpRequest, HttpRequestOptions, HttpResponse,
-};
+use crate::http::{HttpClient, HttpConfig, HttpError, HttpRequest, HttpResponse};
+
+#[cfg(feature = "serde")]
+use crate::http::HttpRequestOptions;
 
 static HTTP_CLIENT: OnceLock<HttpClient> = OnceLock::new();
 
