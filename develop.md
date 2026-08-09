@@ -68,7 +68,6 @@ cargo test --no-default-features --features http --test http
 cargo test --no-default-features --features redis --test redis
 cargo test --no-default-features --features redis,tokio --doc
 cargo tree --no-default-features --features redis -e normal,build
-cargo bench --no-default-features --features redis --bench redis_codec
 
 # 需要覆盖所有已启用模块、feature/API 依赖边界和文档时，使用下面的完整清单；其中
 # feature/API/依赖边界矩阵是慢速测试，默认 cargo test 会跳过。
