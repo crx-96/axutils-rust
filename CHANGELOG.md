@@ -80,6 +80,12 @@
 - 新增 `redis,tokio` 组合下的 `_async` Redis 命令和独立事务通道；异步连接惰性初始化，
   不创建 Tokio runtime、不调用 `block_on`，调用方必须提供 runtime。Redis feature 直接启用
   专用 `serde` 依赖但不自动启用项目公共 `serde` feature。
+- 新增互斥的 `mimalloc` 和 `rpmalloc` allocator feature，分别使用可选的 `mimalloc 0.1.52`
+  与 `rpmalloc 0.2.2` 依赖注册唯一 Rust 全局分配器；不启用时保持目标平台默认分配器。由于
+  `axutils` 是 library，启用后会影响依赖它的最终 Rust binary；已有 `#[global_allocator]` 的
+  应用或递归依赖不得重复启用，两个 allocator feature 同时启用会以编译错误拒绝。native
+  构建需要目标平台的 C toolchain；Windows 的 rpmalloc 路径还需要 SDK 提供 `Advapi32` import
+  library。
 
 ### Changed
 

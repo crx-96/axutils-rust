@@ -55,6 +55,8 @@ base64 = ["dep:base64"]
 md5 = ["dep:md5"]
 aes = ["dep:aes", "dep:aes-gcm", "dep:cbc", "dep:zeroize"]
 encoding_rs = ["dep:encoding_rs"]
+mimalloc = ["dep:mimalloc"]
+rpmalloc = ["dep:rpmalloc"]
 
 [dependencies]
 jsonwebtoken = { version = "11.0.0", default-features = false, features = [
@@ -97,6 +99,8 @@ aes-gcm = { version = "0.11.0", default-features = false, features = ["aes", "al
 cbc = { version = "0.2.1", default-features = false, features = ["alloc", "block-padding", "zeroize"], optional = true }
 zeroize = { version = "1.9.0", default-features = false, optional = true }
 encoding_rs = { version = "0.8.35", default-features = false, features = ["alloc"], optional = true }
+mimalloc = { version = "0.1.52", default-features = false, optional = true }
+rpmalloc = { version = "0.2.2", default-features = false, optional = true }
 
 [dev-dependencies]
 tokio = { version = "1.53.1", default-features = false, features = ["macros", "rt-multi-thread"] }

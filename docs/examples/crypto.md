@@ -18,7 +18,7 @@
 | `aes` | `AesKey`/`AesKeyBits`/`AesMode`/`AesCipher`、`CryptoUtils::aes_init`/`aes_init_from_bytes`/`aes_is_initialized`/`aes_mode` 与无密钥参数的 AES 方法 |
 | `aes` + `base64` | 以上全部，另加 `aes_encrypt_base64`/`aes_decrypt_base64` |
 | `base64`/`md5` + `encoding_rs` | 对应 `*_text` 方法可传入 legacy `TextEncoding` 变体 |
-| `--all-features` | 全部 |
+| 所有 crypto 相关 feature（`base64`、`md5`、`aes`、`encoding_rs`） | 全部 crypto 能力；不包含互斥的全局 allocator feature |
 
 MD5 是摘要算法，不是加密，不可逆；已存在实用碰撞攻击，**禁止**用于密码存储、数字签名、证书、
 防篡改校验、内容寻址或任何对抗性场景，仅适用于与既有系统对接、且输入不受攻击者控制的非对抗性

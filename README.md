@@ -11,6 +11,10 @@
 `RegUtils` 需要 `regex`，`RandomUtils` 需要 `rand`，模板、日期后端、邮件、配置读取和 `CryptoUtils`
 的 Base64/MD5/AES 能力都需要显式 feature。公共导出路径和完整边界见各模块使用文档。
 
+`mimalloc` 和 `rpmalloc` feature 用于为依赖该 library 的最终 Rust binary 选择进程级全局内存
+分配器；两者不能同时启用，也不会提供运行时切换 API。应用或递归依赖已有
+`#[global_allocator]` 时，启用前必须先确认不会发生重复注册。
+
 邮件能力使用 Rustls 强制 SMTPS/STARTTLS，不提供明文或机会式降级；配置文件读取统一限制文件大小，
 错误不回显配置值。真实凭据只能由调用方在本地安全管理，不能硬编码或提交到 Git。
 
@@ -186,8 +190,17 @@ axutils = { version = "0.1", features = ["aes", "base64"] }
 axutils = { version = "0.1", features = ["encoding_rs"] }
 ```
 
-所有 feature 都可以同时启用；各后端仍须满足自己的组合前提。完整 API 和每个方法的可编译示例见
-下面对应的模块文档。
+为最终 Rust binary 选择进程级全局内存分配器的最小配置如下（`rpmalloc` 可替换
+`mimalloc`，两者不能同时启用）：
+
+```toml
+[dependencies]
+axutils = { version = "0.1", features = ["mimalloc"] }
+```
+
+除互斥的 `mimalloc` 与 `rpmalloc` 外，各 feature 可以按各自组合前提启用；两个 allocator
+feature 不能同时启用。完整 API 和每个方法的可编译示例见下面对应的模块文档。全局分配器的
+作用域、构建前置条件和下游兼容性见[全局内存分配器使用文档](docs/examples/allocator.md)。
 
 ## 使用 JWT
 

@@ -1,0 +1,18 @@
+[package]
+name = "axutils-allocator-feature-matrix"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[features]
+none = []
+mimalloc = ["axutils/mimalloc"]
+rpmalloc = ["axutils/rpmalloc"]
+mimalloc-serde = ["axutils/mimalloc", "axutils/serde"]
+rpmalloc-serde = ["axutils/rpmalloc", "axutils/serde"]
+mimalloc-rpmalloc = ["axutils/mimalloc", "axutils/rpmalloc"]
+mimalloc-downstream-system = ["axutils/mimalloc"]
+rpmalloc-downstream-system = ["axutils/rpmalloc"]
+
+[dependencies]
+axutils = { path = "../../..", default-features = false }

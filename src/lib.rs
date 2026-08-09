@@ -2,6 +2,10 @@
 //!
 //! 默认不启用第三方依赖，因此 `PathUtils`、`TimeUtils` 和 `FormatUtils` 的持续时间格式化
 //! 能力可以直接使用。
+//! 如果要为依赖该 library 的最终 Rust binary 选择进程级全局内存分配器，可显式启用
+//! `mimalloc` 或 `rpmalloc` feature；两个 feature 互斥，且应用或递归依赖不能再声明另一个
+//! `#[global_allocator]`。这两个 feature 不增加公共 Rust API，也不提供运行时切换；完整的
+//! 平台前置条件和兼容性说明见项目的全局内存分配器使用文档。
 //! 需要发送 SMTP 邮件时，显式启用 `lettre` feature；它提供强制 SMTPS/STARTTLS、连接池、
 //! 多实例 `EmailClient` 和一次初始化的全局 `EmailUtils`。如果还要使用异步发送，必须
 //! 同时启用 `lettre` 与 `tokio` feature，异步调用方需要自行运行在 Tokio runtime 中。
@@ -124,6 +128,9 @@
 //!
 //! # 异步 HTTP 改为 features = ["http", "tokio"]。
 //! ```
+
+#[cfg(any(feature = "mimalloc", feature = "rpmalloc"))]
+mod allocator;
 
 mod time;
 pub mod utils;

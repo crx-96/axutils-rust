@@ -23,6 +23,7 @@
 └── src/
     ├── config/         # 配置文件读取后端（需要 serde 及对应格式 feature）
     ├── crypto/         # 十六进制/TextEncoding 默认可用；Base64/MD5/AES 需要对应 feature
+    ├── allocator.rs    # mimalloc/rpmalloc 的私有全局分配器选择（互斥 feature）
     ├── email/         # SMTP 配置、消息、错误与多实例客户端（需要 lettre feature）
     ├── lib.rs          # crate 入口和公共导出
     ├── redis/          # Redis 配置、客户端、命令、事务与错误（需要 redis feature）
@@ -70,14 +71,19 @@ cargo test --no-default-features --features redis,tokio --doc
 cargo tree --no-default-features --features redis -e normal,build
 
 # 需要覆盖所有已启用模块、feature/API 依赖边界和文档时，使用下面的完整清单；其中
-# feature/API/依赖边界矩阵是慢速测试，默认 cargo test 会跳过。
+# feature/API/依赖边界矩阵是慢速测试，默认 cargo test 会跳过。allocator 后端必须分别验证；
+# mimalloc + rpmalloc 是预期失败组合，不能把 --all-features 作为成功验收命令。
 cargo fmt --all -- --check
-cargo test --all-features --tests
 cargo test --no-default-features --test feature_matrix -- --ignored --test-threads=1
-cargo test --doc --all-features
-cargo clippy --all-targets --all-features -- -D warnings
-cargo doc --no-deps --all-features
 cargo test --no-default-features
+cargo test --no-default-features --features mimalloc
+cargo test --no-default-features --features rpmalloc
+cargo test --no-default-features --features mimalloc --doc
+cargo test --no-default-features --features rpmalloc --doc
+cargo clippy --all-targets --no-default-features --features mimalloc -- -D warnings
+cargo clippy --all-targets --no-default-features --features rpmalloc -- -D warnings
+cargo tree --no-default-features --features mimalloc -e normal,build,features
+cargo tree --no-default-features --features rpmalloc -e normal,build,features
 cargo check --no-default-features --features lettre
 cargo check --no-default-features --features lettre,tokio
 cargo test --doc --no-default-features --features lettre,tokio
@@ -108,6 +114,12 @@ cargo package --list
 git diff --check
 ```
 
+allocator 的负向契约单独执行，预期以非零状态退出并包含固定诊断；该命令不属于上面的成功清单：
+
+```powershell
+cargo check --no-default-features --features mimalloc,rpmalloc
+```
+
 每个公开方法都应同时具备：
 
 1. API doc，说明行为、输入范围和限制；
@@ -118,8 +130,10 @@ git diff --check
 新增方法时优先评估性能和安全边界；新增、删除或重命名工具类/公共模块时，必须同步维护
 `docs/module-map.md` 中的职责、导出、依赖和使用场景定位。
 
-新增 feature 时，应同步更新 `Cargo.toml`、`README.md`、`CHANGELOG.md` 和本文件，并至少验证默认
-feature、`--no-default-features`、相关单 feature、组合 feature 和 `--all-features`。
+新增普通 feature 时，应同步更新 `Cargo.toml`、`README.md`、`CHANGELOG.md` 和本文件，并至少验证默认
+feature、`--no-default-features`、相关单 feature、组合 feature 和适用的 `--all-features`。`mimalloc`
+与 `rpmalloc` 是有意互斥的进程级 allocator feature，必须分别验证单 feature、依赖边界和下游
+重复注册失败；双 feature 及由此触发的 `--all-features` 组合属于预期编译失败。
 配置读取能力以 `serde` 为基础 feature；YAML、TOML、INI 分别还需要
 `serde-saphyr`、`toml`、`rust-ini`，且单独启用这些后端 feature 时不得导出配置 API。
 `CryptoUtils` 本身与十六进制/`TextEncoding::Utf8` 文本编解码能力默认可用（不依赖任何第三方
@@ -156,10 +170,13 @@ Redis 单机真实测试使用 `tests/redis_live.rs`，同步/异步测试固定
 
    ```powershell
    cargo fmt --all -- --check
-   cargo test --all-features --tests
    cargo test --no-default-features --test feature_matrix -- --ignored --test-threads=1
-   cargo test --doc --all-features
-   cargo clippy --all-targets --all-features -- -D warnings
+   cargo test --no-default-features --features mimalloc
+   cargo test --no-default-features --features rpmalloc
+   cargo test --no-default-features --features mimalloc --doc
+   cargo test --no-default-features --features rpmalloc --doc
+   cargo clippy --all-targets --no-default-features --features mimalloc -- -D warnings
+   cargo clippy --all-targets --no-default-features --features rpmalloc -- -D warnings
    ```
 
 5. 检查发布包文件清单，确认详细使用文档已包含且开发者文档没有被包含：
@@ -217,6 +234,8 @@ md5 = ["dep:md5"]
 aes = ["dep:aes", "dep:aes-gcm", "dep:cbc", "dep:zeroize"]
 encoding_rs = ["dep:encoding_rs"]
 jwt = ["dep:jsonwebtoken", "dep:serde", "dep:serde_json"]
+mimalloc = ["dep:mimalloc"]
+rpmalloc = ["dep:rpmalloc"]
 ```
 
 调用方直接依赖 `axutils = "0.1"` 即可使用 `PathUtils` 和 `TimeUtils`；需要
@@ -248,6 +267,12 @@ axutils = { version = "0.1", features = ["regex", "libphonenumber"] }
 这类方法应直接从 crate 根模块导出。新增 feature 或公共方法时，要同步更新
 `Cargo.toml`、`README.md`、`CHANGELOG.md`、API doc、doctest 和测试。
 
+`mimalloc` 与 `rpmalloc` 是可选依赖对应的互斥 feature；它们只负责在 crate 私有模块中注册
+唯一的 `#[global_allocator]`，不启用其他项目 feature，也不提供运行时 API。启用 allocator
+feature 后，最终 binary 只能保留一个 global allocator；现有 `--all-features` 组合会同时打开
+两个后端，必须按预期失败处理。正向 fixture 需完成 `cargo run` 的最终链接和运行，负向 fixture
+需覆盖双后端及下游额外 `System` 注册。
+
 邮件模块只由 `lettre` feature 导出；`tokio` feature 通过弱依赖语法为“已经启用的
 `lettre`”打开 Tokio Rustls 适配，因此单独启用 `tokio` 不会拉入 `lettre`。同一个 `tokio`
 feature 也为 `serde + tokio` 配置异步入口提供 `fs`/`io-util`；生产依赖不使用 `tokio` 的
@@ -258,7 +283,8 @@ dev-dependency。`lettre` 最低版本为经核验的 `0.11.22`，使用 Cargo �
 机会式 STARTTLS。
 
 本仓库不再维护 GitHub Actions CI 工作流。跨平台验证需要维护者在 Windows、Linux、macOS 的 Rust 1.88
-和 stable 环境中自行执行；当前仓库只提供不连接 SMTP relay 的测试和 feature/依赖边界验证，不会连接
+和 stable 环境中自行执行；mimalloc/rpmalloc 还需要目标平台可用的 C compiler、linker 和 SDK，缺少
+时不得自动修改系统工具链。当前仓库只提供不连接 SMTP relay 的测试和 feature/依赖边界验证，不会连接
 SMTP relay。`axutils` 是 library crate，不新增 Dockerfile；README 中的 Debian/Ubuntu 与 Alpine Docker
 内容只是消费方替换占位符后的说明性模板。
 
