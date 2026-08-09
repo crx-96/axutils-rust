@@ -80,6 +80,18 @@
 //! axutils = { version = "0.1", features = ["aes", "base64"] }
 //! ```
 
+//! Redis 能力需要显式启用 `redis` feature；它提供惰性连接池、Cluster 普通命令、受限
+//! MessagePack 值 API、raw 字节 API、事务和一次初始化的 `RedisUtils`。同时启用 `tokio`
+//! 后追加 `_async` 异步方法；调用方必须自行提供 Tokio runtime。第一阶段只接受
+//! `redis://`，不启用 TLS；构造配置、客户端或全局入口不会访问网络。详细 API、feature
+//! 矩阵、大小边界和事务语义见 [`Redis 使用文档`](https://github.com/crx-96/axutils-rust/blob/main/docs/examples/redis.md)。
+//!
+//! ```toml
+//! [dependencies]
+//! axutils = { version = "0.1", features = ["redis", "tokio"] }
+//! tokio = { version = "1.53.1", features = ["macros", "rt-multi-thread"] }
+//! ```
+
 //! JWT 能力需要显式启用 `jwt` feature。它提供固定算法的 JWS 签发/验证和泛型 claims；
 //! JWT payload 不是加密内容，`JwtUtils` 的全局入口只能成功初始化一次且不支持热轮换。
 //! 详细的算法、key 格式、claims 验证和安全边界见
@@ -115,6 +127,9 @@
 
 mod time;
 pub mod utils;
+
+#[cfg(feature = "redis")]
+pub mod redis;
 
 #[cfg(feature = "jwt")]
 pub mod jwt;
@@ -179,6 +194,12 @@ pub use http::{
 
 #[cfg(feature = "http")]
 pub use utils::HttpUtils;
+
+#[cfg(feature = "redis")]
+pub use redis::{RedisClient, RedisConfig, RedisError, RedisTransaction, RedisTransportErrorKind};
+
+#[cfg(feature = "redis")]
+pub use utils::RedisUtils;
 
 pub mod crypto;
 

@@ -33,6 +33,17 @@ time = ["dep:time"]
 jiff = ["dep:jiff"]
 lettre = ["dep:lettre"]
 http = ["dep:ureq", "dep:reqwest", "dep:url"]
+redis = [
+    "dep:redis",
+    "dep:r2d2",
+    "dep:serde",
+    "dep:rmp-serde",
+    "redis/r2d2",
+    "redis/cluster",
+    "redis/cluster-async",
+    "redis/connection-manager",
+    "redis/tokio-comp",
+]
 tokio = ["dep:tokio", "lettre?/tokio1-rustls"]
 toml = ["dep:toml"]
 serde-saphyr = ["dep:serde-saphyr"]
@@ -68,6 +79,9 @@ lettre = { version = "0.11.22", default-features = false, optional = true, featu
 ] }
 ureq = { version = "3.3.0", default-features = false, features = ["rustls"], optional = true }
 reqwest = { version = "0.12.24", default-features = false, features = ["rustls-tls-webpki-roots"], optional = true }
+redis = { version = "1.5.0", default-features = false, optional = true }
+r2d2 = { version = "0.8.10", optional = true }
+rmp-serde = { version = "1.3.1", optional = true }
 url = { version = "2.5.8", default-features = false, features = ["std"], optional = true }
 tokio = { version = "1.53.1", default-features = false, features = ["fs", "io-util", "rt", "sync", "time"], optional = true }
 toml = { version = "1.1.4", default-features = false, features = ["parse", "serde", "std"], optional = true }
@@ -83,3 +97,9 @@ encoding_rs = { version = "0.8.35", default-features = false, features = ["alloc
 
 [dev-dependencies]
 tokio = { version = "1.53.1", default-features = false, features = ["macros", "rt-multi-thread"] }
+criterion = "0.8"
+redis-test = "1.0.4"
+
+[[bench]]
+name = "redis_codec"
+harness = false

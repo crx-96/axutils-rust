@@ -104,11 +104,21 @@ SMTP 邮件能力通过显式 `lettre` feature 提供；异步发送还需要同
 
 ## 验证命令
 
-提交代码前至少运行：
+验证范围必须与变更影响面匹配。默认只运行直接相关的测试，不要求每次添加或修改内容都执行
+全量测试；测试不足以覆盖影响面时，再逐级扩大范围，并在交付说明中写明实际运行的命令和未运行的检查。
+
+- 只修改单个模块的实现、私有逻辑或局部测试，且没有改变公共 API、feature、依赖和跨模块行为时，运行对应的库单元测试或集成测试目标，优先使用测试过滤器；例如 `cargo test --no-default-features --lib utils::path_utils::tests`。
+- 修改 feature-gated 模块时，至少运行对应 feature 与测试目标；例如 `cargo test --no-default-features --features redis --test redis`。修改 HTTP、邮件、配置等异步能力时，同时覆盖实际涉及的 feature 组合。
+- 修改公共导出、签名、feature 守卫、可选依赖、依赖边界或跨模块调用时，在直接测试之外运行受影响的 feature/API 矩阵；本项目的 `tests/feature_matrix.rs` 属于慢速测试，使用 `cargo test --no-default-features --test feature_matrix -- --ignored --test-threads=1` 显式执行。
+- 修改 API 文档、README 或 `docs/examples/` 时，按项目文档规则编译本次变更涉及文档的全部 Rust 代码块；新增或修改公共 API 的 doctest 不能用普通单元测试替代。
+- 只有跨模块重构、公共行为或安全边界变化、Cargo 配置/依赖变更、发布前验证，或相关测试无法可靠隔离时，才运行全量验证。
+
+全量验证命令如下：
 
 ```powershell
 cargo fmt --all -- --check
-cargo test --all-features
+cargo test --all-features --tests
+cargo test --no-default-features --test feature_matrix -- --ignored --test-threads=1
 cargo test --doc --all-features
 cargo clippy --all-targets --all-features -- -D warnings
 cargo test --no-default-features

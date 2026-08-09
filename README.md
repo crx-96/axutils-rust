@@ -19,6 +19,12 @@ HTTP 能力通过独立的 `http` feature 提供；默认关闭系统代理、�
 HTTP 还需要同时启用 `tokio`，且必须运行在调用方提供的 Tokio runtime 中。详细的请求、重试、
 去重、缓存和便捷方法边界见 HTTP 使用文档。
 
+Redis 能力通过独立的 `redis` feature 提供；它使用惰性连接池、受限 MessagePack 编解码和
+raw 字节 API，支持单机/Cluster 普通命令、批量操作、TTL、counter、list/set、单机原子事务
+和一次初始化的 `RedisUtils`。异步方法还需要同时启用 `tokio`，并由调用方提供 runtime；第一
+阶段只接受 `redis://`，不启用 TLS。构造配置、客户端或全局入口不会访问网络，完整 API 和
+边界见 [Redis 使用文档](https://github.com/crx-96/axutils-rust/blob/main/docs/examples/redis.md)。
+
 ## 安装
 
 在项目的 `Cargo.toml` 中添加默认依赖：
@@ -104,8 +110,31 @@ axutils = { version = "0.1", features = ["lettre", "tokio"] }
 tokio = { version = "1.53.1", features = ["macros", "rt-multi-thread"] }
 ```
 
-`axutils` 的 Tokio 依赖只提供异步文件 I/O 和邮件传输所需能力，不会创建 runtime 或调用
-`block_on`；只启用 `tokio` 不会导出邮件或 HTTP API。
+`axutils` 的 Tokio 依赖按其他 feature 组合提供异步文件 I/O、邮件、HTTP 和 Redis 能力；库
+不会创建 runtime 或调用 `block_on`，只启用 `tokio` 不会单独导出这些领域 API。
+
+同步 Redis 只需要 `redis` feature；异步 Redis 需要 `redis,tokio`，应用仍需直接依赖 Tokio：
+
+```toml
+[dependencies]
+axutils = { version = "0.1", features = ["redis", "tokio"] }
+tokio = { version = "1.53.1", features = ["macros", "rt-multi-thread"] }
+```
+
+```rust,no_run
+# #[cfg(feature = "redis")]
+# fn main() -> Result<(), axutils::RedisError> {
+use axutils::{RedisClient, RedisConfig};
+
+let client = RedisClient::new(RedisConfig::single("redis://127.0.0.1:6379/0")?)?;
+let _ = client.set("example:key", "value");
+# Ok(())
+# }
+# #[cfg(not(feature = "redis"))]
+# fn main() {}
+```
+
+Redis 方法、feature 矩阵、大小上限、raw/MessagePack 区分、Cluster 和事务边界见 [Redis 使用文档](https://github.com/crx-96/axutils-rust/blob/main/docs/examples/redis.md)。
 
 配置读取启用 `serde` 后提供 JSON 和 `.env`；YAML、TOML、INI 分别额外启用
 `serde-saphyr`、`toml`、`rust-ini`：

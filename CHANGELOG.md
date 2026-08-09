@@ -71,6 +71,14 @@
 - 新增 HTTP JSON/query 失败的稳定 `HttpError::JsonSerialize`、`QuerySerialize`、
   `JsonDeserialize` 错误分类，以及 `HttpResponse::into_body` 和受 `serde` feature 守卫的
   `HttpResponse::json`。
+- 新增独立 `redis` feature 下的 Redis 能力：`RedisConfig`、可 Clone 的 `RedisClient`、
+  `RedisError`/`RedisTransportErrorKind`、`RedisTransaction` 和一次初始化的 `RedisUtils`；
+  提供惰性 r2d2 单机/Cluster 连接池、受限 MessagePack 值 API、raw 字节 API、批量命令、
+  TTL/counter/list/set 及单机 `MULTI`/`EXEC` 事务。第一阶段只接受 `redis://`，不提供 TLS、
+  Cluster 事务、WATCH/CAS 或无界 keys/scan；Cluster 跨 slot 错误统一映射为 `CrossSlot`。
+- 新增 `redis,tokio` 组合下的 `_async` Redis 命令和独立事务通道；异步连接惰性初始化，
+  不创建 Tokio runtime、不调用 `block_on`，调用方必须提供 runtime。Redis feature 直接启用
+  专用 `serde` 依赖但不自动启用项目公共 `serde` feature。
 
 ### Changed
 
@@ -95,6 +103,8 @@
   single-flight 通知和受总时间预算约束的异步退避；crate 仍不创建 runtime 或调用 `block_on`。
 - `serde` feature 追加可选的 `serde_urlencoded 0.7.1`，用于 HTTP 快捷方法的 query 编码；
   `http` 不会自动启用 `serde`，因此不改变仅启用 HTTP 时的公共 API 和依赖边界。
+- Redis `ValueTooLarge` 的错误文本不再把批量项数或事务命令数误标为字节，`limit` 的单位改为
+  随具体操作语义解释。
 
 ### Fixed
 
@@ -107,6 +117,14 @@
   变量名遵守 `[A-Za-z_][A-Za-z0-9_]*` 规则。
 - JWT 解码将空 payload 或空 signature 统一归类为 Header/三段结构错误，返回
   `JwtError::InvalidHeader { field: "segments" }`，与其他三段结构错误保持一致。
+- Redis 同步连接池健康检查不再在 checkout 时隐式发送 `PING`；协议、网络和超时类命令错误
+  会标记连接为不可复用，避免将可能处于未知状态的连接重新放回池中。
+- Redis Cluster 的结构化 `CROSSSLOT` 错误码现在与文本形式保持一致，统一映射为
+  `RedisError::CrossSlot`，避免误分类为普通服务端错误。
+- Redis 集群无法找到可用节点和 RESP3 协商失败现在分别稳定映射为
+  `Transport(Connection)` 与 `Transport(Protocol)`，不再落入不明确的 `Other` 分类。
+- Redis 异步 Cluster 事务现在会在 runtime 检查前稳定返回 `UnsupportedMode`，不会因调用方
+  未处于 Tokio runtime 而误报为 `RuntimeRequired`。
 
 ### Security and compatibility
 

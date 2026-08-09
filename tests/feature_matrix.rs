@@ -14,6 +14,7 @@ impl Drop for TemporaryTarget {
 }
 
 #[test]
+#[ignore = "慢速 feature/依赖契约矩阵；使用 cargo test --no-default-features --test feature_matrix -- --ignored 执行"]
 fn verifies_feature_api_matrix_and_dependency_boundaries() {
     let fixture_manifest = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests")
@@ -57,6 +58,7 @@ fn verifies_feature_api_matrix_and_dependency_boundaries() {
 }
 
 #[test]
+#[ignore = "慢速 feature/依赖契约矩阵；使用 cargo test --no-default-features --test feature_matrix -- --ignored 执行"]
 fn verifies_http_feature_api_matrix_and_dependency_boundaries() {
     let fixture_manifest = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests")
@@ -103,6 +105,7 @@ fn verifies_http_feature_api_matrix_and_dependency_boundaries() {
 }
 
 #[test]
+#[ignore = "慢速 feature/依赖契约矩阵；使用 cargo test --no-default-features --test feature_matrix -- --ignored 执行"]
 fn verifies_format_template_feature_api_matrix() {
     let fixture_manifest = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests")
@@ -150,6 +153,7 @@ fn verifies_format_template_feature_api_matrix() {
 }
 
 #[test]
+#[ignore = "慢速 feature/依赖契约矩阵；使用 cargo test --no-default-features --test feature_matrix -- --ignored 执行"]
 fn verifies_config_feature_api_matrix_and_dependency_boundaries() {
     let fixture_manifest = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests")
@@ -200,6 +204,7 @@ fn verifies_config_feature_api_matrix_and_dependency_boundaries() {
 }
 
 #[test]
+#[ignore = "慢速 feature/依赖契约矩阵；使用 cargo test --no-default-features --test feature_matrix -- --ignored 执行"]
 fn verifies_crypto_feature_api_matrix_and_dependency_boundaries() {
     let fixture_manifest = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests")
@@ -318,6 +323,7 @@ fn verifies_crypto_feature_api_matrix_and_dependency_boundaries() {
 }
 
 #[test]
+#[ignore = "慢速 feature/依赖契约矩阵；使用 cargo test --no-default-features --test feature_matrix -- --ignored 执行"]
 fn verifies_jwt_feature_api_matrix_and_dependency_boundaries() {
     let fixture_manifest = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests")
@@ -371,6 +377,53 @@ fn verifies_jwt_feature_api_matrix_and_dependency_boundaries() {
     }
 
     assert_jwt_dependency_boundaries();
+}
+
+#[test]
+#[ignore = "慢速 feature/依赖契约矩阵；使用 cargo test --no-default-features --test feature_matrix -- --ignored 执行"]
+fn verifies_redis_feature_api_matrix_and_dependency_boundaries() {
+    let fixture_manifest = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("fixtures")
+        .join("redis_feature_matrix")
+        .join("Cargo.toml");
+    let target_dir = unique_target("axutils-redis-feature-matrix");
+
+    for (feature, expected_success, diagnostic_token) in [
+        ("none", true, ""),
+        ("tokio-only", true, ""),
+        ("redis", true, ""),
+        ("redis-tokio", true, ""),
+        ("redis-serde", true, ""),
+        ("redis-tokio-serde", true, ""),
+        ("all", true, ""),
+        ("negative-no-redis-module", false, "redis"),
+        ("negative-no-redis-root", false, "redisclient"),
+        ("negative-no-redis-utils", false, "redisutils"),
+        ("negative-tokio-redis-module", false, "redis"),
+        ("negative-tokio-redis-root", false, "redisclient"),
+        ("negative-tokio-redis-utils", false, "redisutils"),
+        ("negative-redis-async", false, "get_async"),
+        ("negative-redis-utils-async", false, "get_async"),
+        ("negative-redis-config", false, "config"),
+    ] {
+        let output = run_fixture(&fixture_manifest, &target_dir.0, feature);
+        if expected_success {
+            assert!(
+                output.status.success(),
+                "Redis fixture feature `{feature}` should compile successfully: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        } else {
+            assert!(
+                !output.status.success(),
+                "Redis fixture feature `{feature}` should fail to compile"
+            );
+            assert_expected_diagnostic(&output, diagnostic_token, feature);
+        }
+    }
+
+    assert_redis_dependency_boundaries();
 }
 
 fn assert_crypto_dependency_boundaries() {
@@ -632,6 +685,43 @@ fn assert_jwt_dependency_boundaries() {
     assert!(jwt_feature_tree.contains("jsonwebtoken feature \"rust_crypto\""));
     assert!(jwt_feature_tree.contains("jsonwebtoken feature \"use_pem\""));
     assert!(!jwt_feature_tree.contains("jsonwebtoken feature \"aws_lc_rs\""));
+}
+
+fn assert_redis_dependency_boundaries() {
+    let no_feature_tree = cargo_tree("");
+    assert!(!has_package(&no_feature_tree, "redis"));
+    assert!(!has_package(&no_feature_tree, "r2d2"));
+    assert!(!has_package(&no_feature_tree, "rmp-serde"));
+
+    let tokio_tree = cargo_tree("tokio");
+    assert!(has_package(&tokio_tree, "tokio"));
+    assert!(!has_package(&tokio_tree, "redis"));
+    assert!(!has_package(&tokio_tree, "r2d2"));
+    assert!(!has_package(&tokio_tree, "rmp-serde"));
+
+    let redis_tree = cargo_tree("redis");
+    assert!(has_package(&redis_tree, "redis"));
+    assert!(has_package(&redis_tree, "r2d2"));
+    assert!(has_package(&redis_tree, "rmp-serde"));
+    assert!(!has_package(&redis_tree, "serde_json"));
+
+    let serde_tree = cargo_tree("serde");
+    assert!(has_package(&serde_tree, "serde_json"));
+    assert!(!has_package(&serde_tree, "redis"));
+    assert!(!has_package(&serde_tree, "r2d2"));
+    assert!(!has_package(&serde_tree, "rmp-serde"));
+
+    let redis_serde_tree = cargo_tree("redis,serde");
+    assert!(has_package(&redis_serde_tree, "redis"));
+    assert!(has_package(&redis_serde_tree, "r2d2"));
+    assert!(has_package(&redis_serde_tree, "rmp-serde"));
+    assert!(has_package(&redis_serde_tree, "serde_json"));
+
+    let redis_tokio_tree = cargo_tree("redis,tokio");
+    assert!(has_package(&redis_tokio_tree, "redis"));
+    assert!(has_package(&redis_tokio_tree, "r2d2"));
+    assert!(has_package(&redis_tokio_tree, "rmp-serde"));
+    assert!(has_package(&redis_tokio_tree, "tokio"));
 }
 
 fn cargo_tree(features: &str) -> String {

@@ -25,10 +25,12 @@
     ├── crypto/         # 十六进制/TextEncoding 默认可用；Base64/MD5/AES 需要对应 feature
     ├── email/         # SMTP 配置、消息、错误与多实例客户端（需要 lettre feature）
     ├── lib.rs          # crate 入口和公共导出
+    ├── redis/          # Redis 配置、客户端、命令、事务与错误（需要 redis feature）
     └── utils/
         ├── mod.rs        # 通用工具模块和公共导出
         ├── path_utils.rs  # PathUtils 实现与单元测试
         ├── random_utils.rs # RandomUtils 实现与单元测试（需要 rand feature）
+        ├── redis_utils.rs # RedisUtils 一次初始化的全局转发（需要 redis feature）
         ├── reg_utils.rs  # RegUtils 实现与单元测试
         ├── time_utils.rs # TimeUtils 实现与单元测试
         ├── config_utils.rs # ConfigUtils 静态配置读取入口（需要 serde feature）
@@ -58,8 +60,21 @@ src/
 应修改最低版本并重新执行完整验证。
 
 ```powershell
+# 日常修改后的快速反馈：仅运行默认能力的库单元测试。
+cargo test --no-default-features --lib
+
+# 需要检查某个可选模块时，只编译并运行对应 feature 的测试目标，例如：
+cargo test --no-default-features --features http --test http
+cargo test --no-default-features --features redis --test redis
+cargo test --no-default-features --features redis,tokio --doc
+cargo tree --no-default-features --features redis -e normal,build
+cargo bench --no-default-features --features redis --bench redis_codec
+
+# 需要覆盖所有已启用模块、feature/API 依赖边界和文档时，使用下面的完整清单；其中
+# feature/API/依赖边界矩阵是慢速测试，默认 cargo test 会跳过。
 cargo fmt --all -- --check
-cargo test --all-features
+cargo test --all-features --tests
+cargo test --no-default-features --test feature_matrix -- --ignored --test-threads=1
 cargo test --doc --all-features
 cargo clippy --all-targets --all-features -- -D warnings
 cargo doc --no-deps --all-features
@@ -81,7 +96,6 @@ cargo test --no-default-features --features base64,md5,aes,encoding_rs
 cargo check --no-default-features --features jwt
 cargo test --no-default-features --features jwt
 cargo test --no-default-features --features jwt --test jwt_global -- --test-threads=1
-cargo test --no-default-features --features jwt --test feature_matrix
 cargo tree --no-default-features --features jwt -e normal,build
 cargo tree --no-default-features --features jwt -e normal,build,features
 cargo tree --no-default-features --features tokio -e normal,build
@@ -126,6 +140,13 @@ crate，与 `PathUtils` 同类）；`base64`/`md5`/`aes` 各自解锁对应算�
 `.gitignore` 忽略，不能把账号或授权码写入源码、命令行、日志或文档。没有用户明确授权时，
 不得运行 ignored 真实测试。
 
+Redis 单机真实测试使用 `tests/redis_live.rs`，同步/异步测试固定 `#[ignore]`，并要求一次性
+设置 `AXUTILS_REDIS_LIVE_TEST=1` 以及本地被忽略的 `config/redis-test.toml`；显式运行 ignored
+测试时，缺少环境变量、配置文件或必填字段会明确失败，不会伪装成测试通过。Redis Cluster
+测试使用 `tests/redis_cluster.rs` 和本地 `127.0.0.1:7000-7002` fixture，同样固定 `#[ignore]`。
+没有用户明确授权、受控服务和本地配置时，不得运行这些 Redis ignored 真实测试；真实配置、
+凭据和节点地址不得写入源码、命令行、日志或文档，测试内置的 loopback fixture 除外。
+
 ## 发布步骤
 
 1. 确认工作区只包含本次发布需要的修改，并在 `Cargo.toml` 中更新 `version`。
@@ -136,7 +157,8 @@ crate，与 `PathUtils` 同类）；`base64`/`md5`/`aes` 各自解锁对应算�
 
    ```powershell
    cargo fmt --all -- --check
-   cargo test --all-features
+   cargo test --all-features --tests
+   cargo test --no-default-features --test feature_matrix -- --ignored --test-threads=1
    cargo test --doc --all-features
    cargo clippy --all-targets --all-features -- -D warnings
    ```
@@ -148,7 +170,8 @@ crate，与 `PathUtils` 同类）；`base64`/`md5`/`aes` 各自解锁对应算�
    cargo package --allow-dirty --list
    ```
 
-   输出应包含 `README.md`、`CHANGELOG.md`、`src/` 和 `docs/examples/`，逐项确认 9 份模块文档均在；
+   输出应包含 `README.md`、`CHANGELOG.md`、`src/` 和 `docs/examples/`，并按
+   `docs/module-map.md` 的「使用示例文档」映射表逐项确认所有模块文档均在；
    不应包含 `develop.md`、`AGENTS.md`、`CLAUDE.md`、`docs/plans/`、`docs/status/` 或 `docs/skills/`。
 
 6. 先执行发布 dry-run：
