@@ -24,10 +24,11 @@ HTTP 还需要同时启用 `tokio`，且必须运行在调用方提供的 Tokio 
 去重、缓存和便捷方法边界见 HTTP 使用文档。
 
 Redis 能力通过独立的 `redis` feature 提供；它使用惰性连接池、受限 MessagePack 编解码和
-raw 字节 API，支持单机/Cluster 普通命令、批量操作、TTL、counter、list/set、单机原子事务
-和一次初始化的 `RedisUtils`。异步方法还需要同时启用 `tokio`，并由调用方提供 runtime；第一
-阶段只接受 `redis://`，不启用 TLS。构造配置、客户端或全局入口不会访问网络，完整 API 和
-边界见 [Redis 使用文档](https://github.com/crx-96/axutils-rust/blob/main/docs/examples/redis.md)。
+raw 字节 API，支持单机/Cluster 普通命令、批量操作、TTL、counter、list/set、单机原子事务、
+单 Redis 拓扑的带 TTL 单键租约锁和一次初始化的 `RedisUtils`。异步方法还需要同时启用
+`tokio`，并由调用方提供 runtime；第一阶段只接受 `redis://`，不启用 TLS。构造配置、客户端
+或全局入口不会访问网络，锁不是 Redlock 或 fencing token；完整 API 和边界见
+[Redis 使用文档](https://github.com/crx-96/axutils-rust/blob/main/docs/examples/redis.md)。
 
 ## 安装
 

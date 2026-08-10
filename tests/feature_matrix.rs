@@ -467,6 +467,7 @@ fn verifies_redis_feature_api_matrix_and_dependency_boundaries() {
         ("negative-tokio-redis-root", false, "redisclient"),
         ("negative-tokio-redis-utils", false, "redisutils"),
         ("negative-redis-async", false, "get_async"),
+        ("negative-redis-async-lock", false, "redisasynclockguard"),
         ("negative-redis-utils-async", false, "get_async"),
         ("negative-redis-config", false, "configloader"),
     ] {
@@ -1017,12 +1018,14 @@ fn assert_time_dependency_boundaries() {
 fn assert_redis_dependency_boundaries() {
     let no_feature_tree = cargo_tree("");
     assert!(!has_package(&no_feature_tree, "redis"));
+    assert!(!has_package(&no_feature_tree, "rand"));
     assert!(!has_package(&no_feature_tree, "r2d2"));
     assert!(!has_package(&no_feature_tree, "rmp-serde"));
 
     let tokio_tree = cargo_tree("tokio");
     assert!(has_package(&tokio_tree, "tokio"));
     assert!(!has_package(&tokio_tree, "redis"));
+    assert!(!has_package(&tokio_tree, "rand"));
     assert!(!has_package(&tokio_tree, "r2d2"));
     assert!(!has_package(&tokio_tree, "rmp-serde"));
 
@@ -1030,6 +1033,7 @@ fn assert_redis_dependency_boundaries() {
     assert!(has_package(&redis_tree, "redis"));
     assert!(has_package(&redis_tree, "r2d2"));
     assert!(has_package(&redis_tree, "rmp-serde"));
+    assert!(has_package(&redis_tree, "rand"));
     assert!(!has_package(&redis_tree, "tokio"));
     assert!(!has_package(&redis_tree, "serde_json"));
 
@@ -1057,6 +1061,7 @@ fn assert_redis_dependency_boundaries() {
     assert!(has_package(&redis_tokio_tree, "redis"));
     assert!(has_package(&redis_tokio_tree, "r2d2"));
     assert!(has_package(&redis_tokio_tree, "rmp-serde"));
+    assert!(has_package(&redis_tokio_tree, "rand"));
     assert!(has_package(&redis_tokio_tree, "tokio"));
 
     let redis_tokio_feature_tree = cargo_feature_tree_inverted("redis,tokio", "redis");

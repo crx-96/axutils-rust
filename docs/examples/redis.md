@@ -1,9 +1,11 @@
 # Redis 使用文档
 
 Redis 能力由独立的 `redis` feature 提供。它使用 `redis-rs 1.5`、`r2d2 0.8`、
-`rmp-serde 1.3` 和 Redis 专用的 `serde` 依赖；启用 `redis` 不会启用项目公共 `serde`
-feature，因此不会额外导出配置文件能力。同步 API 只需要 `redis`；带 `_async` 后缀的
-异步 API 需要同时启用 `redis,tokio`，并由调用方直接依赖 Tokio、提供 runtime。
+`rmp-serde 1.3`、Redis 专用的 `serde` 依赖和现有可选的 `rand` 依赖；`rand` 在这里仅
+用于从操作系统随机源生成锁 token，不会因为 `redis` feature 导出 `RandomUtils`。启用
+`redis` 不会启用项目公共 `serde` feature，因此不会额外导出配置文件能力。同步 API 只
+需要 `redis`；带 `_async` 后缀的异步 API 需要同时启用 `redis,tokio`，并由调用方直接
+依赖 Tokio、提供 runtime。
 
 ```toml
 [dependencies]
@@ -33,10 +35,12 @@ runtime、调用 `block_on` 或把同步调用转移到线程池。
 | `RedisConfig` | `axutils::redis::RedisConfig` | `axutils::RedisConfig` | `redis` |
 | `RedisError` | `axutils::redis::RedisError` | `axutils::RedisError` | `redis` |
 | `RedisTransportErrorKind` | `axutils::redis::RedisTransportErrorKind` | `axutils::RedisTransportErrorKind` | `redis` |
+| `RedisLockGuard` | `axutils::redis::RedisLockGuard` | `axutils::RedisLockGuard` | `redis` |
+| `RedisAsyncLockGuard` | `axutils::redis::RedisAsyncLockGuard` | `axutils::RedisAsyncLockGuard` | `redis,tokio` |
 | `RedisTransaction` | `axutils::redis::RedisTransaction` | `axutils::RedisTransaction` | `redis` |
 | `RedisUtils` | `axutils::RedisUtils` | `axutils::utils::RedisUtils`、`axutils::utils::redis_utils::RedisUtils` | `redis` |
 
-`axutils::redis::client`、`config`、`codec`、`commands`、`error` 和 `transaction` 是私有
+`axutils::redis::client`、`config`、`codec`、`commands`、`error`、`lock` 和 `transaction` 是私有
 实现模块，不是额外的公共导入路径。Redis 不导出第三方连接、Pipeline、pool、runtime 或
 第三方错误类型。
 
@@ -46,8 +50,8 @@ runtime、调用 `block_on` 或把同步调用转移到线程池。
 | --- | --- |
 | 无 feature | 没有 `redis` 模块、Redis 类型、`RedisUtils` 或 Redis 依赖 |
 | `tokio` | 不改变 Redis API 可见性；不会单独导出 Redis |
-| `redis` | 同步客户端、Cluster 普通命令、MessagePack/raw API、批量命令、事务和 `RedisUtils` |
-| `redis,tokio` | 上述同步能力以及所有 `_async` 方法和异步事务 |
+| `redis` | 同步客户端、Cluster 普通命令、MessagePack/raw API、批量命令、单键租约锁、事务和 `RedisUtils` |
+| `redis,tokio` | 上述同步能力以及所有 `_async` 方法、异步租约锁和异步事务 |
 | `redis,serde` | Redis 能力与项目公共配置/Serde 能力同时可用，不重复导出 |
 | `redis,tokio,serde` | Redis 同步/异步能力与项目公共配置/Serde 能力同时可用 |
 
@@ -67,6 +71,7 @@ runtime、调用 `block_on` 或把同步调用转移到线程池。
 | 事务参数字节数 | 64 MiB | 1–256 MiB |
 | 同步 pool 最大连接数 | 8 | 1–64 |
 | 建连、checkout、响应超时 | 5 秒、5 秒、30 秒 | 1 ms–5 分钟 |
+| 单键锁 TTL | — | 大于 0 且不超过 24 小时；毫秒向上取整 |
 
 Serde 值使用受限 writer 生成紧凑 MessagePack。读取值会在反序列化前检查单值上限；多项
 读取还检查累计 response 字节数和集合 item 数。由于 `redis-rs` 可能已经读入完整响应，
@@ -118,6 +123,30 @@ Serde 值使用受限 writer 生成紧凑 MessagePack。读取值会在反序列
 | `NotInitialized` / `AlreadyInitialized` | `RedisUtils` 单例状态错误 |
 
 错误的 `Display`/`Debug` 不包含 endpoint、用户名、密码、key、field、值或服务器原始文本。
+
+## 单键租约锁
+
+`RedisClient::try_lock` 和 `RedisUtils::try_lock` 提供单 Redis 逻辑主节点/单 Redis Cluster
+拓扑上的单 key try-lock。成功时 Redis 保存 32 字节的 OS CSPRNG token 和 TTL；同一 key
+已被占用时返回 `Ok(None)`，不会等待、排队或重试。`RedisLockGuard` 的 token、完整 key 和
+客户端字段均为私有，`Debug` 不显示它们，也不实现 `Clone`/`Copy`。
+
+释放和续租分别使用一次带 `GET` token 比较的 Lua `EVAL`：只有 token 仍匹配时才会 `DEL`
+或 `PEXPIRE`。`Ok(false)` 表示锁已过期、所有权已丢失或 guard 已失效，不能继续把临界区
+当作受锁保护；Redis 传输或协议错误返回 `Err`，不能当作释放成功。TTL 上限为 24 小时，
+正但不足一毫秒的 duration 向上取 1 ms。
+
+同步 guard 的 `Drop` 只做一次不重试的最佳努力 token 校验释放，不 panic；它不是可靠的
+释放确认，正常路径应显式调用 `release`。异步 guard 的 `Drop` 不会发起网络操作、创建
+后台 task 或等待 runtime，正常路径必须 `await release()`，取消、异常或 runtime 关闭时
+依赖 TTL 兜底。释放/续租错误期间不会伪造成功，业务应停止后续受保护写入。
+
+该锁不是跨多个相互独立 Redis 主节点的 Redlock，也不提供 fencing token。临界区若会写
+数据库或触发外部副作用，仍应使用条件更新、唯一约束、事务和幂等设计；锁只能减少同一
+协议调用方的并发进入。锁 key 应使用稳定且足够细的业务命名空间，例如
+`receipt-audit:{serial_no}`，不要把未经审查的用户输入直接作为跨业务共享 key，也不要让
+其他代码使用无 token 的 `delete`/`pexpire` 操作同一锁 key。主从异步复制发生故障切换时
+可能丢失锁；token 仅是内部所有权标记，不是业务身份、认证凭据或可持久化数据。
 
 ## `RedisConfig`
 
@@ -478,12 +507,68 @@ let _ = RedisClient::set_nx::<&str, u8>;
 ### `RedisClient::set_nx_with_expiry`
 
 签名：`pub fn set_nx_with_expiry<K: AsRef<[u8]>, T: Serialize>(&self, key: K, value: T, ttl: Duration) -> Result<bool, RedisError>`。
-用一个 `SET ... PX NX` 命令完成 MessagePack 条件写入和 TTL。调用示例：`client.set_nx_with_expiry("lock:key", token, Duration::from_secs(5))`。
+用一个 `SET ... PX NX` 命令完成 MessagePack 条件写入和 TTL。这是通用 NX 写入原语，
+不会记录所有者或在业务方法返回时自动删除；锁场景应使用 `RedisClient::try_lock`。调用
+示例：`client.set_nx_with_expiry("cache:key", value, Duration::from_secs(5))`。
 
 ```rust,no_run
 use axutils::RedisClient;
 
 let _ = RedisClient::set_nx_with_expiry::<&str, u8>;
+```
+
+### `RedisClient::try_lock`
+
+签名：`pub fn try_lock<K: AsRef<[u8]>>(&self, key: K, ttl: Duration) -> Result<Option<RedisLockGuard>, RedisError>`。
+使用 `SET key token PX ttl NX` 尝试获取单键租约锁；抢锁失败返回 `Ok(None)`，不等待。
+key 仍使用当前 `RedisConfig` 的 key 上限，TTL 必须大于 0 且不超过 24 小时；随机源、
+参数、连接或协议失败返回 `Err`。调用示例：`client.try_lock("receipt-audit:serial-1", ttl)`。
+
+```rust,no_run
+use axutils::{RedisClient, RedisError};
+use std::time::Duration;
+
+fn guarded(client: &RedisClient) -> Result<(), RedisError> {
+    let Some(mut lock) = client.try_lock("receipt-audit:serial-1", Duration::from_secs(30))?
+    else {
+        return Ok(());
+    };
+    let _ = lock.release()?;
+    Ok(())
+}
+
+let _ = guarded;
+```
+
+### `RedisLockGuard`
+
+`RedisLockGuard` 是非 `Clone`、非 `Copy` 的同步锁所有权 guard。其 token、完整 key 和
+客户端句柄不提供 getter；`Debug` 只显示非敏感的活动状态和当前 TTL。正常路径应显式
+调用 `release`；guard 被丢弃时会再做一次最佳努力释放，但不能把 `Drop` 当作可靠确认。
+
+### `RedisLockGuard::release`
+
+签名：`pub fn release(&mut self) -> Result<bool, RedisError>`。
+使用 token 校验脚本原子释放当前锁。`Ok(true)` 表示删除了当前锁，`Ok(false)` 表示锁已
+过期、已由其他 token 持有或 guard 已失效；重复调用不会访问 Redis。传输/协议 `Err` 不
+伪造成功，同步 guard 的 `Drop` 仍可能再尝试一次。
+
+```rust,no_run
+use axutils::RedisLockGuard;
+
+let _ = RedisLockGuard::release;
+```
+
+### `RedisLockGuard::renew`
+
+签名：`pub fn renew(&mut self, ttl: Duration) -> Result<bool, RedisError>`。
+只有当前 token 仍匹配时才原子刷新 TTL；`Ok(false)` 会使 guard 失效，后续受保护操作
+必须停止。TTL 校验与获取锁相同，释放后的 guard 不会再次发送续租命令。
+
+```rust,no_run
+use axutils::RedisLockGuard;
+
+let _ = RedisLockGuard::renew;
 ```
 
 ### `RedisClient::set_bytes_nx`
@@ -500,7 +585,8 @@ let _ = RedisClient::set_bytes_nx::<&str, Vec<u8>>;
 ### `RedisClient::set_bytes_nx_with_expiry`
 
 签名：`pub fn set_bytes_nx_with_expiry<K: AsRef<[u8]>, V: AsRef<[u8]>>(&self, key: K, value: V, ttl: Duration) -> Result<bool, RedisError>`。
-raw 版本的 `SET ... PX NX`。调用示例：`client.set_bytes_nx_with_expiry("lock:key", token_bytes, Duration::from_secs(5))`。
+raw 版本的 `SET ... PX NX`，仍是通用条件写入，不记录锁所有者，也不会自动释放；锁场景
+应使用 `RedisClient::try_lock`。调用示例：`client.set_bytes_nx_with_expiry("cache:key", bytes, Duration::from_secs(5))`。
 
 ```rust,no_run
 use axutils::RedisClient;
@@ -511,7 +597,8 @@ let _ = RedisClient::set_bytes_nx_with_expiry::<&str, Vec<u8>>;
 ### `RedisClient::delete`
 
 签名：`pub fn delete<K: AsRef<[u8]>>(&self, key: K) -> Result<u64, RedisError>`。
-删除一个 key，返回实际删除数量。调用示例：`client.delete("cache:key")`。
+删除一个 key，返回实际删除数量。该方法无条件执行 `DEL`，不校验锁 token，不适合释放
+租约锁。调用示例：`client.delete("cache:key")`。
 
 ```rust,no_run
 use axutils::RedisClient;
@@ -722,7 +809,8 @@ let _ = RedisClient::expire::<&str>;
 ### `RedisClient::pexpire`
 
 签名：`pub fn pexpire<K: AsRef<[u8]>>(&self, key: K, ttl: Duration) -> Result<bool, RedisError>`。
-以毫秒为单位设置 TTL；正但不足一毫秒的 duration 向上取 1 ms。调用示例：`client.pexpire("key", Duration::from_millis(500))`。
+无条件以毫秒为单位设置 TTL，不校验锁 token；租约锁应使用 guard 的 `renew`。正但不足
+一毫秒的 duration 向上取 1 ms。调用示例：`client.pexpire("cache:key", Duration::from_millis(500))`。
 
 ```rust,no_run
 use axutils::RedisClient;
@@ -935,6 +1023,7 @@ let _ = RedisClient::ping;
 | `set_bytes_with_expiry_async<K, V>` | `client.set_bytes_with_expiry_async("key", bytes, ttl).await` |
 | `set_nx_async<K, T>` | `client.set_nx_async("key", value).await` |
 | `set_nx_with_expiry_async<K, T>` | `client.set_nx_with_expiry_async("key", value, ttl).await` |
+| `try_lock_async<K>` | `client.try_lock_async("key", ttl).await` |
 | `set_bytes_nx_async<K, V>` | `client.set_bytes_nx_async("key", bytes).await` |
 | `set_bytes_nx_with_expiry_async<K, V>` | `client.set_bytes_nx_with_expiry_async("key", bytes, ttl).await` |
 | `delete_async<K>` | `client.delete_async("key").await` |
@@ -972,6 +1061,61 @@ let _ = RedisClient::ping;
 
 为便于逐项查阅，以下列出每个异步方法的独立调用入口；返回值、错误和资源边界分别与同名
 同步方法一致：
+
+### `RedisAsyncLockGuard`
+
+`RedisAsyncLockGuard` 只在 `redis,tokio` 下导出，是非 `Clone`、非 `Copy` 的异步锁所有权
+guard。它的 `Drop` 不发送网络命令；取消或异常路径依赖 Redis TTL。正常路径必须显式
+`await release()`，并处理 `Ok(false)` 和 `Err`。
+
+### `RedisAsyncLockGuard::release`
+
+签名：`pub async fn release(&mut self) -> Result<bool, RedisError>`。语义与同步 guard 的
+`release` 相同，但网络操作必须由调用方 `await`，`Drop` 不会重试或创建后台任务。
+
+```rust,no_run
+# #[cfg(all(feature = "redis", feature = "tokio"))]
+# fn main() {
+use axutils::RedisAsyncLockGuard;
+
+let _ = RedisAsyncLockGuard::release;
+# }
+# #[cfg(not(all(feature = "redis", feature = "tokio")))]
+# fn main() {}
+```
+
+### `RedisAsyncLockGuard::renew`
+
+签名：`pub async fn renew(&mut self, ttl: Duration) -> Result<bool, RedisError>`。只有当前
+token 匹配时原子刷新 TTL；返回 `Ok(false)` 后不能继续执行依赖锁的写入。
+
+```rust,no_run
+# #[cfg(all(feature = "redis", feature = "tokio"))]
+# fn main() {
+use axutils::RedisAsyncLockGuard;
+
+let _ = RedisAsyncLockGuard::renew;
+# }
+# #[cfg(not(all(feature = "redis", feature = "tokio")))]
+# fn main() {}
+```
+
+### `RedisClient::try_lock_async`
+
+签名：`pub async fn try_lock_async<K: AsRef<[u8]>>(&self, key: K, ttl: Duration) -> Result<Option<RedisAsyncLockGuard>, RedisError>`。
+使用单次 `SET ... PX NX` 尝试获取锁；抢锁失败返回 `Ok(None)`，TTL、token、错误和
+Cluster 单 key 边界与同步 `try_lock` 相同。
+
+```rust,no_run
+# #[cfg(all(feature = "redis", feature = "tokio"))]
+# fn main() {
+use axutils::RedisClient;
+
+let _ = RedisClient::try_lock_async::<&str>;
+# }
+# #[cfg(not(all(feature = "redis", feature = "tokio")))]
+# fn main() {}
+```
 
 ### `RedisClient::get_async`
 
@@ -1080,7 +1224,8 @@ let _ = RedisClient::set_nx_async::<&str, u8>;
 
 ### `RedisClient::set_nx_with_expiry_async`
 
-调用示例：`client.set_nx_with_expiry_async("key", value, ttl).await`。
+这是通用 NX 写入，不记录锁所有者，也不会自动释放；锁场景应使用
+`RedisClient::try_lock_async`。调用示例：`client.set_nx_with_expiry_async("cache:key", value, ttl).await`。
 
 ```rust,no_run
 # #[cfg(all(feature = "redis", feature = "tokio"))]
@@ -1110,7 +1255,8 @@ let _ = RedisClient::set_bytes_nx_async::<&str, Vec<u8>>;
 
 ### `RedisClient::set_bytes_nx_with_expiry_async`
 
-调用示例：`client.set_bytes_nx_with_expiry_async("key", bytes, ttl).await`。
+这是通用 raw NX 写入，不记录锁所有者，也不会自动释放；锁场景应使用
+`RedisClient::try_lock_async`。调用示例：`client.set_bytes_nx_with_expiry_async("cache:key", bytes, ttl).await`。
 
 ```rust,no_run
 # #[cfg(all(feature = "redis", feature = "tokio"))]
@@ -1125,7 +1271,8 @@ let _ = RedisClient::set_bytes_nx_with_expiry_async::<&str, Vec<u8>>;
 
 ### `RedisClient::delete_async`
 
-调用示例：`client.delete_async("key").await`。
+这是无条件删除，不校验锁 token；释放租约锁应使用 guard 的 `release`。调用示例：
+`client.delete_async("cache:key").await`。
 
 ```rust,no_run
 # #[cfg(all(feature = "redis", feature = "tokio"))]
@@ -1410,7 +1557,8 @@ let _ = RedisClient::expire_async::<&str>;
 
 ### `RedisClient::pexpire_async`
 
-调用示例：`client.pexpire_async("key", ttl).await`。
+这是无条件设置 TTL，不校验锁 token；续租租约锁应使用 guard 的 `renew`。调用示例：
+`client.pexpire_async("cache:key", ttl).await`。
 
 ```rust,no_run
 # #[cfg(all(feature = "redis", feature = "tokio"))]
@@ -1839,6 +1987,8 @@ let _ = RedisTransaction::persist::<&str>;
 `RedisUtils` 使用 `OnceLock<RedisClient>`。`init` 只有在客户端本地构造成功后才占用单例；
 竞争初始化时仅一个调用成功，之后返回 `AlreadyInitialized`。未初始化调用返回
 `NotInitialized`。没有 `client()`、配置/凭据 getter、reset 或 replace 公共 API。
+`set_nx_with_expiry` 和 `set_bytes_nx_with_expiry` 只是通用条件写入，不会自动释放；
+`delete`/`pexpire` 也不校验锁 token。需要租约语义时使用下方的 `try_lock` 转发。
 
 ### `RedisUtils::init`
 
@@ -1874,6 +2024,7 @@ let _ = RedisUtils::is_initialized();
 | `set` / `set_bytes` | `RedisUtils::set("key", value)` / `RedisUtils::set_bytes("key", bytes)` |
 | `set_with_expiry` / `set_bytes_with_expiry` | `RedisUtils::set_with_expiry("key", value, ttl)` / `RedisUtils::set_bytes_with_expiry("key", bytes, ttl)` |
 | `set_nx` / `set_nx_with_expiry` | `RedisUtils::set_nx("key", value)` / `RedisUtils::set_nx_with_expiry("key", value, ttl)` |
+| `try_lock` | `RedisUtils::try_lock("key", ttl)` |
 | `set_bytes_nx` / `set_bytes_nx_with_expiry` | `RedisUtils::set_bytes_nx("key", bytes)` / `RedisUtils::set_bytes_nx_with_expiry("key", bytes, ttl)` |
 | `delete` / `delete_many` | `RedisUtils::delete("key")` / `RedisUtils::delete_many(["a", "b"])` |
 | `exists` | `RedisUtils::exists("key")` |
@@ -1967,12 +2118,27 @@ let _ = RedisUtils::set_nx::<&str, u8>;
 
 ### `RedisUtils::set_nx_with_expiry`
 
-调用示例：`RedisUtils::set_nx_with_expiry("key", value, ttl)`。
+这是通用 NX 写入，不记录锁所有者，也不会在 guard 被丢弃时自动释放；锁场景应使用
+`RedisUtils::try_lock`。调用示例：`RedisUtils::set_nx_with_expiry("cache:key", value, ttl)`。
 
 ```rust,no_run
 use axutils::RedisUtils;
 
 let _ = RedisUtils::set_nx_with_expiry::<&str, u8>;
+```
+
+### `RedisUtils::try_lock`
+
+签名：`pub fn try_lock<K: AsRef<[u8]>>(key: K, ttl: Duration) -> Result<Option<RedisLockGuard>, RedisError>`。
+转发到已初始化的全局 `RedisClient`，不在 `RedisUtils` 内维护 guard 注册表，也不返回对
+`OnceLock` 的借用；guard 自己持有 client clone。未初始化返回 `NotInitialized`，其余
+返回值和同步 `RedisClient::try_lock` 相同。
+
+```rust,no_run
+use axutils::{RedisLockGuard, RedisUtils};
+
+let _ = RedisUtils::try_lock::<&str>;
+let _ = RedisLockGuard::release;
 ```
 
 ### `RedisUtils::set_bytes_nx`
@@ -1987,7 +2153,8 @@ let _ = RedisUtils::set_bytes_nx::<&str, Vec<u8>>;
 
 ### `RedisUtils::set_bytes_nx_with_expiry`
 
-调用示例：`RedisUtils::set_bytes_nx_with_expiry("key", bytes, ttl)`。
+这是通用 raw NX 写入，不记录锁所有者，也不会自动释放；锁场景应使用
+`RedisUtils::try_lock`。调用示例：`RedisUtils::set_bytes_nx_with_expiry("cache:key", bytes, ttl)`。
 
 ```rust,no_run
 use axutils::RedisUtils;
@@ -1997,7 +2164,8 @@ let _ = RedisUtils::set_bytes_nx_with_expiry::<&str, Vec<u8>>;
 
 ### `RedisUtils::delete`
 
-调用示例：`RedisUtils::delete("key")`。
+这是无条件删除，不校验锁 token；释放租约锁应使用 guard 的 `release`。调用示例：
+`RedisUtils::delete("cache:key")`。
 
 ```rust,no_run
 use axutils::RedisUtils;
@@ -2187,7 +2355,8 @@ let _ = RedisUtils::expire::<&str>;
 
 ### `RedisUtils::pexpire`
 
-调用示例：`RedisUtils::pexpire("key", ttl)`。
+这是无条件设置 TTL，不校验锁 token；续租租约锁应使用 guard 的 `renew`。调用示例：
+`RedisUtils::pexpire("cache:key", ttl)`。
 
 ```rust,no_run
 use axutils::RedisUtils;
@@ -2382,7 +2551,8 @@ let _ = RedisUtils::transaction::<fn(&mut RedisTransaction) -> Result<(), RedisE
 `RedisUtils::hgetall_async::<_, MyValue>("hash").await`、`RedisUtils::ping_async().await` 和
 `RedisUtils::transaction_async(|tx| tx.set("key", value)).await`。其余
 `get_bytes_async`、`set_bytes_async`、两组 expiry/NX、delete/mget/mset、全部 Hash、TTL、
-counter、list/set 方法分别与前述异步 `RedisClient` 方法一一对应，参数/返回/边界不变。
+counter、list/set 方法以及 `try_lock_async` 分别与前述异步 `RedisClient` 方法一一对应，
+参数/返回/边界不变；异步锁 guard 仍必须显式 `await release()`。
 
 ### `RedisUtils::get_async`
 
@@ -2491,7 +2661,8 @@ let _ = RedisUtils::set_nx_async::<&str, u8>;
 
 ### `RedisUtils::set_nx_with_expiry_async`
 
-调用示例：`RedisUtils::set_nx_with_expiry_async("key", value, ttl).await`。
+这是通用 NX 写入，不记录锁所有者，也不会自动释放；锁场景应使用
+`RedisUtils::try_lock_async`。调用示例：`RedisUtils::set_nx_with_expiry_async("cache:key", value, ttl).await`。
 
 ```rust,no_run
 # #[cfg(all(feature = "redis", feature = "tokio"))]
@@ -2499,6 +2670,24 @@ let _ = RedisUtils::set_nx_async::<&str, u8>;
 use axutils::RedisUtils;
 
 let _ = RedisUtils::set_nx_with_expiry_async::<&str, u8>;
+# }
+# #[cfg(not(all(feature = "redis", feature = "tokio")))]
+# fn main() {}
+```
+
+### `RedisUtils::try_lock_async`
+
+签名：`pub async fn try_lock_async<K: AsRef<[u8]>>(key: K, ttl: Duration) -> Result<Option<RedisAsyncLockGuard>, RedisError>`。
+转发到全局客户端并返回拥有 client clone 的异步 guard；全局入口不提供进程内锁表，
+异步 guard 的 `Drop` 不会执行网络清理。
+
+```rust,no_run
+# #[cfg(all(feature = "redis", feature = "tokio"))]
+# fn main() {
+use axutils::{RedisAsyncLockGuard, RedisUtils};
+
+let _ = RedisUtils::try_lock_async::<&str>;
+let _ = RedisAsyncLockGuard::release;
 # }
 # #[cfg(not(all(feature = "redis", feature = "tokio")))]
 # fn main() {}
@@ -2521,7 +2710,8 @@ let _ = RedisUtils::set_bytes_nx_async::<&str, Vec<u8>>;
 
 ### `RedisUtils::set_bytes_nx_with_expiry_async`
 
-调用示例：`RedisUtils::set_bytes_nx_with_expiry_async("key", bytes, ttl).await`。
+这是通用 raw NX 写入，不记录锁所有者，也不会自动释放；锁场景应使用
+`RedisUtils::try_lock_async`。调用示例：`RedisUtils::set_bytes_nx_with_expiry_async("cache:key", bytes, ttl).await`。
 
 ```rust,no_run
 # #[cfg(all(feature = "redis", feature = "tokio"))]
@@ -2536,7 +2726,8 @@ let _ = RedisUtils::set_bytes_nx_with_expiry_async::<&str, Vec<u8>>;
 
 ### `RedisUtils::delete_async`
 
-调用示例：`RedisUtils::delete_async("key").await`。
+这是无条件删除，不校验锁 token；释放租约锁应使用 guard 的 `release`。调用示例：
+`RedisUtils::delete_async("cache:key").await`。
 
 ```rust,no_run
 # #[cfg(all(feature = "redis", feature = "tokio"))]
@@ -2821,7 +3012,8 @@ let _ = RedisUtils::expire_async::<&str>;
 
 ### `RedisUtils::pexpire_async`
 
-调用示例：`RedisUtils::pexpire_async("key", ttl).await`。
+这是无条件设置 TTL，不校验锁 token；续租租约锁应使用 guard 的 `renew`。调用示例：
+`RedisUtils::pexpire_async("cache:key", ttl).await`。
 
 ```rust,no_run
 # #[cfg(all(feature = "redis", feature = "tokio"))]

@@ -12,8 +12,9 @@
 //! 应使用 `crate::AesCipher` 实例。
 //! JWT 的一次初始化全局入口需要 `jwt` feature；它只转发到 `crate::jwt` 的固定 codec。
 //! HTTP 客户端需要 `http` feature；异步 HTTP 入口还需要同时启用 `tokio`。
-//! Redis 客户端需要 `redis` feature；同步 API 使用惰性连接池，异步 API 还需要同时启用
-//! `tokio`，并由调用方提供 runtime。
+//! Redis 客户端需要 `redis` feature；同步 API 使用惰性连接池和单键租约锁，异步 API 还
+//! 需要同时启用 `tokio`，并由调用方提供 runtime。全局 `RedisUtils` 只是连接入口，不维护
+//! 进程内锁表；锁 guard 自己拥有客户端 clone。
 
 #[cfg(feature = "rand")]
 pub mod random_utils;

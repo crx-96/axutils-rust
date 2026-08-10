@@ -4,7 +4,10 @@ use std::sync::OnceLock;
 
 use serde::{de::DeserializeOwned, Serialize};
 
-use crate::redis::{RedisClient, RedisConfig, RedisError, RedisTransaction};
+use crate::redis::{RedisClient, RedisConfig, RedisError, RedisLockGuard, RedisTransaction};
+
+#[cfg(all(feature = "redis", feature = "tokio"))]
+use crate::redis::RedisAsyncLockGuard;
 
 static REDIS_CLIENT: OnceLock<RedisClient> = OnceLock::new();
 
@@ -154,6 +157,9 @@ impl RedisUtils {
 
     /// 仅在 key 不存在时写入带 TTL 的 MessagePack 值。
     ///
+    /// 这是通用的 NX 写入，不会生成锁 token，也不会在 guard 被丢弃时自动释放；需要
+    /// 所有权校验的单键租约锁请使用 [`RedisUtils::try_lock`]。
+    ///
     /// # Examples
     ///
     /// ```no_run
@@ -167,6 +173,28 @@ impl RedisUtils {
         ttl: std::time::Duration,
     ) -> Result<bool, RedisError> {
         Self::client()?.set_nx_with_expiry(key, value, ttl)
+    }
+
+    /// 尝试通过全局客户端获取单键租约锁。
+    ///
+    /// 全局客户端只是连接入口，不是进程内互斥锁；跨进程互斥由 Redis key、不可预测
+    /// token 和 TTL 协议保证。返回的 guard 拥有 `RedisClient` clone，可以在该方法返回后
+    /// 显式释放或续租。
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use axutils::RedisUtils;
+    /// use std::time::Duration;
+    ///
+    /// let _ = RedisUtils::try_lock::<&str>;
+    /// let _ = Duration::from_secs(30);
+    /// ```
+    pub fn try_lock<K: AsRef<[u8]>>(
+        key: K,
+        ttl: std::time::Duration,
+    ) -> Result<Option<RedisLockGuard>, RedisError> {
+        Self::client()?.try_lock(key, ttl)
     }
 
     /// 仅在 key 不存在时写入 raw 值。
@@ -187,6 +215,9 @@ impl RedisUtils {
 
     /// 仅在 key 不存在时写入带 TTL 的 raw 值。
     ///
+    /// 这是通用的 NX 写入，不会生成锁 token，也不会在 guard 被丢弃时自动释放；需要
+    /// 所有权校验的单键租约锁请使用 [`RedisUtils::try_lock`]。
+    ///
     /// # Examples
     ///
     /// ```no_run
@@ -203,6 +234,9 @@ impl RedisUtils {
     }
 
     /// 删除一个 key。
+    ///
+    /// 此操作是无条件删除，不会校验租约 token；释放由 [`RedisUtils::try_lock`] 返回的锁
+    /// 应使用 guard 的 `release` 方法。
     ///
     /// # Examples
     ///
@@ -502,6 +536,9 @@ impl RedisUtils {
     }
 
     /// 以毫秒为单位设置 key 的 TTL。
+    ///
+    /// 此操作是无条件设置 TTL，不会校验租约 token；续租由 [`RedisUtils::try_lock`] 返回的
+    /// 锁应使用 guard 的 `renew` 方法。
     ///
     /// # Examples
     ///
@@ -872,6 +909,9 @@ impl RedisUtils {
 
     /// 异步仅在 key 不存在时写入带 TTL 的 MessagePack 值。
     ///
+    /// 这是通用的 NX 写入，不会生成锁 token，也不会在 guard 被丢弃时自动释放；需要
+    /// 所有权校验的单键租约锁请使用 [`RedisUtils::try_lock_async`]。
+    ///
     /// # Examples
     ///
     /// ```no_run
@@ -887,6 +927,26 @@ impl RedisUtils {
         Self::client()?
             .set_nx_with_expiry_async(key, value, ttl)
             .await
+    }
+
+    /// 异步尝试通过全局客户端获取单键租约锁。
+    ///
+    /// 全局客户端只是连接入口，不是进程内互斥锁；跨进程互斥由 Redis key、不可预测
+    /// token 和 TTL 协议保证。返回的 guard 拥有 `RedisClient` clone；异步 guard 的 `Drop`
+    /// 不会发起网络操作，正常路径必须显式 `await release()`。
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use axutils::RedisUtils;
+    ///
+    /// let _ = RedisUtils::try_lock_async::<&str>;
+    /// ```
+    pub async fn try_lock_async<K: AsRef<[u8]>>(
+        key: K,
+        ttl: std::time::Duration,
+    ) -> Result<Option<RedisAsyncLockGuard>, RedisError> {
+        Self::client()?.try_lock_async(key, ttl).await
     }
 
     /// 异步仅在 key 不存在时写入 raw 值。
@@ -907,6 +967,9 @@ impl RedisUtils {
 
     /// 异步仅在 key 不存在时写入带 TTL 的 raw 值。
     ///
+    /// 这是通用的 NX 写入，不会生成锁 token，也不会在 guard 被丢弃时自动释放；需要
+    /// 所有权校验的单键租约锁请使用 [`RedisUtils::try_lock_async`]。
+    ///
     /// # Examples
     ///
     /// ```no_run
@@ -925,6 +988,9 @@ impl RedisUtils {
     }
 
     /// 异步删除一个 key。
+    ///
+    /// 此操作是无条件删除，不会校验租约 token；释放由 [`RedisUtils::try_lock_async`] 返回
+    /// 的锁应使用 guard 的 `release` 方法。
     ///
     /// # Examples
     ///
@@ -1234,6 +1300,9 @@ impl RedisUtils {
     }
 
     /// 异步以毫秒为单位设置 key 的 TTL。
+    ///
+    /// 此操作是无条件设置 TTL，不会校验租约 token；续租由 [`RedisUtils::try_lock_async`] 返回
+    /// 的锁应使用 guard 的 `renew` 方法。
     ///
     /// # Examples
     ///

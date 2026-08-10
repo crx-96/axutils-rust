@@ -84,6 +84,49 @@ fn client_construction_and_local_validation_do_not_connect() {
 }
 
 #[test]
+fn lock_validation_is_local_and_enforces_the_24_hour_bound() {
+    let client = RedisClient::new(RedisConfig::single("redis://127.0.0.1:6379/0").unwrap())
+        .expect("client construction should be lazy");
+
+    assert!(matches!(
+        client.try_lock("", Duration::from_secs(1)),
+        Err(RedisError::InvalidKey)
+    ));
+    for ttl in [
+        Duration::ZERO,
+        Duration::from_secs(24 * 60 * 60 + 1),
+        Duration::MAX,
+    ] {
+        assert!(matches!(
+            client.try_lock("lock:key", ttl),
+            Err(RedisError::InvalidConfig { field: "ttl" })
+        ));
+    }
+}
+
+#[cfg(feature = "tokio")]
+#[tokio::test]
+async fn async_lock_validation_is_local_and_enforces_the_24_hour_bound() {
+    let client = RedisClient::new(RedisConfig::single("redis://127.0.0.1:6379/0").unwrap())
+        .expect("client construction should be lazy");
+
+    assert!(matches!(
+        client.try_lock_async("", Duration::from_secs(1)).await,
+        Err(RedisError::InvalidKey)
+    ));
+    for ttl in [
+        Duration::ZERO,
+        Duration::from_secs(24 * 60 * 60 + 1),
+        Duration::MAX,
+    ] {
+        assert!(matches!(
+            client.try_lock_async("lock:key", ttl).await,
+            Err(RedisError::InvalidConfig { field: "ttl" })
+        ));
+    }
+}
+
+#[test]
 fn transaction_callback_and_queue_limits_are_local() {
     let config = RedisConfig::single("redis://127.0.0.1:6379/0")
         .unwrap()

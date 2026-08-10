@@ -77,9 +77,17 @@
   提供惰性 r2d2 单机/Cluster 连接池、受限 MessagePack 值 API、raw 字节 API、批量命令、
   TTL/counter/list/set 及单机 `MULTI`/`EXEC` 事务。第一阶段只接受 `redis://`，不提供 TLS、
   Cluster 事务、WATCH/CAS 或无界 keys/scan；Cluster 跨 slot 错误统一映射为 `CrossSlot`。
+- 新增 `RedisClient::try_lock`、`RedisLockGuard`、`RedisLockGuard::release`/`renew` 以及
+  `RedisUtils::try_lock`，提供单 Redis 逻辑主节点/单 Cluster 拓扑的单键租约锁：使用 OS
+  CSPRNG token、24 小时以内 TTL 和 token 校验 Lua `EVAL`，同步 guard 支持一次最佳努力
+  `Drop` 释放，锁丢失时返回 `Ok(false)` 而不删除新持有者的锁。
 - 新增 `redis,tokio` 组合下的 `_async` Redis 命令和独立事务通道；异步连接惰性初始化，
   不创建 Tokio runtime、不调用 `block_on`，调用方必须提供 runtime。Redis feature 直接启用
   专用 `serde` 依赖但不自动启用项目公共 `serde` feature。
+- 新增 `redis,tokio` 组合下的 `RedisAsyncLockGuard`、`RedisClient::try_lock_async`、
+  `RedisUtils::try_lock_async` 及异步 `release`/`renew`；异步 guard 的 `Drop` 不发起网络
+  操作，取消和 runtime 关闭路径依赖 TTL 兜底。既有 `set_nx_with_expiry`/raw 变体仍是
+  通用 NX 写入原语，不记录锁所有者或自动释放，普通 `delete`/`pexpire` 也不校验 token。
 - 新增互斥的 `mimalloc` 和 `rpmalloc` allocator feature，分别使用可选的 `mimalloc 0.1.52`
   与 `rpmalloc 0.2.2` 依赖注册唯一 Rust 全局分配器；不启用时保持目标平台默认分配器。由于
   `axutils` 是 library，启用后会影响依赖它的最终 Rust binary；已有 `#[global_allocator]` 的

@@ -70,6 +70,17 @@ fn cluster_live_fixture_covers_routing_and_cross_slot_boundaries() {
         .expect("cluster set with expiry");
     assert!(client.pttl(&shared_a).expect("cluster pttl") > 0);
 
+    let lock_key = format!("{namespace}:{{lock}}:lease");
+    let mut lock = client
+        .try_lock(&lock_key, std::time::Duration::from_secs(10))
+        .expect("cluster lock acquisition")
+        .expect("cluster lock should be available");
+    assert!(client
+        .try_lock(&lock_key, std::time::Duration::from_secs(10))
+        .expect("cluster busy lock attempt")
+        .is_none());
+    assert!(lock.release().expect("cluster lock release"));
+
     client
         .mset([(shared_a.clone(), 3_u8), (shared_b.clone(), 4_u8)])
         .expect("same-slot mset");
@@ -84,7 +95,7 @@ fn cluster_live_fixture_covers_routing_and_cross_slot_boundaries() {
         Err(RedisError::CrossSlot)
     );
 
-    for key in [shared_a, shared_b, shared_hash, cross_a, cross_b] {
+    for key in [shared_a, shared_b, shared_hash, cross_a, cross_b, lock_key] {
         let _ = client.delete(key).expect("cluster cleanup");
     }
 }
@@ -107,6 +118,16 @@ async fn cluster_async_fixture_covers_routing() {
             .expect("cluster async get"),
         Some(1)
     );
+    let mut lock = client
+        .try_lock_async(&key, std::time::Duration::from_secs(10))
+        .await
+        .expect("cluster async lock acquisition")
+        .expect("cluster async lock should be available");
+    assert!(lock
+        .renew(std::time::Duration::from_secs(10))
+        .await
+        .expect("cluster async lock renew"));
+    assert!(lock.release().await.expect("cluster async lock release"));
     let _ = client
         .delete_async(&key)
         .await

@@ -2,7 +2,7 @@
 
 use std::{collections::HashMap, fs, path::PathBuf, time::Duration};
 
-use axutils::{RedisClient, RedisConfig, RedisError};
+use axutils::{RedisClient, RedisConfig, RedisError, RedisUtils};
 
 struct LiveConfig {
     redis_url: String,
@@ -148,6 +148,140 @@ fn exercises_sync_redis_api_against_local_service() {
     client.delete_many(cleanup).expect("cleanup");
 }
 
+#[test]
+#[ignore = "requires config/redis-test.toml and explicit AXUTILS_REDIS_LIVE_TEST=1"]
+fn exercises_sync_single_key_lock_ownership_and_ttl() {
+    let config = load_live_config();
+    let client_a = RedisClient::new(
+        RedisConfig::single(config.redis_url.clone())
+            .unwrap_or_else(|_| panic!("Redis live configuration has invalid redis_url")),
+    )
+    .unwrap_or_else(|_| panic!("Redis live client construction failed"));
+    let client_b = RedisClient::new(
+        RedisConfig::single(config.redis_url)
+            .unwrap_or_else(|_| panic!("Redis live configuration has invalid redis_url")),
+    )
+    .unwrap_or_else(|_| panic!("Redis live client construction failed"));
+    let key = format!(
+        "{}:lock:{}:{}",
+        config.key_prefix,
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos()
+    );
+
+    let barrier = std::sync::Arc::new(std::sync::Barrier::new(3));
+    let results = std::thread::scope(|scope| {
+        let barrier_a = std::sync::Arc::clone(&barrier);
+        let barrier_b = std::sync::Arc::clone(&barrier);
+        let key_a = key.clone();
+        let key_b = key.clone();
+        let thread_client_a = client_a.clone();
+        let thread_client_b = client_b.clone();
+        let first = scope.spawn(move || {
+            barrier_a.wait();
+            match thread_client_a.try_lock(key_a, Duration::from_secs(5))? {
+                Some(mut lock) => lock.release(),
+                None => Ok(false),
+            }
+        });
+        let second = scope.spawn(move || {
+            barrier_b.wait();
+            match thread_client_b.try_lock(key_b, Duration::from_secs(5))? {
+                Some(mut lock) => lock.release(),
+                None => Ok(false),
+            }
+        });
+        barrier.wait();
+        [
+            first.join().expect("first lock thread should not panic"),
+            second.join().expect("second lock thread should not panic"),
+        ]
+    });
+    let successful_releases = results
+        .into_iter()
+        .map(|result| result.expect("lock command should succeed"))
+        .filter(|released| *released)
+        .count();
+    assert_eq!(successful_releases, 1);
+
+    let mut old = client_b
+        .try_lock(&key, Duration::from_millis(120))
+        .expect("old lock acquisition")
+        .expect("old lock should be available");
+    assert!(format!("{old:?}").contains("RedisLockGuard"));
+    assert!(!format!("{old:?}").contains(&key));
+    assert!(client_a
+        .try_lock(&key, Duration::from_secs(1))
+        .unwrap()
+        .is_none());
+    std::thread::sleep(Duration::from_millis(180));
+
+    let mut replacement = client_a
+        .try_lock(&key, Duration::from_secs(1))
+        .expect("replacement lock acquisition")
+        .expect("replacement lock should be available after TTL");
+    assert!(!old.release().expect("stale release"));
+    assert!(replacement.renew(Duration::from_secs(1)).expect("renew"));
+    assert!(replacement.release().expect("release"));
+
+    let mut old_renew = client_b
+        .try_lock(&key, Duration::from_millis(120))
+        .expect("old renew lock acquisition")
+        .expect("old renew lock should be available");
+    std::thread::sleep(Duration::from_millis(180));
+    let mut replacement = client_a
+        .try_lock(&key, Duration::from_secs(1))
+        .expect("second replacement lock acquisition")
+        .expect("second replacement lock should be available after TTL");
+    assert!(!old_renew
+        .renew(Duration::from_secs(1))
+        .expect("stale renew"));
+    assert!(replacement.release().expect("second replacement release"));
+
+    {
+        let _drop_guard = client_a
+            .try_lock(&key, Duration::from_secs(1))
+            .expect("drop lock acquisition")
+            .expect("drop lock should be available");
+    }
+    let mut after_drop = client_b
+        .try_lock(&key, Duration::from_secs(1))
+        .expect("post-drop lock acquisition")
+        .expect("sync Drop should release when Redis is available");
+    assert!(after_drop.release().expect("post-drop release"));
+}
+
+#[test]
+#[ignore = "requires config/redis-test.toml and explicit AXUTILS_REDIS_LIVE_TEST=1"]
+fn exercises_redis_utils_lock_forwarding_lifetime() {
+    let config = load_live_config();
+    RedisUtils::init(
+        RedisConfig::single(config.redis_url)
+            .unwrap_or_else(|_| panic!("Redis live configuration has invalid redis_url")),
+    )
+    .unwrap_or_else(|_| panic!("RedisUtils live initialization failed"));
+    let key = format!(
+        "{}:utils-lock:{}:{}",
+        config.key_prefix,
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos()
+    );
+
+    let mut lock = RedisUtils::try_lock(&key, Duration::from_secs(1))
+        .expect("RedisUtils lock acquisition")
+        .expect("RedisUtils lock should be available");
+    assert!(lock
+        .renew(Duration::from_secs(1))
+        .expect("RedisUtils renew"));
+    assert!(lock.release().expect("RedisUtils release"));
+}
+
 #[cfg(all(feature = "redis", feature = "tokio"))]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "requires config/redis-test.toml and explicit AXUTILS_REDIS_LIVE_TEST=1"]
@@ -167,6 +301,68 @@ async fn exercises_async_redis_api_against_local_service() {
         .expect("async transaction");
     assert_eq!(client.get_async::<_, u8>(&key).await.unwrap(), Some(2));
     client.delete_async(&key).await.expect("async cleanup");
+}
+
+#[cfg(all(feature = "redis", feature = "tokio"))]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "requires config/redis-test.toml and explicit AXUTILS_REDIS_LIVE_TEST=1"]
+async fn exercises_async_single_key_lock_and_ttl_fallback() {
+    let config = load_live_config();
+    let client = RedisClient::new(
+        RedisConfig::single(config.redis_url.clone())
+            .unwrap_or_else(|_| panic!("Redis live configuration has invalid redis_url")),
+    )
+    .unwrap_or_else(|_| panic!("Redis live client construction failed"));
+    let other = RedisClient::new(
+        RedisConfig::single(config.redis_url)
+            .unwrap_or_else(|_| panic!("Redis live configuration has invalid redis_url")),
+    )
+    .unwrap_or_else(|_| panic!("Redis live client construction failed"));
+    let key = format!(
+        "{}:async-lock:{}:{}",
+        config.key_prefix,
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos()
+    );
+
+    let mut lock = client
+        .try_lock_async(&key, Duration::from_secs(1))
+        .await
+        .expect("async lock acquisition")
+        .expect("async lock should be available");
+    assert!(other
+        .try_lock_async(&key, Duration::from_secs(1))
+        .await
+        .expect("busy lock attempt")
+        .is_none());
+    assert!(lock
+        .renew(Duration::from_secs(1))
+        .await
+        .expect("async renew"));
+    assert!(lock.release().await.expect("async release"));
+    assert!(!lock.release().await.expect("repeated async release"));
+
+    let short_lock = client
+        .try_lock_async(&key, Duration::from_millis(120))
+        .await
+        .expect("short async lock acquisition")
+        .expect("short async lock should be available");
+    drop(short_lock);
+    assert!(other
+        .try_lock_async(&key, Duration::from_secs(1))
+        .await
+        .expect("async Drop busy attempt")
+        .is_none());
+    tokio::time::sleep(Duration::from_millis(180)).await;
+    let mut after_ttl = other
+        .try_lock_async(&key, Duration::from_secs(1))
+        .await
+        .expect("async lock after TTL")
+        .expect("TTL should release a dropped async guard");
+    assert!(after_ttl.release().await.expect("async cleanup"));
 }
 
 fn load_live_config() -> LiveConfig {

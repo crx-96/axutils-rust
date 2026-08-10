@@ -36,6 +36,7 @@ http = ["dep:ureq", "dep:reqwest", "dep:url"]
 redis = [
     "dep:redis",
     "dep:r2d2",
+    "dep:rand",
     "dep:serde",
     "dep:rmp-serde",
     "redis/r2d2",

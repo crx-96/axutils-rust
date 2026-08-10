@@ -85,10 +85,12 @@
 //! ```
 
 //! Redis 能力需要显式启用 `redis` feature；它提供惰性连接池、Cluster 普通命令、受限
-//! MessagePack 值 API、raw 字节 API、事务和一次初始化的 `RedisUtils`。同时启用 `tokio`
-//! 后追加 `_async` 异步方法；调用方必须自行提供 Tokio runtime。第一阶段只接受
-//! `redis://`，不启用 TLS；构造配置、客户端或全局入口不会访问网络。详细 API、feature
-//! 矩阵、大小边界和事务语义见 [`Redis 使用文档`](https://github.com/crx-96/axutils-rust/blob/main/docs/examples/redis.md)。
+//! MessagePack 值 API、raw 字节 API、单 Redis 拓扑单键租约锁、事务和一次初始化的
+//! `RedisUtils`。锁 token 使用 OS CSPRNG，释放/续租使用单 key Lua 校验；该能力不是
+//! Redlock，也不提供 fencing token。同时启用 `tokio` 后追加 `_async` 异步方法和异步锁
+//! guard；调用方必须自行提供 Tokio runtime。第一阶段只接受 `redis://`，不启用 TLS；构造
+//! 配置、客户端或全局入口不会访问网络。详细 API、feature 矩阵、大小边界和事务语义见
+//! [`Redis 使用文档`](https://github.com/crx-96/axutils-rust/blob/main/docs/examples/redis.md)。
 //!
 //! ```toml
 //! [dependencies]
@@ -203,7 +205,12 @@ pub use http::{
 pub use utils::HttpUtils;
 
 #[cfg(feature = "redis")]
-pub use redis::{RedisClient, RedisConfig, RedisError, RedisTransaction, RedisTransportErrorKind};
+pub use redis::{
+    RedisClient, RedisConfig, RedisError, RedisLockGuard, RedisTransaction, RedisTransportErrorKind,
+};
+
+#[cfg(all(feature = "redis", feature = "tokio"))]
+pub use redis::RedisAsyncLockGuard;
 
 #[cfg(feature = "redis")]
 pub use utils::RedisUtils;
