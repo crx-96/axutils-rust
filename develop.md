@@ -5,6 +5,10 @@
 `docs/examples/` 打入发布包；`develop.md`、`AGENTS.md`、`CLAUDE.md` 以及 `docs/` 中的计划、
 状态和其他开发资料不随包发布。
 
+实现、审查和验收的统一门槛见 [`REVIEW_ACCEPTANCE.md`](REVIEW_ACCEPTANCE.md)；本文档保留开发、
+feature 背景和发布操作命令。两者出现冲突时，先按标准文档的权威来源顺序核对当前源码和
+`Cargo.toml`，再同步修正文档。
+
 ## 项目结构
 
 ```text
@@ -218,7 +222,7 @@ default = []
 rand = ["dep:rand"]
 regex = ["dep:regex"]
 libphonenumber = ["dep:libphonenumber"]
-serde = ["dep:serde", "dep:serde_json"]
+serde = ["dep:serde", "dep:serde_json", "dep:serde_urlencoded"]
 strfmt = ["dep:strfmt"]
 minijinja = ["dep:minijinja"]
 chrono = ["dep:chrono"]
