@@ -85,9 +85,9 @@ HTTP 模块可从以下路径访问：
   `DELETE` 和带体请求只有在请求级显式设置去重策略后才允许合并。leader 取消或异常退出时，
   follower 收到 `CoalescedRequestCancelled`；follower 自己超时不会取消 leader。
 - 完成缓存必须通过 `DeduplicationPolicy::with_completed_ttl` 显式开启，只缓存满足安全条件的
-  2xx 无体 `GET`/`HEAD`；带认证、Cookie、Range、条件 Header、`Set-Cookie`、`Vary: *`、
-  `Cache-Control: no-store` 或 `no-cache` 的响应不缓存。缓存按客户端隔离、使用单调时钟并受
-  条目数和响应体总大小上限约束。
+  2xx 无体 `GET`/`HEAD`；请求带认证、Cookie、Range、条件 Header、`Pragma`，请求或响应的
+  `Cache-Control` 含 `no-store`/`no-cache`，或响应带 `Set-Cookie`、`Vary: *` 时不缓存。缓存
+  按客户端隔离、使用单调时钟并受条目数和响应体总大小上限约束。
 - 4xx/5xx 是正常的 `HttpResponse`，不会转换为 `HttpError`；连接、TLS、协议、超时、大小
   和本地校验失败才返回 `HttpError`。`HttpError` 不保存 URL、Header 值、请求/响应体或第三方
   原始错误文本。

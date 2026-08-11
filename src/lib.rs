@@ -15,24 +15,25 @@
 //! axutils = { version = "0.1", features = ["lettre"] }
 //! # 异步邮件改为 features = ["lettre", "tokio"]，并由调用方提供 Tokio runtime。
 //! ```
-//! 需要随机工具时，
-//! 通过 `rand` feature 显式启用 `RandomUtils`；需要邮箱和中国大陆手机号码校验时，
-//! 通过 `regex` feature 显式启用 `RegUtils`；`is_phone` 还需要同时启用独立的
-//! `libphonenumber` feature：
+//! 需要随机工具时，通过 `rand` feature 显式启用 `RandomUtils`：
+//!
+//! ```toml
+//! [dependencies]
+//! axutils = { version = "0.1", features = ["rand"] }
+//! ```
+//!
+//! 需要邮箱和中国大陆手机号码校验时，通过 `regex` feature 显式启用 `RegUtils`：
 //!
 //! ```toml
 //! [dependencies]
 //! axutils = { version = "0.1", features = ["regex"] }
 //! ```
-
+//!
+//! `is_phone` 还需要同时启用独立的 `libphonenumber` feature：
+//!
 //! ```toml
 //! [dependencies]
 //! axutils = { version = "0.1", features = ["regex", "libphonenumber"] }
-//! ```
-
-//! ```toml
-//! [dependencies]
-//! axutils = { version = "0.1", features = ["rand"] }
 //! ```
 //!
 //! `FormatUtils` 的运行时模板能力需要用户显式启用 `serde` 和一个后端 feature：`strfmt`

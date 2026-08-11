@@ -13,7 +13,7 @@ const MAX_DEPTH_CEILING: usize = 256;
 /// 字段的“伪表”来传递原始字符串表示，而不是直接调用 `visit_str`；本 crate 的 TOML 后端据此
 /// 识别并还原为 [`ConfigValue::String`]，其余后端不做这一特殊处理，避免把恰好使用同名键的
 /// 普通表误判为日期时间。
-const TOML_DATETIME_FIELD: &str = "$__toml_private_datetime";
+pub(crate) const TOML_DATETIME_FIELD: &str = "$__toml_private_datetime";
 
 const DEPTH_MARKER: &str = "\u{0}axutils:config:depth\u{0}";
 const DUPLICATE_KEY_MARKER_PREFIX: &str = "\u{0}axutils:config:duplicate:";
@@ -439,9 +439,13 @@ impl<'de> Visitor<'de> for ConfigValueVisitor {
         // `toml_datetime` exposes a datetime as a one-field pseudo-table. Consume the
         // complete map before converting it so a user table containing the marker together
         // with another field cannot cause the already-read fields to be discarded.
+        #[cfg(feature = "toml")]
         if self.detect_toml_datetime && table.len() == 1 {
             if let Some(ConfigValue::String(raw)) = table.remove(TOML_DATETIME_FIELD) {
-                return Ok(ConfigValue::String(raw));
+                if raw.parse::<::toml::value::Datetime>().is_ok() {
+                    return Ok(ConfigValue::String(raw));
+                }
+                table.insert(TOML_DATETIME_FIELD.to_owned(), ConfigValue::String(raw));
             }
         }
         Ok(ConfigValue::Table(table))

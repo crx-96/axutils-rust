@@ -4,16 +4,61 @@ use serde::de::{DeserializeOwned, DeserializeSeed};
 
 use super::{
     error::{line_column_at, ConfigError},
-    value::{classify_marker, ConfigValueSeed, ErrorMarker},
+    value::{classify_marker, ConfigValueSeed, ErrorMarker, TOML_DATETIME_FIELD},
     ConfigValue,
 };
 
 pub(crate) fn parse_value(text: &str, max_depth: usize) -> Result<ConfigValue, ConfigError> {
+    // `toml_datetime` represents a datetime through a map whose sole key is a private
+    // string. A user is nevertheless allowed to create a TOML table with that same key.
+    // When the marker occurs in the source, parse the public TOML value tree first so the
+    // actual node kind remains distinguishable from the serde pseudo-table representation.
+    if text.contains(TOML_DATETIME_FIELD) {
+        if let Ok(value) = ::toml::from_str::<::toml::Value>(text) {
+            return convert_toml_value(value, max_depth, max_depth);
+        }
+    }
     let deserializer =
         ::toml::de::Deserializer::parse(text).map_err(|error| map_parse_error(text, &error))?;
     ConfigValueSeed::root_for_toml(max_depth)
         .deserialize(deserializer)
         .map_err(|error| map_value_error(text, &error, max_depth))
+}
+
+fn convert_toml_value(
+    value: ::toml::Value,
+    remaining_depth: usize,
+    limit: usize,
+) -> Result<ConfigValue, ConfigError> {
+    match value {
+        ::toml::Value::String(value) => Ok(ConfigValue::String(value)),
+        ::toml::Value::Integer(value) => Ok(ConfigValue::Integer(value)),
+        ::toml::Value::Float(value) => Ok(ConfigValue::Float(value)),
+        ::toml::Value::Boolean(value) => Ok(ConfigValue::Bool(value)),
+        ::toml::Value::Datetime(value) => Ok(ConfigValue::String(value.to_string())),
+        ::toml::Value::Array(values) => {
+            let remaining_depth = remaining_depth
+                .checked_sub(1)
+                .ok_or(ConfigError::DepthLimitExceeded { limit })?;
+            values
+                .into_iter()
+                .map(|value| convert_toml_value(value, remaining_depth, limit))
+                .collect::<Result<Vec<_>, _>>()
+                .map(ConfigValue::Array)
+        }
+        ::toml::Value::Table(values) => {
+            let remaining_depth = remaining_depth
+                .checked_sub(1)
+                .ok_or(ConfigError::DepthLimitExceeded { limit })?;
+            values
+                .into_iter()
+                .map(|(key, value)| {
+                    convert_toml_value(value, remaining_depth, limit).map(|value| (key, value))
+                })
+                .collect::<Result<_, _>>()
+                .map(ConfigValue::Table)
+        }
+    }
 }
 
 pub(crate) fn parse<T: DeserializeOwned>(text: &str) -> Result<T, ConfigError> {
@@ -155,6 +200,19 @@ mod tests {
         );
         assert_eq!(
             metadata
+                .get("$__toml_private_datetime")
+                .and_then(|value| value.as_str()),
+            Some("literal")
+        );
+    }
+
+    #[test]
+    fn datetime_marker_only_user_field_remains_a_table() {
+        let text = "\"$__toml_private_datetime\" = \"literal\"\n";
+        let value = parse_value(text, 64).expect("table should remain a table");
+        let table = value.as_table().expect("root should remain a table");
+        assert_eq!(
+            table
                 .get("$__toml_private_datetime")
                 .and_then(|value| value.as_str()),
             Some("literal")

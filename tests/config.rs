@@ -5,7 +5,9 @@ use std::path::{Path, PathBuf};
 #[cfg(all(feature = "serde", feature = "tokio"))]
 use std::fs;
 
-use axutils::{ConfigError, ConfigFormat, ConfigLoader, ConfigUtils};
+#[cfg(all(feature = "serde", feature = "tokio"))]
+use axutils::ConfigLoader;
+use axutils::{ConfigError, ConfigFormat, ConfigUtils};
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
@@ -37,6 +39,7 @@ fn reads_json_fixture_untyped_and_typed() {
         server: Server,
     }
     let config: Config = ConfigUtils::load(&path).expect("json fixture should load typed");
+    assert_eq!(config.server.host, "localhost");
     assert_eq!(config.server.port, 8080);
     assert!(config.server.tls);
 }
@@ -74,6 +77,7 @@ fn reads_toml_fixture_untyped_and_typed() {
         server: Server,
     }
     let config: Config = ConfigUtils::load(&path).expect("toml fixture should load typed");
+    assert_eq!(config.server.host, "localhost");
     assert_eq!(config.server.port, 8080);
 }
 

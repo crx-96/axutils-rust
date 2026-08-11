@@ -880,6 +880,13 @@ fn cache_eligible(prepared: &PreparedRequest, response: &HttpResponse) -> bool {
     }) {
         return false;
     }
+    if prepared.headers.iter().any(|(name, value)| {
+        name == "cache-control"
+            && (contains_header_token(value, b"no-store")
+                || contains_header_token(value, b"no-cache"))
+    }) {
+        return false;
+    }
     if response.headers().contains("set-cookie") {
         return false;
     }
@@ -932,7 +939,7 @@ fn recover_lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 #[cfg(test)]
 mod tests {
     use super::HttpClient;
-    use crate::{HttpConfig, HttpMethod, HttpRequest};
+    use crate::{HttpConfig, HttpHeaders, HttpMethod, HttpRequest, HttpResponse};
 
     #[test]
     fn cross_origin_absolute_urls_drop_only_sensitive_default_headers() {
@@ -971,5 +978,29 @@ mod tests {
             cross_origin.headers.get("x-client"),
             Some(b"axutils".as_slice())
         );
+    }
+
+    #[test]
+    fn completed_cache_rejects_request_cache_directives() {
+        let policy = crate::DeduplicationPolicy::with_completed_ttl(
+            std::time::Duration::from_secs(1),
+            8,
+            4,
+            1024,
+        )
+        .unwrap_or_else(|_| unreachable!());
+        let config = HttpConfig::builder()
+            .deduplication_policy(policy)
+            .build()
+            .unwrap_or_else(|_| unreachable!());
+        let client = HttpClient::new(config).unwrap_or_else(|_| unreachable!());
+        let request = HttpRequest::new(HttpMethod::Get, "https://example.com/resource")
+            .unwrap_or_else(|_| unreachable!())
+            .with_header("cache-control", "no-cache, no-store")
+            .unwrap_or_else(|_| unreachable!());
+        let prepared = client.prepare(request).unwrap_or_else(|_| unreachable!());
+        let response = HttpResponse::new(200, HttpHeaders::new(), Vec::new(), 1);
+
+        assert!(!super::cache_eligible(&prepared, &response));
     }
 }

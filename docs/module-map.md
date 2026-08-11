@@ -25,6 +25,11 @@
 | `JwtUtils` 与 JWT 领域类型 | `src/utils/jwt_utils.rs`、`src/jwt/{mod,algorithm,key,config,header,claims,clock,codec,error}.rs` | 仅在 `jwt` feature 下：公开模块为 `axutils::jwt`；`JwtAlgorithm`、`JwtSigningKey`、`JwtVerificationKey`、`JwtConfig`、`JwtValidation`、`JwtError` 同时从 `axutils::*` 与 `axutils::jwt::*` 导出；`JwtUtils` 从 `axutils::JwtUtils`、`axutils::utils::JwtUtils`、`axutils::utils::jwt_utils::JwtUtils` 导出；不提供 `axutils::jwt_utils` 根级别名 | `jwt` 直接启用可选 `jsonwebtoken`（11.0.0，`rust_crypto` + `use_pem`）、`serde` 和 `serde_json`，不启用项目现有 `serde` feature、配置、邮件或其他能力；默认 feature 为空 | 通过固定算法和拥有型 signing/verification key 提供受限 JWS 签发与验证；`JwtUtils` 只负责一次初始化的进程级全局转发，`JwtConfig` 不提供实例 encode/decode；claims 有 Header/重复键/深度/成员/数组/大小预检，标准 `exp`/`nbf`/`aud`/`iss`/`sub` 规则在签名成功后固定执行；不负责 JWE 加密、JWKS、远程 key、`kid` 路由、多 key 轮换、撤销、黑名单、重放保护、密钥托管或时钟同步；同进程外部依赖启用第二个 jsonwebtoken backend 的 provider 竞争不在本 crate 保证范围内 |
 | 全局内存分配器 | `src/allocator.rs` | 无公共模块、类型、函数、trait、常量、静态项或宏；`src/allocator.rs` 为 crate 私有实现，不存在 `axutils::allocator` 或 `AllocatorUtils` | `mimalloc` 与 `rpmalloc` 是互斥 feature，分别通过同名 optional dependency 注册 `mimalloc::MiMalloc` 或 `rpmalloc::RpMalloc`；不启用时保持默认分配器；native 构建依赖目标平台 C compiler/linker/SDK，Windows 的 rpmalloc 还需要 `Advapi32` import library，支持目标以实际验证为准 | 编译期为依赖该 library 的最终 Rust binary 选择唯一进程级 Rust global allocator；不提供运行时切换、allocator handle、统计或性能保证；已有 `#[global_allocator]`、动态库/静态库和 native/FFI 内存所有权由调用方按依赖边界单独处理 |
 
+HTTP 完成缓存还会拒绝请求侧的认证、Cookie、Range、条件 Header、`Pragma` 及
+`Cache-Control: no-store/no-cache`；响应侧的 `Cache-Control: no-store/no-cache`、
+`Vary: *` 及 `Set-Cookie` 也会阻止缓存。具体执行语义和测试边界见
+[`docs/examples/http.md`](examples/http.md)。
+
 ### `ConvertUtils` 公共导出与 feature 明细
 
 `ConvertUtils` 本体以及 `axutils::convert`、`axutils::utils::convert_utils` 模块始终公开。工具类提供
