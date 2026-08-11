@@ -84,6 +84,19 @@
 //! axutils = { version = "0.1", features = ["aes", "base64"] }
 //! ```
 
+//! 字符串转换能力通过 `itoa`、`ryu`、`zmij` 和 `uuid` 四个独立 feature 提供。`ConvertUtils`
+//! 和 `axutils::convert` 模块始终可用；整数、浮点数和 UUID 方法只在对应 feature 下导出。
+//! 浮点同时启用 `ryu` 与 `zmij` 时，通过 `FloatFormat` 显式选择后端，不存在隐式默认后端。
+//! 借用型 `*_to_str` 使用调用方 buffer，`append_*` 直接追加到已有字符串，`*_to_string` 返回
+//! 拥有型结果。完整 API、feature 矩阵和 UUID 直接依赖声明见
+//! [`ConvertUtils 使用文档`](https://github.com/crx-96/axutils-rust/blob/main/docs/examples/convert.md)。
+//!
+//! ```toml
+//! [dependencies]
+//! axutils = { version = "0.1", features = ["itoa", "ryu", "uuid"] }
+//! uuid = { version = "1.24.0", default-features = false, features = ["std"] }
+//! ```
+
 //! Redis 能力需要显式启用 `redis` feature；它提供惰性连接池、Cluster 普通命令、受限
 //! MessagePack 值 API、raw 字节 API、单 Redis 拓扑单键租约锁、事务和一次初始化的
 //! `RedisUtils`。锁 token 使用 OS CSPRNG，释放/续租使用单 key Lua 校验；该能力不是
@@ -134,6 +147,7 @@
 #[cfg(any(feature = "mimalloc", feature = "rpmalloc"))]
 mod allocator;
 
+pub mod convert;
 mod time;
 pub mod utils;
 
@@ -157,6 +171,17 @@ pub use utils::{LetterCase, RandomRangeError, RandomUtils};
 
 pub use utils::path_utils;
 pub use utils::PathUtils;
+
+pub use convert::ConvertUtils;
+
+#[cfg(feature = "itoa")]
+pub use convert::{IntegerBuffer, IntegerValue};
+
+#[cfg(any(feature = "ryu", feature = "zmij"))]
+pub use convert::{FloatBuffer, FloatFormat, FloatValue};
+
+#[cfg(feature = "uuid")]
+pub use convert::UuidBuffer;
 
 pub use utils::time_utils;
 pub use utils::TimeUtils;

@@ -1,0 +1,52 @@
+[package]
+name = "axutils-convert-feature-matrix"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[features]
+none = []
+itoa-only = ["axutils/itoa"]
+ryu-only = ["axutils/ryu"]
+zmij-only = ["axutils/zmij"]
+uuid-only = ["axutils/uuid", "dep:uuid"]
+itoa-ryu = ["axutils/itoa", "axutils/ryu"]
+itoa-zmij = ["axutils/itoa", "axutils/zmij"]
+itoa-uuid = ["axutils/itoa", "axutils/uuid", "dep:uuid"]
+ryu-zmij = ["axutils/ryu", "axutils/zmij"]
+ryu-uuid = ["axutils/ryu", "axutils/uuid", "dep:uuid"]
+zmij-uuid = ["axutils/zmij", "axutils/uuid", "dep:uuid"]
+itoa-ryu-zmij = ["axutils/itoa", "axutils/ryu", "axutils/zmij"]
+itoa-ryu-uuid = ["axutils/itoa", "axutils/ryu", "axutils/uuid", "dep:uuid"]
+itoa-zmij-uuid = ["axutils/itoa", "axutils/zmij", "axutils/uuid", "dep:uuid"]
+ryu-zmij-uuid = ["axutils/ryu", "axutils/zmij", "axutils/uuid", "dep:uuid"]
+all = [
+    "axutils/itoa",
+    "axutils/ryu",
+    "axutils/zmij",
+    "axutils/uuid",
+    "dep:uuid",
+]
+
+negative-no-itoa-integer = []
+negative-no-float = []
+negative-no-uuid = []
+negative-no-ryu-variant = ["axutils/zmij"]
+negative-no-zmij-variant = ["axutils/ryu"]
+negative-float-default = ["axutils/ryu"]
+negative-float-suffix = ["axutils/ryu"]
+negative-integer-custom = ["axutils/itoa"]
+negative-float-custom = ["axutils/ryu"]
+negative-integer-sealed = ["axutils/itoa"]
+negative-float-sealed = ["axutils/ryu"]
+negative-utils-domain-types = [
+    "axutils/itoa",
+    "axutils/ryu",
+    "axutils/zmij",
+    "axutils/uuid",
+    "dep:uuid",
+]
+
+[dependencies]
+axutils = { path = "../../..", default-features = false }
+uuid = { version = "1.24.0", default-features = false, features = ["std"], optional = true }

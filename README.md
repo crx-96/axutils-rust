@@ -11,6 +11,11 @@
 `RegUtils` 需要 `regex`，`RandomUtils` 需要 `rand`，模板、日期后端、邮件、配置读取和 `CryptoUtils`
 的 Base64/MD5/AES 能力都需要显式 feature。公共导出路径和完整边界见各模块使用文档。
 
+`ConvertUtils` 始终提供无状态工具类型；`itoa`、`ryu`/`zmij`、`uuid` feature 分别开放整数、
+浮点数和 UUID 的借用型、追加型及拥有型字符串转换。浮点同时启用两个后端时通过
+`FloatFormat` 显式选择，完整 API、feature 矩阵和 UUID 直接依赖声明见
+[ConvertUtils 使用文档](docs/examples/convert.md)。
+
 `mimalloc` 和 `rpmalloc` feature 用于为依赖该 library 的最终 Rust binary 选择进程级全局内存
 分配器；两者不能同时启用，也不会提供运行时切换 API。应用或递归依赖已有
 `#[global_allocator]` 时，启用前必须先确认不会发生重复注册。

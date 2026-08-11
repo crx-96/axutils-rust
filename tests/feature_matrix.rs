@@ -491,6 +491,65 @@ fn verifies_redis_feature_api_matrix_and_dependency_boundaries() {
 }
 
 #[test]
+#[ignore = "慢速 feature/依赖契约矩阵；使用 cargo test --no-default-features --test feature_matrix -- --ignored 执行"]
+fn verifies_convert_feature_api_matrix_and_dependency_boundaries() {
+    let fixture_manifest = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("fixtures")
+        .join("convert_feature_matrix")
+        .join("Cargo.toml");
+    let target_dir = unique_target("axutils-convert-feature-matrix");
+
+    for (feature, expected_success, diagnostic_token) in [
+        ("none", true, ""),
+        ("itoa-only", true, ""),
+        ("ryu-only", true, ""),
+        ("zmij-only", true, ""),
+        ("uuid-only", true, ""),
+        ("itoa-ryu", true, ""),
+        ("itoa-zmij", true, ""),
+        ("itoa-uuid", true, ""),
+        ("ryu-zmij", true, ""),
+        ("ryu-uuid", true, ""),
+        ("zmij-uuid", true, ""),
+        ("itoa-ryu-zmij", true, ""),
+        ("itoa-ryu-uuid", true, ""),
+        ("itoa-zmij-uuid", true, ""),
+        ("ryu-zmij-uuid", true, ""),
+        ("all", true, ""),
+        ("negative-no-itoa-integer", false, "integer_to_string"),
+        ("negative-no-float", false, "float_to_string"),
+        ("negative-no-uuid", false, "string_to_uuid"),
+        ("negative-no-ryu-variant", false, "ryu"),
+        ("negative-no-zmij-variant", false, "zmij"),
+        ("negative-float-default", false, "default"),
+        ("negative-float-suffix", false, "float_to_string_ryu"),
+        ("negative-integer-custom", false, "custom"),
+        ("negative-float-custom", false, "custom"),
+        ("negative-integer-sealed", false, "integer"),
+        ("negative-float-sealed", false, "float"),
+        ("negative-utils-domain-types", false, "IntegerBuffer"),
+    ] {
+        let output = run_fixture(&fixture_manifest, &target_dir.0, feature);
+        if expected_success {
+            assert!(
+                output.status.success(),
+                "ConvertUtils fixture feature `{feature}` should compile successfully: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        } else {
+            assert!(
+                !output.status.success(),
+                "ConvertUtils fixture feature `{feature}` should fail to compile"
+            );
+            assert_expected_diagnostic(&output, diagnostic_token, feature);
+        }
+    }
+
+    assert_convert_dependency_boundaries();
+}
+
+#[test]
 #[ignore = "慢速 allocator/依赖契约矩阵；使用 cargo test --no-default-features --test feature_matrix -- --ignored 执行"]
 fn verifies_allocator_feature_matrix_and_dependency_boundaries() {
     let fixture_manifest = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -801,8 +860,9 @@ fn assert_output_contains(output: &Output, tokens: &[&str], feature: &str) {
 }
 
 fn rust_error_diagnostics(output: &Output) -> Vec<&str> {
-    const EXPECTED_API_ERROR_CODES: [&str; 6] =
-        ["E0412", "E0425", "E0432", "E0433", "E0599", "E0603"];
+    const EXPECTED_API_ERROR_CODES: [&str; 7] = [
+        "E0277", "E0412", "E0425", "E0432", "E0433", "E0599", "E0603",
+    ];
     let stdout = std::str::from_utf8(&output.stdout).expect("cargo JSON output should be UTF-8");
     stdout
         .lines()
@@ -1070,6 +1130,56 @@ fn assert_redis_dependency_boundaries() {
             redis_tokio_feature_tree.contains(&format!("redis feature \"{feature}\"")),
             "redis+tokio does not enable required async redis feature `{feature}`"
         );
+    }
+}
+
+fn assert_convert_dependency_boundaries() {
+    let no_feature_tree = cargo_tree("");
+    for package in ["itoa", "ryu", "zmij", "uuid"] {
+        assert!(!has_package(&no_feature_tree, package));
+    }
+
+    let itoa_tree = cargo_tree("itoa");
+    assert!(has_package(&itoa_tree, "itoa"));
+    for package in ["ryu", "zmij", "uuid"] {
+        assert!(!has_package(&itoa_tree, package));
+    }
+
+    let ryu_tree = cargo_tree("ryu");
+    assert!(has_package(&ryu_tree, "ryu"));
+    for package in ["itoa", "zmij", "uuid"] {
+        assert!(!has_package(&ryu_tree, package));
+    }
+
+    let zmij_tree = cargo_tree("zmij");
+    assert!(has_package(&zmij_tree, "zmij"));
+    for package in ["itoa", "ryu", "uuid"] {
+        assert!(!has_package(&zmij_tree, package));
+    }
+
+    let uuid_tree = cargo_tree("uuid");
+    assert!(has_package(&uuid_tree, "uuid"));
+    for package in ["itoa", "ryu", "zmij", "getrandom", "rand", "serde"] {
+        assert!(!has_package(&uuid_tree, package));
+    }
+    let uuid_feature_tree = cargo_tree_with_edges("uuid", "normal,build,features");
+    assert!(uuid_feature_tree.contains("uuid feature \"std\""));
+    for feature in ["v1", "v3", "v4", "v5", "v6", "v7", "fast-rng", "serde"] {
+        assert!(
+            !uuid_feature_tree.contains(&format!("uuid feature \"{feature}\"")),
+            "uuid unexpectedly enables upstream feature `{feature}`"
+        );
+    }
+
+    let float_tree = cargo_tree("ryu,zmij");
+    assert!(has_package(&float_tree, "ryu"));
+    assert!(has_package(&float_tree, "zmij"));
+    assert!(!has_package(&float_tree, "itoa"));
+    assert!(!has_package(&float_tree, "uuid"));
+
+    let all_tree = cargo_tree("itoa,ryu,zmij,uuid");
+    for package in ["itoa", "ryu", "zmij", "uuid"] {
+        assert!(has_package(&all_tree, package));
     }
 }
 

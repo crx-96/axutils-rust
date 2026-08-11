@@ -16,6 +16,11 @@
   `FormatUtils::template(template, context, default, engine)` 显式选择 `TemplateEngine::Strfmt`
   或 `TemplateEngine::MiniJinja` 模板后端；缺少 `serde` 或未启用任何模板后端时不导出该统一
   入口和 `TemplateEngine`。
+- 新增 `ConvertUtils`（`src/utils/convert_utils.rs`；整数、浮点和 UUID 的领域实现位于
+  `src/convert/`），通过独立的 `itoa`、`ryu`/`zmij` 和 `uuid` feature
+  提供整数、`f32`/`f64`、UUID 与字符串之间的标准解析和高性能格式化；格式化同时提供调用方
+  buffer 的借用型入口、直接追加到已有 `String` 的入口和拥有型字符串入口，双浮点后端通过
+  `FloatFormat` 显式选择，不自动启用其他公共 feature。
 - 新增 `RegUtils`，在 `regex` feature 下提供常见/严格电子邮箱和中国大陆手机号码格式校验；同时启用
   `libphonenumber` feature 后提供国际 E.164 手机号码校验。
 - 新增 `RandomUtils`、`LetterCase` 和 `RandomRangeError`，在 `rand` feature 下提供 ASCII 随机字符串、
