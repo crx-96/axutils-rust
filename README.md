@@ -35,6 +35,13 @@ raw 字节 API，支持单机/Cluster 普通命令、批量操作、TTL、counte
 或全局入口不会访问网络，锁不是 Redlock 或 fencing token；完整 API 和边界见
 [Redis 使用文档](https://github.com/crx-96/axutils-rust/blob/main/docs/examples/redis.md)。
 
+SQLx 能力通过 `sqlx + tokio` 组合 feature 提供；它使用 SQLx `0.8.6` 的 `AnyPool` 在运行时
+选择 PostgreSQL、MySQL/MariaDB 或 SQLite driver。`SqlxClient` 支持多个独立实例，`SqlxUtils`
+是只能成功初始化一次的全局入口；调用方仍直接使用 SQLx 的 `.bind(...)`、`FromRow`、
+`QueryBuilder` 和原生事务。crate 不创建 Tokio runtime、不调用 `block_on`，首版不配置 TLS，
+`fetch_all` 默认限制 1_024 行并逐行消费。完整 API、feature 矩阵和关闭/脱敏边界见
+[SQLx 使用文档](https://github.com/crx-96/axutils-rust/blob/main/docs/examples/sqlx.md)。
+
 ## 安装
 
 在项目的 `Cargo.toml` 中添加默认依赖：
@@ -145,6 +152,37 @@ let _ = client.set("example:key", "value");
 ```
 
 Redis 方法、feature 矩阵、大小上限、raw/MessagePack 区分、Cluster 和事务边界见 [Redis 使用文档](https://github.com/crx-96/axutils-rust/blob/main/docs/examples/redis.md)。
+
+SQLx 异步 Any 客户端必须同时启用 `sqlx` 与 `tokio`，并直接依赖匹配的 SQLx 0.8.x 与 Tokio：
+
+```toml
+[dependencies]
+axutils = { version = "0.1", default-features = false, features = ["sqlx", "tokio"] }
+sqlx = { version = "0.8.6", default-features = false, features = ["any", "postgres", "mysql", "sqlite", "runtime-tokio"] }
+tokio = { version = "1.53.1", features = ["macros", "rt-multi-thread"] }
+```
+
+```rust,no_run
+# #[cfg(all(feature = "sqlx", feature = "tokio"))]
+# async fn example() -> Result<(), axutils::SqlxError> {
+use axutils::{SqlxClient, SqlxConfig};
+
+let client = SqlxClient::connect(SqlxConfig::new("sqlite::memory:")?).await?;
+client
+    .execute_async(client.query("CREATE TABLE items (id INTEGER)"))
+    .await?;
+let _count: i64 = client
+    .fetch_scalar_async(client.query_scalar("SELECT COUNT(*) FROM items"))
+    .await?;
+client.close_async().await?;
+# Ok(())
+# }
+```
+
+`SqlxConfig` 只做本地校验；`connect`/`init` 才会访问网络或产生 SQLite 文件 I/O。SQLite
+`sqlite::memory:` 使用 `max_connections = 1`；事务内执行使用 SQLx 原生的 `&mut *tx`，调用方
+必须显式 `commit`/`rollback`。完整方法清单、行数 sentinel、全局生命周期和错误脱敏规则见
+[SQLx 使用文档](docs/examples/sqlx.md)。
 
 配置读取启用 `serde` 后提供 JSON 和 `.env`；YAML、TOML、INI 分别额外启用
 `serde-saphyr`、`toml`、`rust-ini`：

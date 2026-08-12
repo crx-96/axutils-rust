@@ -57,7 +57,7 @@
 //!
 //! 需要读取配置文件时，通过 `serde` feature 显式启用 `ConfigLoader`/`ConfigUtils`，提供
 //! JSON 与自实现 `.env`（dotenv）读取；YAML、TOML、INI 分别需要额外启用
-//! `serde-saphyr`、`toml`、`rust-ini` feature。每种格式都提供无类型 [`ConfigValue`]（点号
+//! `serde-saphyr`、`toml`、`rust-ini` feature。每种格式都提供无类型 `ConfigValue`（点号
 //! 路径访问）与有类型 `serde::Deserialize` 两条读取路径；文件大小上限统一，JSON/TOML/YAML/INI
 //! 的无类型路径以及 YAML/INI 的有类型路径使用配置的嵌套深度上限，JSON/TOML 有类型路径使用
 //! 各自后端的递归保护；错误不回显配置文件内容：
@@ -111,6 +111,20 @@
 //! axutils = { version = "0.1", features = ["redis", "tokio"] }
 //! tokio = { version = "1.53.1", features = ["macros", "rt-multi-thread"] }
 //! ```
+
+//! SQLx 能力需要同时显式启用 `sqlx` 与 `tokio` feature；它使用 SQLx `0.8.6` 的 `AnyPool`
+//! 在运行时选择 PostgreSQL、MySQL/MariaDB 或 SQLite driver。`SqlxClient` 是可 clone 的实例入口，
+//! `SqlxUtils` 是只初始化一次的全局入口；调用方需要直接依赖匹配的 SQLx 版本以使用 `.bind(...)`、
+//! `FromRow`、`QueryBuilder` 或原生事务。crate 不创建 Tokio runtime、不调用 `block_on`，且默认不
+//! 启用 SQLx/TLS；`fetch_all` 使用默认 1_024 行上限并逐行消费。
+//!
+//! ```toml
+//! [dependencies]
+//! axutils = { version = "0.1", default-features = false, features = ["sqlx", "tokio"] }
+//! sqlx = { version = "0.8.6", default-features = false, features = ["any", "postgres", "mysql", "sqlite", "runtime-tokio"] }
+//! tokio = { version = "1.53.1", features = ["macros", "rt-multi-thread"] }
+//! ```
+//! 详见 [`SQLx 使用文档`](https://github.com/crx-96/axutils-rust/blob/main/docs/examples/sqlx.md)。
 
 //! JWT 能力需要显式启用 `jwt` feature。它提供固定算法的 JWS 签发/验证和泛型 claims；
 //! JWT payload 不是加密内容，`JwtUtils` 的全局入口只能成功初始化一次且不支持热轮换。
@@ -240,6 +254,18 @@ pub use redis::RedisAsyncLockGuard;
 
 #[cfg(feature = "redis")]
 pub use utils::RedisUtils;
+
+#[cfg(all(feature = "sqlx", feature = "tokio"))]
+pub mod sqlx;
+
+#[cfg(all(feature = "sqlx", feature = "tokio"))]
+pub use sqlx::{
+    SqlxClient, SqlxConfig, SqlxError, SqlxQueryResult, SqlxRow, SqlxTransaction,
+    SqlxTransportErrorKind,
+};
+
+#[cfg(all(feature = "sqlx", feature = "tokio"))]
+pub use utils::SqlxUtils;
 
 pub mod crypto;
 

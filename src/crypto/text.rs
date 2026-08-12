@@ -65,7 +65,7 @@ impl TextEncoding {
     /// # Errors
     ///
     /// UTF-8 编码永不因内容失败，但可检查的容量失败返回 [`CryptoError::OutputTooLarge`]；
-    /// legacy 编码遇到无法表示的字符时返回 [`CryptoError::TextEncodeUnmappable`]。
+    /// legacy 编码遇到无法表示的字符时返回 `CryptoError::TextEncodeUnmappable`。
     ///
     /// # Examples
     ///

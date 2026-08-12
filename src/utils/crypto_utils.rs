@@ -13,12 +13,13 @@ use std::sync::OnceLock;
 /// 内存数据编码、摘要和加解密的静态工具入口。
 ///
 /// 十六进制、Base64、MD5 和 `TextEncoding` 路径仍是无状态的；启用 `aes` 后，AES 静态方法
-/// 使用文件内的进程级 `OnceLock`。必须先通过 [`Self::aes_init`] 或 [`Self::aes_init_from_bytes`]
+/// 使用文件内的进程级 `OnceLock`。必须先通过 `CryptoUtils::aes_init` 或
+/// `CryptoUtils::aes_init_from_bytes`
 /// 成功初始化一次密钥与模式，之后该密钥和模式不可修改，也无法通过本类型读取。
 ///
-/// 全局 `AesCipher` 与进程同寿命，正常退出前不会触发内部 [`AesKey`] 的 `Drop`，因此全局密钥
+/// 全局 `AesCipher` 与进程同寿命，正常退出前不会触发内部 `AesKey` 的 `Drop`，因此全局密钥
 /// 不会由本 crate 清零。需要多密钥、多模式或可控密钥生命周期时，请使用可独立销毁的
-/// [`crate::AesCipher`] 实例；`*_from_bytes` 也只会清零本 crate 的密钥副本，调用方持有的
+/// `AesCipher` 实例；`*_from_bytes` 也只会清零本 crate 的密钥副本，调用方持有的
 /// 原始数组或 `Vec<u8>` 需要由调用方自行清零。
 #[derive(Debug, Clone, Copy, Default)]
 pub struct CryptoUtils;

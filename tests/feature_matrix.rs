@@ -492,6 +492,52 @@ fn verifies_redis_feature_api_matrix_and_dependency_boundaries() {
 
 #[test]
 #[ignore = "慢速 feature/依赖契约矩阵；使用 cargo test --no-default-features --test feature_matrix -- --ignored 执行"]
+fn verifies_sqlx_feature_api_matrix_and_dependency_boundaries() {
+    let fixture_manifest = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("fixtures")
+        .join("sqlx_feature_matrix")
+        .join("Cargo.toml");
+    let target_dir = unique_target("axutils-sqlx-feature-matrix");
+
+    for (feature, expected_success, diagnostic_token) in [
+        ("none", true, ""),
+        ("tokio-only", true, ""),
+        ("sqlx-only", true, ""),
+        ("sqlx-tokio", true, ""),
+        ("negative-no-sqlx-module", false, "sqlxclient"),
+        ("negative-no-sqlx-root", false, "sqlxclient"),
+        ("negative-no-sqlx-utils", false, "sqlxutils"),
+        ("negative-sqlx-only-module", false, "sqlxclient"),
+        ("negative-sqlx-only-root", false, "sqlxclient"),
+        ("negative-sqlx-only-utils", false, "sqlxutils"),
+        ("negative-sqlx-only-async", false, "sqlxclient"),
+        ("negative-tokio-module", false, "sqlxclient"),
+        ("negative-tokio-root", false, "sqlxclient"),
+        ("negative-tokio-utils", false, "sqlxutils"),
+        ("negative-tokio-async", false, "sqlxutils"),
+    ] {
+        let output = run_fixture(&fixture_manifest, &target_dir.0, feature);
+        if expected_success {
+            assert!(
+                output.status.success(),
+                "SQLx fixture feature `{feature}` should compile successfully: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        } else {
+            assert!(
+                !output.status.success(),
+                "SQLx fixture feature `{feature}` should fail to compile"
+            );
+            assert_expected_diagnostic(&output, diagnostic_token, feature);
+        }
+    }
+
+    assert_sqlx_dependency_boundaries();
+}
+
+#[test]
+#[ignore = "慢速 feature/依赖契约矩阵；使用 cargo test --no-default-features --test feature_matrix -- --ignored 执行"]
 fn verifies_convert_feature_api_matrix_and_dependency_boundaries() {
     let fixture_manifest = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests")
@@ -1129,6 +1175,83 @@ fn assert_redis_dependency_boundaries() {
         assert!(
             redis_tokio_feature_tree.contains(&format!("redis feature \"{feature}\"")),
             "redis+tokio does not enable required async redis feature `{feature}`"
+        );
+    }
+}
+
+fn assert_sqlx_dependency_boundaries() {
+    let no_feature_tree = cargo_tree("");
+    for package in [
+        "sqlx",
+        "sqlx-core",
+        "sqlx-postgres",
+        "sqlx-mysql",
+        "sqlx-sqlite",
+        "futures-util",
+    ] {
+        assert!(!has_package(&no_feature_tree, package));
+    }
+
+    let tokio_tree = cargo_tree("tokio");
+    assert!(has_package(&tokio_tree, "tokio"));
+    for package in [
+        "sqlx",
+        "sqlx-core",
+        "sqlx-postgres",
+        "sqlx-mysql",
+        "sqlx-sqlite",
+        "futures-util",
+    ] {
+        assert!(!has_package(&tokio_tree, package));
+    }
+
+    let sqlx_tree = cargo_tree("sqlx");
+    for package in [
+        "sqlx",
+        "sqlx-core",
+        "sqlx-postgres",
+        "sqlx-mysql",
+        "sqlx-sqlite",
+        "futures-util",
+    ] {
+        assert!(has_package(&sqlx_tree, package));
+    }
+    assert!(!has_package(&sqlx_tree, "tokio"));
+    assert!(!has_package(&sqlx_tree, "tokio-stream"));
+    assert!(!has_package(&sqlx_tree, "sqlx-macros"));
+    assert_forbidden_tls_packages(&sqlx_tree);
+
+    let sqlx_feature_tree = cargo_tree_with_edges("sqlx", "normal,build,features");
+    for feature in ["runtime-tokio", "macros", "migrate", "json"] {
+        assert!(
+            !sqlx_feature_tree.contains(&format!("sqlx feature \"{feature}\"")),
+            "SQLx facade unexpectedly enables feature `{feature}`"
+        );
+    }
+    assert!(sqlx_feature_tree.contains("sqlx-core feature \"migrate\""));
+    assert!(sqlx_feature_tree.contains("sqlx-core feature \"json\""));
+
+    let sqlx_tokio_tree = cargo_tree("sqlx,tokio");
+    for package in [
+        "sqlx",
+        "sqlx-core",
+        "sqlx-postgres",
+        "sqlx-mysql",
+        "sqlx-sqlite",
+        "futures-util",
+        "tokio",
+        "tokio-stream",
+    ] {
+        assert!(has_package(&sqlx_tokio_tree, package));
+    }
+    assert_forbidden_tls_packages(&sqlx_tokio_tree);
+
+    let sqlx_tokio_feature_tree = cargo_tree_with_edges("sqlx,tokio", "normal,build,features");
+    assert!(sqlx_tokio_feature_tree.contains("tokio feature \"rt\""));
+    for feature in ["macros", "migrate", "json"] {
+        assert!(
+            !sqlx_tokio_feature_tree.contains(&format!("sqlx feature \"{feature}\"")),
+            "SQLx facade unexpectedly enables feature `{feature}` with Tokio"
         );
     }
 }

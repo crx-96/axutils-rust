@@ -93,6 +93,11 @@
   `RedisUtils::try_lock_async` 及异步 `release`/`renew`；异步 guard 的 `Drop` 不发起网络
   操作，取消和 runtime 关闭路径依赖 TTL 兜底。既有 `set_nx_with_expiry`/raw 变体仍是
   通用 NX 写入原语，不记录锁所有者或自动释放，普通 `delete`/`pexpire` 也不校验 token。
+- 新增 `sqlx + tokio` 组合下的 SQLx Any 能力：提供 `SqlxConfig`、可 Clone 的 `SqlxClient`、
+  一次初始化的 `SqlxUtils`、脱敏 `SqlxError`、原生 Any row/query result/transaction 类型别名，
+  以及 PostgreSQL、MySQL/MariaDB、SQLite 的参数化查询、映射/标量读取、事务和优雅关闭入口。
+  连接数、获取超时和 `fetch_all` 行数均有本地上限；SQLite 内存 URL 默认单连接；不配置 TLS、
+  不创建 Tokio runtime、不调用 `block_on`，Any driver 默认注册要求本 crate 是进程中唯一注册方。
 - 新增互斥的 `mimalloc` 和 `rpmalloc` allocator feature，分别使用可选的 `mimalloc 0.1.52`
   与 `rpmalloc 0.2.2` 依赖注册唯一 Rust 全局分配器；不启用时保持目标平台默认分配器。由于
   `axutils` 是 library，启用后会影响依赖它的最终 Rust binary；已有 `#[global_allocator]` 的

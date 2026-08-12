@@ -31,11 +31,13 @@ feature 背景和发布操作命令。两者出现冲突时，先按标准文档
     ├── email/         # SMTP 配置、消息、错误与多实例客户端（需要 lettre feature）
     ├── lib.rs          # crate 入口和公共导出
     ├── redis/          # Redis 配置、客户端、命令、事务与错误（需要 redis feature）
+    ├── sqlx/           # SQLx Any 配置、客户端、事务与错误（需要 sqlx + tokio）
     └── utils/
         ├── mod.rs        # 通用工具模块和公共导出
         ├── path_utils.rs  # PathUtils 实现与单元测试
         ├── random_utils.rs # RandomUtils 实现与单元测试（需要 rand feature）
         ├── redis_utils.rs # RedisUtils 一次初始化的全局转发（需要 redis feature）
+        ├── sqlx_utils.rs  # SqlxUtils 一次初始化的全局转发（需要 sqlx + tokio）
         ├── reg_utils.rs  # RegUtils 实现与单元测试
         ├── time_utils.rs # TimeUtils 实现与单元测试
         ├── config_utils.rs # ConfigUtils 静态配置读取入口（需要 serde feature）
@@ -73,6 +75,11 @@ cargo test --no-default-features --features http --test http
 cargo test --no-default-features --features redis --test redis
 cargo test --no-default-features --features redis,tokio --doc
 cargo tree --no-default-features --features redis -e normal,build
+cargo check --no-default-features --features sqlx
+cargo check --no-default-features --features sqlx,tokio
+cargo test --no-default-features --features sqlx,tokio --test sqlx -- --test-threads=1
+cargo test --no-default-features --features sqlx,tokio --doc
+cargo tree --no-default-features --features sqlx,tokio -e normal,build,features
 
 # 需要覆盖所有已启用模块、feature/API 依赖边界和文档时，使用下面的完整清单；其中
 # feature/API/依赖边界矩阵是慢速测试，默认 cargo test 会跳过。allocator 后端必须分别验证；
@@ -92,6 +99,11 @@ cargo check --no-default-features --features lettre
 cargo check --no-default-features --features lettre,tokio
 cargo test --doc --no-default-features --features lettre,tokio
 cargo check --no-default-features --features tokio
+cargo check --no-default-features --features sqlx
+cargo check --no-default-features --features sqlx,tokio
+cargo test --no-default-features --features sqlx,tokio --test sqlx -- --test-threads=1
+cargo test --no-default-features --features sqlx,tokio --doc
+cargo tree --no-default-features --features sqlx,tokio -e normal,build,features
 cargo check --no-default-features --features serde
 cargo check --no-default-features --features serde,tokio
 cargo check --no-default-features --features serde,tokio,toml,serde-saphyr,rust-ini
@@ -151,6 +163,14 @@ crate，与 `PathUtils` 同类）；`base64`/`md5`/`aes` 各自解锁对应算�
 `ConfigLoader` 两个方法、显式格式、大小/深度/BOM/UTF-8/错误脱敏和各格式后端。
 邮件能力还必须验证 `tokio` 单 feature 不导出邮件 API、`lettre` 单 feature 不导出异步 API，
 以及生产依赖树只包含 Rustls、`ring` 和 `webpki-roots` 方案，不包含 native-tls/OpenSSL。
+
+SQLx 能力必须同时启用 `sqlx` 与 `tokio`；`sqlx` 单 feature 只编译关闭默认 feature 的 SQLx
+依赖，不导出 `axutils::sqlx`/根类型/`SqlxUtils`，`tokio` 单 feature 也不引入 SQLx。SQLx
+固定使用 `0.8.6` 下限、`Any` + PostgreSQL/MySQL/SQLite 三个 driver 和 `runtime-tokio` 弱依赖
+映射；不启用 SQLx facade 的宏、迁移、JSON 或 TLS feature。SQLx 0.8.6 的驱动清单会在内部
+依赖树中带出 `sqlx-core` 的 `json`/`migrate` 支持依赖，这是上游 manifest 的实现细节，不等于
+本 crate 开放这些 SQLx API。集成测试只使用 SQLite `sqlite::memory:` 且将最大连接数固定为 1；
+事务测试必须通过原生 SQLx 的 `&mut *tx` 语义，真实 PostgreSQL/MySQL 服务测试不属于本任务。
 
 邮件真实测试使用 `tests/email_live.rs`，函数固定 `#[ignore]`，且还需要一次性设置
 `AXUTILS_EMAIL_LIVE_TEST=1`。测试从本地 `config/email-test.toml` 读取配置；该目录整体被
@@ -229,7 +249,14 @@ chrono = ["dep:chrono"]
 time = ["dep:time"]
 jiff = ["dep:jiff"]
 lettre = ["dep:lettre"]
-tokio = ["dep:tokio", "lettre?/tokio1-rustls"]
+tokio = [
+  "dep:tokio",
+  "lettre?/tokio1-rustls",
+  "redis?/cluster-async",
+  "redis?/connection-manager",
+  "redis?/tokio-comp",
+  "sqlx?/runtime-tokio",
+]
 toml = ["dep:toml"]
 serde-saphyr = ["dep:serde-saphyr"]
 rust-ini = ["dep:rust-ini"]
@@ -238,6 +265,7 @@ md5 = ["dep:md5"]
 aes = ["dep:aes", "dep:aes-gcm", "dep:cbc", "dep:zeroize"]
 encoding_rs = ["dep:encoding_rs"]
 jwt = ["dep:jsonwebtoken", "dep:serde", "dep:serde_json"]
+sqlx = ["dep:sqlx", "dep:futures-util"]
 mimalloc = ["dep:mimalloc"]
 rpmalloc = ["dep:rpmalloc"]
 ```
@@ -254,6 +282,21 @@ axutils = { version = "0.1", features = ["rand"] }
 ```toml
 axutils = { version = "0.1", features = ["regex"] }
 ```
+
+SQLx 异步 Any 客户端必须同时启用 `sqlx` 和 `tokio`，并由应用直接依赖 SQLx 0.8.x 与 Tokio：
+
+```toml
+[dependencies]
+axutils = { version = "0.1", default-features = false, features = ["sqlx", "tokio"] }
+sqlx = { version = "0.8.6", default-features = false, features = ["any", "postgres", "mysql", "sqlite", "runtime-tokio"] }
+tokio = { version = "1.53.1", features = ["macros", "rt-multi-thread"] }
+```
+
+`SqlxConfig` 只做本地校验；`SqlxClient::connect` 和 `SqlxUtils::init` 才会连接数据库或触发
+SQLite 文件 I/O。首版不配置 TLS、不创建 runtime；Any driver 默认注册是进程级一次性前提。
+查询构造仍使用 SQLx 的 `.bind(...)`/`FromRow`，事务内使用 `&mut *tx`；`fetch_all` 默认限制为
+1_024 行并在第 1_025 行返回限制错误。完整 API、feature 矩阵、关闭语义和脱敏边界见
+[`SQLx 使用文档`](docs/examples/sqlx.md)。
 
 国际手机号码校验的 `RegUtils::is_phone` 需要同时启用两个 feature：
 

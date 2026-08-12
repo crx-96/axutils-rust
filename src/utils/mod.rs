@@ -15,6 +15,8 @@
 //! Redis 客户端需要 `redis` feature；同步 API 使用惰性连接池和单键租约锁，异步 API 还
 //! 需要同时启用 `tokio`，并由调用方提供 runtime。全局 `RedisUtils` 只是连接入口，不维护
 //! 进程内锁表；锁 guard 自己拥有客户端 clone。
+//! SQLx 客户端需要同时启用 `sqlx` 与 `tokio` feature；`SqlxClient` 使用 SQLx Any pool，
+//! `SqlxUtils` 只成功初始化一次，且由调用方提供 Tokio runtime。
 //! `ConvertUtils` 始终提供无状态工具类型；整数、浮点数和 UUID 转换分别需要 `itoa`、
 //! `ryu`/`zmij` 和 `uuid` feature。借用型格式化入口使用调用方 buffer，追加型入口直接写入
 //! 已有字符串，拥有型入口才创建独立 `String`。
@@ -43,6 +45,9 @@ pub mod http_utils;
 
 #[cfg(feature = "redis")]
 pub mod redis_utils;
+
+#[cfg(all(feature = "sqlx", feature = "tokio"))]
+pub mod sqlx_utils;
 
 pub mod convert_utils;
 pub mod crypto_utils;
@@ -75,5 +80,8 @@ pub use http_utils::HttpUtils;
 
 #[cfg(feature = "redis")]
 pub use redis_utils::RedisUtils;
+
+#[cfg(all(feature = "sqlx", feature = "tokio"))]
+pub use sqlx_utils::SqlxUtils;
 
 pub use crypto_utils::CryptoUtils;
