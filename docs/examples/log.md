@@ -3,8 +3,8 @@
 `axutils` 使用两个分层 feature：
 
 - `tracing` 只启用库内各领域的结构化事件；
-- `logging` 依赖 `tracing`，并额外启用 `LogUtils`、同步 `fmt` formatter 与
-  `tracing-appender` 文件轮转 writer。
+- `logging` 依赖 `tracing`，并额外启用 `LogUtils`、同步 `fmt` formatter、可配置的
+  `EnvFilter` target directive 与 `tracing-appender` 文件轮转 writer。
 
 默认 feature 为空。库不会因为加载、构造客户端或调用任意业务 API 而自动安装全局
 subscriber；只想接收库内事件时，应用仍需启用 `tracing`，然后自行安装 subscriber。
@@ -19,7 +19,7 @@ axutils = { version = "0.1", default-features = false, features = ["logging"] }
 推荐从 crate 根导入：
 
 ```rust,no_run
-use axutils::{LogConfig, LogFileConfig, LogLevel, LogRotation, LogUtils};
+use axutils::{LogConfig, LogError, LogFileConfig, LogLevel, LogRotation, LogUtils};
 ```
 
 兼容路径为 `axutils::utils::{LogUtils, LogConfig, LogLevel, LogFileConfig, LogRotation,
@@ -52,6 +52,12 @@ fn main() -> Result<(), LogError> {
 已经成功初始化，重复调用返回 `LogError::AlreadyInitialized`。应用不能通过再次调用来
 替换第一个配置。
 
+过滤器由 `LogConfig::with_level` 与 `LogConfig::with_directives` 共同构造。例如应用可以根据自身
+配置动态传入 `lettre=off,rustls=off` 关闭这两个 target，也可以拼接更多 target 规则；这些规则
+不是库内固定默认值。`init` 不会自动读取 `RUST_LOG`，也不提供运行时重载或公共 getter；需要安装
+第三方 layer、字段过滤器或完全自定义 subscriber 的应用应只启用 `tracing` feature 并自行安装
+subscriber。
+
 ## `LogUtils::is_initialized`
 
 ```text
@@ -68,7 +74,79 @@ let initialized_by_axutils = LogUtils::is_initialized();
 let _ = initialized_by_axutils;
 ```
 
-应用需要发出自己的事件时，应直接使用 `tracing` 宏，以保留自定义 target、结构化字段和 span。
+## `LogUtils::trace`
+
+```text
+pub fn trace(message: impl Display)
+```
+
+以固定 target `axutils::log` 发出 `TRACE` 消息；没有 subscriber 或被过滤时静默丢弃。
+
+```rust,no_run
+use axutils::LogUtils;
+
+LogUtils::trace("进入详细诊断路径");
+```
+
+## `LogUtils::debug`
+
+```text
+pub fn debug(message: impl Display)
+```
+
+以固定 target `axutils::log` 发出 `DEBUG` 消息。
+
+```rust,no_run
+use axutils::LogUtils;
+
+LogUtils::debug("缓存检查完成");
+```
+
+## `LogUtils::info`
+
+```text
+pub fn info(message: impl Display)
+```
+
+以固定 target `axutils::log` 发出 `INFO` 消息。
+
+```rust,no_run
+use axutils::LogUtils;
+
+LogUtils::info("服务已经启动");
+```
+
+## `LogUtils::warn`
+
+```text
+pub fn warn(message: impl Display)
+```
+
+以固定 target `axutils::log` 发出 `WARN` 消息。
+
+```rust,no_run
+use axutils::LogUtils;
+
+LogUtils::warn("即将重试外部调用");
+```
+
+## `LogUtils::error`
+
+```text
+pub fn error(message: impl Display)
+```
+
+以固定 target `axutils::log` 发出 `ERROR` 消息。
+
+```rust,no_run
+use axutils::LogUtils;
+
+LogUtils::error("外部调用失败");
+```
+
+这五个方法不是独立的 `println!` 或另一套 logger；它们受相同 subscriber 和 EnvFilter 规则
+控制。消息的 `Display` 文本会直接进入日志，因此不得传入密码、token、密钥、URL、SQL、请求/
+邮件正文或其他敏感数据。需要自定义 target、结构化字段或 span 时，应直接使用 `tracing` 宏。
 
 初始化不会创建 Tokio runtime、调用 `block_on` 或启动异步日志 worker；formatter 和 writer
 均为同步实现，文件 I/O 可能阻塞产生日志的线程。writer 运行时的 I/O 错误不会递归记录新
@@ -76,7 +154,7 @@ let _ = initialized_by_axutils;
 
 ## `LogConfig`
 
-`LogConfig` 使用 consuming builder 设置输出、最低级别和文件配置。
+`LogConfig` 使用 consuming builder 设置输出、默认最低级别、target directive 和文件配置。
 
 ### `LogConfig::new`
 
@@ -84,7 +162,8 @@ let _ = initialized_by_axutils;
 pub fn new() -> LogConfig
 ```
 
-`new()` 与 `default()` 等价：标准输出开启、最低级别为 `LogLevel::Info`、没有文件输出。
+`new()` 与 `default()` 等价：标准输出开启、最低级别为 `LogLevel::Info`、没有额外 directive、
+没有文件输出。
 
 ```rust,no_run
 use axutils::LogConfig;
@@ -93,7 +172,7 @@ let stdout_only = LogConfig::new();
 let _ = stdout_only;
 ```
 
-### `with_stdout(enabled)`
+### `LogConfig::with_stdout`
 
 ```text
 pub fn with_stdout(self, enabled: bool) -> LogConfig
@@ -101,7 +180,8 @@ pub fn with_stdout(self, enabled: bool) -> LogConfig
 
 设置标准输出是否开启。它不会删除文件配置，因此 `with_stdout(false)` 既可以构造纯文件
 输出，也可以和 `with_file` 一起使用。标准输出与文件都关闭时，`LogUtils::init` 返回
-`LogError::InvalidConfig`，不会消耗一次性初始化机会。
+`LogError::InvalidConfig { field: "output" }`，不会消耗一次性初始化机会。`field` 是固定的
+配置类别，不包含调用方输入。
 
 ```rust,no_run
 use axutils::LogConfig;
@@ -110,7 +190,7 @@ let without_stdout = LogConfig::new().with_stdout(false);
 let _ = without_stdout;
 ```
 
-### `with_level(level)`
+### `LogConfig::with_level`
 
 ```text
 pub fn with_level(self, level: LogLevel) -> LogConfig
@@ -124,7 +204,8 @@ pub fn with_level(self, level: LogLevel) -> LogConfig
 - `LogLevel::Warn`：可恢复问题或重试事件；
 - `LogLevel::Error`：需要关注的失败事件。
 
-过滤在 subscriber 层执行；低于全局最低级别的事件不会写入标准输出或文件。
+过滤在 subscriber 层执行；低于默认最低级别的事件不会写入标准输出或文件。更具体的
+`with_directives` target 规则可以把某个 target 的级别调高、调低或关闭。
 
 ```rust,no_run
 use axutils::{LogConfig, LogLevel};
@@ -133,7 +214,53 @@ let debug_and_above = LogConfig::new().with_level(LogLevel::Debug);
 let _ = debug_and_above;
 ```
 
-### `with_file(file)`
+### `LogConfig::with_directives`
+
+```text
+pub fn with_directives(self, directives: impl Into<String>) -> LogConfig
+```
+
+接收一段与 `RUST_LOG` 类似、用英文逗号分隔的 EnvFilter 字符串；本方法只是使用相同语法，
+`LogUtils::init` 不会读取 `RUST_LOG` 环境变量。最常用的格式是裸级别或 `target=级别`：
+
+```rust,no_run
+use axutils::{LogConfig, LogLevel};
+
+let config = LogConfig::new()
+    .with_level(LogLevel::Info)
+    .with_directives("lettre=off,rustls=off,tower_http=debug,sqlx::query=warn");
+let _ = config;
+```
+
+没有裸级别时，`with_level` 是未匹配 target 的默认值；上例相当于先使用 `info`，再追加四条
+target 规则。支持的级别为 `trace`、`debug`、`info`、`warn`、`error` 和 `off`，其中日志级别
+写作 `warn`，不是 `warning`。target 按前缀匹配，更具体的规则优先，例如
+`axutils::http=debug` 会覆盖 `axutils=info`。
+
+如果只想开启明确列出的 target，应提供裸级别 `off`：
+
+```rust,no_run
+use axutils::{LogConfig, LogUtils};
+
+fn main() -> Result<(), axutils::LogError> {
+    let config = LogConfig::new().with_directives(
+        "off,axutils=info,axutils::http=debug,axutils::crypto=warn",
+    );
+    LogUtils::init(config)?;
+    Ok(())
+}
+```
+
+这会关闭未匹配 target，允许 `axutils` 的 `INFO` 及以上、HTTP 的 `DEBUG` 及以上，并把 Crypto
+限制为 `WARN` 及以上；`LogUtils::info` 使用的 `axutils::log` 也会被 `axutils=info` 打开。
+当字符串已包含 `off`、`info` 等裸级别时，该裸级别会作为显式默认值。
+
+directive 在 `init` 时解析；语法无效返回
+`LogError::InvalidConfig { field: "filter" }`，不会安装 subscriber，也不会消耗一次性初始化
+机会。多次调用时后一次替换前一次；空白字符串表示不追加 directive。调用方不应把含有敏感
+值的动态文本拼入过滤字符串。
+
+### `LogConfig::with_file`
 
 ```text
 pub fn with_file(self, file: LogFileConfig) -> LogConfig
@@ -206,7 +333,8 @@ fn main() -> Result<(), axutils::LogError> {
 
 公开错误变体及其脱敏边界如下：
 
-- `InvalidConfig`：配置无效；当前表示标准输出和文件输出同时关闭；
+- `InvalidConfig { field }`：配置无效；`field` 只使用固定类别：`"output"` 表示标准输出和文件
+  输出同时关闭，`"filter"` 表示 EnvFilter directive 解析失败；
 - `InvalidPath`：日志文件路径没有可用的文件名或不是可接受的路径；
 - `FileInit { kind }`：目录或文件 writer 初始化失败，只保留 `io::ErrorKind`；
 - `AlreadyInitialized`：本 crate 已成功安装 subscriber；
@@ -228,7 +356,7 @@ subscriber 时，这些事件不会自动写文件、标准输出或改变业务
 
 | target | 所需 feature | 事件范围 |
 | --- | --- | --- |
-| `axutils::log` | `logging` | `log_init` |
+| `axutils::log` | `logging` | `log_init` 与 `LogUtils::{trace,debug,info,warn,error}` 应用消息 |
 | `axutils::http` | `tracing + http` | `client_init`、`request_dispatch`、`request_retry`、`request_complete` |
 | `axutils::redis` | `tracing + redis` | `client_init`、`connection_manager_init`、`connection`、`command` |
 | `axutils::sqlx` | `tracing + sqlx + tokio` | `client_init`、`connect`、实际查询方法、`begin`、`close` |
@@ -249,6 +377,10 @@ JWT token/claims/secret 或 AES key/IV/密文。应用若需要关联业务请�
 重试事件；Redis 普通命令使用共同命令入口记录，事务和锁不额外复制领域事件；SQLx 只在
 实际执行、连接、事务开始和关闭时记录，`query`/`query_as`/`query_scalar` 构造及 `.bind()`
 本身不记录 SQL；配置读取与解析分别记录，永不记录路径和内容。
+
+`logging` 使用 `tracing-subscriber` 的 `env-filter` feature 解析 `with_level` 与调用方传入的
+`with_directives`，因此会额外带入 `matchers`、`once_cell`、`regex-automata`、`regex-syntax` 和
+`thread_local` 等实现依赖。它不自动读取环境变量，也不启用 JSON、ANSI 或 `tracing-log`。
 
 本地回归测试使用 loopback HTTP、SQLite `:memory:`、临时目录和合成 subscriber。真实 SMTP、
 外部 Redis 和外部数据库不属于默认测试范围。

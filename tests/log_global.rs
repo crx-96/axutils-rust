@@ -8,15 +8,37 @@ use std::sync::{Arc, Barrier};
 use axutils::{LogConfig, LogError, LogFileConfig, LogLevel, LogRotation, LogUtils};
 
 const EVENT_SENTINEL: &str = "AXUTILS_LOG_EVENT_SENTINEL";
+const TRACE_SENTINEL: &str = "AXUTILS_LOG_TRACE_SENTINEL";
+const DEBUG_SENTINEL: &str = "AXUTILS_LOG_DEBUG_SENTINEL";
+const WARN_SENTINEL: &str = "AXUTILS_LOG_WARN_SENTINEL";
 const INFO_SENTINEL: &str = "AXUTILS_LOG_INFO_SENTINEL";
 const ERROR_SENTINEL: &str = "AXUTILS_LOG_ERROR_SENTINEL";
 const PATH_SENTINEL: &str = "AXUTILS_LOG_PATH_SENTINEL";
+const TARGET_FILTER_VISIBLE_SENTINEL: &str = "AXUTILS_LOG_TARGET_FILTER_VISIBLE";
+const LETTRE_FILTERED_SENTINEL: &str = "AXUTILS_LOG_LETTRE_FILTERED";
+const RUSTLS_FILTERED_SENTINEL: &str = "AXUTILS_LOG_RUSTLS_FILTERED";
+const THIRD_PARTY_DEBUG_SENTINEL: &str = "AXUTILS_LOG_THIRD_PARTY_DEBUG_SENTINEL";
+const AXUTILS_HTTP_SENTINEL: &str = "AXUTILS_LOG_AXUTILS_HTTP_SENTINEL";
+const SQLX_QUERY_DEBUG_SENTINEL: &str = "AXUTILS_LOG_SQLX_QUERY_DEBUG_SENTINEL";
+const OTHER_INFO_SENTINEL: &str = "AXUTILS_LOG_OTHER_INFO_SENTINEL";
+const SELECTIVE_LOG_INFO_SENTINEL: &str = "AXUTILS_LOG_SELECTIVE_LOG_INFO_SENTINEL";
+const SELECTIVE_HTTP_DEBUG_SENTINEL: &str = "AXUTILS_LOG_SELECTIVE_HTTP_DEBUG_SENTINEL";
+const SELECTIVE_CRYPTO_WARN_SENTINEL: &str = "AXUTILS_LOG_SELECTIVE_CRYPTO_WARN_SENTINEL";
+const SELECTIVE_CRYPTO_INFO_SENTINEL: &str = "AXUTILS_LOG_SELECTIVE_CRYPTO_INFO_SENTINEL";
+const SELECTIVE_OTHER_ERROR_SENTINEL: &str = "AXUTILS_LOG_SELECTIVE_OTHER_ERROR_SENTINEL";
+const RUST_LOG_IGNORED_SENTINEL: &str = "AXUTILS_LOG_RUST_LOG_IGNORED_SENTINEL";
+const REPLACED_FILTER_VISIBLE_SENTINEL: &str = "AXUTILS_LOG_REPLACED_FILTER_VISIBLE_SENTINEL";
+const REPLACED_FILTER_HIDDEN_SENTINEL: &str = "AXUTILS_LOG_REPLACED_FILTER_HIDDEN_SENTINEL";
+const BLANK_FILTER_VISIBLE_SENTINEL: &str = "AXUTILS_LOG_BLANK_FILTER_VISIBLE_SENTINEL";
+const BLANK_FILTER_HIDDEN_SENTINEL: &str = "AXUTILS_LOG_BLANK_FILTER_HIDDEN_SENTINEL";
+const INVALID_FILTER_SENTINEL: &str = "axutils::http=not-a-level";
 
 #[test]
 fn global_tracing_behaviors_are_isolated_in_child_processes() {
     let mut cases = vec![
         "silent",
         "stdout",
+        "methods",
         "file",
         "relative",
         "dual",
@@ -29,6 +51,13 @@ fn global_tracing_behaviors_are_isolated_in_child_processes() {
         "repeat",
         "concurrency",
         "level",
+        "target-filter",
+        "directives",
+        "selective-directives",
+        "directives-replace",
+        "directives-blank",
+        "rust-log-ignored",
+        "invalid-filter",
     ];
     #[cfg(windows)]
     cases.push("non-utf8");
@@ -53,11 +82,79 @@ fn global_tracing_behaviors_are_isolated_in_child_processes() {
                 assert_eq!(count_occurrences(&stdout, EVENT_SENTINEL), 1);
                 assert!(!stdout.contains('\u{1b}'));
             }
+            "methods" => {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                for sentinel in [
+                    TRACE_SENTINEL,
+                    DEBUG_SENTINEL,
+                    INFO_SENTINEL,
+                    WARN_SENTINEL,
+                    ERROR_SENTINEL,
+                ] {
+                    assert_eq!(
+                        count_occurrences(&stdout, sentinel),
+                        1,
+                        "missing {sentinel}"
+                    );
+                    let line = stdout
+                        .lines()
+                        .find(|line| line.contains(sentinel))
+                        .expect("method event line");
+                    assert!(
+                        line.contains("axutils::log"),
+                        "method event should use the fixed target: {line}"
+                    );
+                }
+                assert!(!stdout.contains('\u{1b}'));
+            }
             "level" => {
                 let stdout = String::from_utf8_lossy(&output.stdout);
                 assert!(!stdout.contains(INFO_SENTINEL));
                 assert!(stdout.contains(ERROR_SENTINEL));
                 assert!(!stdout.contains('\u{1b}'));
+            }
+            "target-filter" => {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                assert_eq!(
+                    count_occurrences(&stdout, TARGET_FILTER_VISIBLE_SENTINEL),
+                    1
+                );
+                assert!(!stdout.contains(LETTRE_FILTERED_SENTINEL));
+                assert!(!stdout.contains(RUSTLS_FILTERED_SENTINEL));
+            }
+            "directives" => {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                assert!(stdout.contains(THIRD_PARTY_DEBUG_SENTINEL));
+                assert!(stdout.contains(AXUTILS_HTTP_SENTINEL));
+                assert!(!stdout.contains(SQLX_QUERY_DEBUG_SENTINEL));
+                assert!(!stdout.contains(OTHER_INFO_SENTINEL));
+                assert!(!stdout.contains('\u{1b}'));
+            }
+            "selective-directives" => {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                assert!(stdout.contains(SELECTIVE_LOG_INFO_SENTINEL));
+                assert!(stdout.contains(SELECTIVE_HTTP_DEBUG_SENTINEL));
+                assert!(stdout.contains(SELECTIVE_CRYPTO_WARN_SENTINEL));
+                assert!(!stdout.contains(SELECTIVE_CRYPTO_INFO_SENTINEL));
+                assert!(!stdout.contains(SELECTIVE_OTHER_ERROR_SENTINEL));
+                assert!(!stdout.contains('\u{1b}'));
+            }
+            "directives-replace" => {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                assert_eq!(
+                    count_occurrences(&stdout, REPLACED_FILTER_VISIBLE_SENTINEL),
+                    1
+                );
+                assert!(!stdout.contains(REPLACED_FILTER_HIDDEN_SENTINEL));
+            }
+            "directives-blank" => {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                assert_eq!(count_occurrences(&stdout, BLANK_FILTER_VISIBLE_SENTINEL), 1);
+                assert!(!stdout.contains(BLANK_FILTER_HIDDEN_SENTINEL));
+            }
+            "rust-log-ignored" => {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                assert_eq!(count_occurrences(&stdout, RUST_LOG_IGNORED_SENTINEL), 1);
             }
             "file" | "relative" | "dual" => {
                 let contents =
@@ -103,6 +200,7 @@ fn child_process_case() {
     match case.as_str() {
         "silent" => silent_case(),
         "stdout" => stdout_case(),
+        "methods" => methods_case(),
         "file" => file_case(&root, false),
         "relative" => relative_file_case(&root),
         "dual" => file_case(&root, true),
@@ -117,22 +215,32 @@ fn child_process_case() {
         "repeat" => repeat_case(&root),
         "concurrency" => concurrency_case(),
         "level" => level_case(),
+        "target-filter" => target_filter_case(),
+        "directives" => directives_case(),
+        "selective-directives" => selective_directives_case(),
+        "directives-replace" => directives_replace_case(),
+        "directives-blank" => directives_blank_case(),
+        "rust-log-ignored" => rust_log_ignored_case(),
+        "invalid-filter" => invalid_filter_case(),
         other => panic!("unknown log child case: {other}"),
     }
 }
 
 fn run_child(case: &str, root: &Path) -> Output {
     let executable = std::env::current_exe().expect("integration test executable");
-    Command::new(executable)
+    let mut command = Command::new(executable);
+    command
         .arg("--ignored")
         .arg("--exact")
         .arg("child_process_case")
         .arg("--nocapture")
         .env("AXUTILS_LOG_CASE", case)
         .env("AXUTILS_LOG_ROOT", root)
-        .env("CARGO_TERM_COLOR", "never")
-        .output()
-        .expect("spawn isolated log test")
+        .env("CARGO_TERM_COLOR", "never");
+    if case == "rust-log-ignored" {
+        command.env("RUST_LOG", "off");
+    }
+    command.output().expect("spawn isolated log test")
 }
 
 fn stdout_case() {
@@ -141,8 +249,17 @@ fn stdout_case() {
 }
 
 fn silent_case() {
-    tracing::info!(target: "axutils::test", message = EVENT_SENTINEL);
+    LogUtils::info(EVENT_SENTINEL);
     assert!(!LogUtils::is_initialized());
+}
+
+fn methods_case() {
+    LogUtils::init(LogConfig::new().with_level(LogLevel::Trace)).expect("methods init");
+    LogUtils::trace(TRACE_SENTINEL);
+    LogUtils::debug(DEBUG_SENTINEL);
+    LogUtils::info(INFO_SENTINEL);
+    LogUtils::warn(WARN_SENTINEL);
+    LogUtils::error(ERROR_SENTINEL);
 }
 
 fn file_case(root: &Path, dual: bool) {
@@ -207,7 +324,10 @@ fn invalid_case() {
 
 fn invalid_output_case() {
     let result = LogUtils::init(LogConfig::new().with_stdout(false));
-    assert!(matches!(&result, Err(LogError::InvalidConfig)));
+    assert!(matches!(
+        &result,
+        Err(LogError::InvalidConfig { field: "output" })
+    ));
     assert!(!LogUtils::is_initialized());
     LogUtils::init(LogConfig::default()).expect("valid init after invalid output");
     assert!(LogUtils::is_initialized());
@@ -297,6 +417,123 @@ fn level_case() {
     LogUtils::init(LogConfig::new().with_level(LogLevel::Error)).expect("level init");
     tracing::info!(target: "axutils::test", message = INFO_SENTINEL);
     tracing::error!(target: "axutils::test", message = ERROR_SENTINEL);
+}
+
+fn target_filter_case() {
+    LogUtils::init(
+        LogConfig::new()
+            .with_level(LogLevel::Trace)
+            .with_directives("lettre=off,rustls=off"),
+    )
+    .expect("target filter init");
+    tracing::error!(target: "lettre", message = LETTRE_FILTERED_SENTINEL);
+    tracing::error!(target: "lettre::transport::smtp", message = LETTRE_FILTERED_SENTINEL);
+    tracing::error!(target: "rustls", message = RUSTLS_FILTERED_SENTINEL);
+    tracing::error!(target: "rustls::client", message = RUSTLS_FILTERED_SENTINEL);
+    tracing::trace!(target: "axutils::test", message = TARGET_FILTER_VISIBLE_SENTINEL);
+}
+
+fn directives_case() {
+    LogUtils::init(
+        LogConfig::new()
+            .with_level(LogLevel::Error)
+            .with_directives("axutils::http=info,tower_http=debug,sqlx::query=warn"),
+    )
+    .expect("directive init");
+    tracing::debug!(
+        target: "tower_http::trace",
+        message = THIRD_PARTY_DEBUG_SENTINEL
+    );
+    tracing::info!(target: "axutils::http", message = AXUTILS_HTTP_SENTINEL);
+    tracing::debug!(
+        target: "sqlx::query",
+        message = SQLX_QUERY_DEBUG_SENTINEL
+    );
+    tracing::info!(target: "axutils::other", message = OTHER_INFO_SENTINEL);
+}
+
+fn selective_directives_case() {
+    LogUtils::init(
+        LogConfig::new()
+            .with_directives("off,axutils=info,axutils::http=debug,axutils::crypto=warn"),
+    )
+    .expect("selective directive init");
+    LogUtils::info(SELECTIVE_LOG_INFO_SENTINEL);
+    tracing::debug!(
+        target: "axutils::http::request",
+        message = SELECTIVE_HTTP_DEBUG_SENTINEL
+    );
+    tracing::warn!(
+        target: "axutils::crypto::aes",
+        message = SELECTIVE_CRYPTO_WARN_SENTINEL
+    );
+    tracing::info!(
+        target: "axutils::crypto::aes",
+        message = SELECTIVE_CRYPTO_INFO_SENTINEL
+    );
+    tracing::error!(
+        target: "tower_http::trace",
+        message = SELECTIVE_OTHER_ERROR_SENTINEL
+    );
+}
+
+fn directives_replace_case() {
+    LogUtils::init(
+        LogConfig::new()
+            .with_level(LogLevel::Error)
+            .with_directives("axutils::replace=trace")
+            .with_directives("axutils::replace=warn"),
+    )
+    .expect("replacement directive init");
+    tracing::warn!(
+        target: "axutils::replace",
+        message = REPLACED_FILTER_VISIBLE_SENTINEL
+    );
+    tracing::info!(
+        target: "axutils::replace",
+        message = REPLACED_FILTER_HIDDEN_SENTINEL
+    );
+}
+
+fn directives_blank_case() {
+    LogUtils::init(
+        LogConfig::new()
+            .with_level(LogLevel::Error)
+            .with_directives("axutils::blank=trace")
+            .with_directives(" \t "),
+    )
+    .expect("blank directive init");
+    tracing::error!(
+        target: "axutils::blank",
+        message = BLANK_FILTER_VISIBLE_SENTINEL
+    );
+    tracing::info!(
+        target: "axutils::blank",
+        message = BLANK_FILTER_HIDDEN_SENTINEL
+    );
+}
+
+fn rust_log_ignored_case() {
+    LogUtils::init(LogConfig::new().with_level(LogLevel::Trace))
+        .expect("RUST_LOG-independent init");
+    tracing::trace!(
+        target: "third_party::without_directives",
+        message = RUST_LOG_IGNORED_SENTINEL
+    );
+}
+
+fn invalid_filter_case() {
+    let result = LogUtils::init(LogConfig::new().with_directives(INVALID_FILTER_SENTINEL));
+    assert!(matches!(
+        &result,
+        Err(LogError::InvalidConfig { field: "filter" })
+    ));
+    assert!(!LogUtils::is_initialized());
+    let error = result.expect_err("invalid filter should fail");
+    assert!(!error.to_string().contains(INVALID_FILTER_SENTINEL));
+    assert!(!format!("{error:?}").contains(INVALID_FILTER_SENTINEL));
+    LogUtils::init(LogConfig::default()).expect("valid init after invalid filter");
+    assert!(LogUtils::is_initialized());
 }
 
 fn unique_temp_dir(case: &str) -> PathBuf {

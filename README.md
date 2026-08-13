@@ -44,8 +44,12 @@ SQLx 能力通过 `sqlx + tokio` 组合 feature 提供；它使用 SQLx `0.8.6` 
 
 库内日志事件通过 `tracing` feature 提供；同步 `LogUtils` 初始化器需要 `logging` feature。
 库不会自动安装全局 subscriber；`LogUtils` 只在调用方显式初始化时安装一次无 ANSI formatter，
-可写标准输出、文件或双输出，并支持 Never/分钟/小时/天轮转。日志写入是同步 I/O，应用负责
-目录权限和历史文件 retention。HTTP URL、Header/body、
+可写标准输出、文件或双输出，支持 Never/分钟/小时/天轮转，并可通过 `with_directives` 配置
+EnvFilter target 规则，例如由调用方传入 `lettre=off,rustls=off`。这些规则不是库内固定默认值；
+应用还可用 `LogUtils::trace/debug/info/warn/error` 向固定 target `axutils::log` 发出消息。初始化不
+自动读取 `RUST_LOG`，成功后也不支持运行时 reload。日志写入是同步 I/O，应用负责目录权限和
+历史文件 retention。
+HTTP URL、Header/body、
 SQL/bind、Redis key/value/token、邮件和配置敏感内容不会写入库内事件。完整事件 target、
 字段和边界见
 [日志与 tracing 使用文档](docs/examples/log.md)。

@@ -1,8 +1,8 @@
 #![cfg(feature = "tracing")]
 
-#[cfg(feature = "http")]
-use std::io::Read;
 use std::io::Write;
+#[cfg(feature = "http")]
+use std::io::{ErrorKind, Read};
 #[cfg(feature = "http")]
 use std::net::{TcpListener, TcpStream};
 #[cfg(feature = "serde")]
@@ -12,6 +12,8 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 #[cfg(any(feature = "http", all(feature = "sqlx", feature = "tokio")))]
 use std::time::Duration;
+#[cfg(feature = "http")]
+use std::time::Instant;
 
 #[cfg(all(feature = "sqlx", feature = "tokio"))]
 use axutils::SqlxError;
@@ -62,6 +64,37 @@ impl<'a> MakeWriter<'a> for Capture {
 }
 
 #[test]
+fn tracing_minimal_feature_exercises_the_capture_harness() {
+    let capture = Arc::new(Mutex::new(Vec::new()));
+    let subscriber = tracing_subscriber::fmt()
+        .with_ansi(false)
+        .with_target(true)
+        .with_max_level(tracing::Level::DEBUG)
+        .with_writer(Capture(Arc::clone(&capture)))
+        .finish();
+
+    tracing::subscriber::with_default(subscriber, || {
+        tracing::debug!(
+            target: "axutils::observability_test",
+            operation = "capture_harness",
+            mode = "scoped",
+            outcome = "success",
+        );
+    });
+
+    let output = captured(&capture);
+    assert_event_count(
+        &output,
+        "axutils::observability_test",
+        "capture_harness",
+        Some("scoped"),
+        "success",
+        1,
+    );
+    assert!(!output.contains('\u{1b}'));
+}
+
+#[test]
 #[cfg(feature = "http")]
 fn captures_sync_http_events_without_sensitive_context() {
     let (url, server) = spawn_http_server();
@@ -95,7 +128,15 @@ fn captures_sync_http_events_without_sensitive_context() {
         output.contains("request_complete"),
         "captured output:\n{output}"
     );
-    assert_eq!(count_event(&output, "axutils::http", "request_complete"), 1);
+    assert_event_count(
+        &output,
+        "axutils::http",
+        "request_complete",
+        Some("sync"),
+        "success",
+        1,
+    );
+    assert_dispatch_count(&output, "sync", 1);
     assert!(!output.contains(HTTP_SENTINEL));
     assert!(!output.contains(HTTP_HEADER_SENTINEL));
     assert!(!output.contains(HTTP_BODY_SENTINEL));
@@ -159,8 +200,17 @@ fn captures_sync_config_events_without_sensitive_context() {
         "captured output:\n{output}"
     );
     assert!(output.contains("error_kind=\"io\"") || output.contains("error_kind = \"io\""));
-    assert_eq!(count_event(&output, "axutils::config", "read"), 2);
-    assert_eq!(count_event(&output, "axutils::config", "parse"), 3);
+    assert_event_count(
+        &output,
+        "axutils::config",
+        "read",
+        Some("sync"),
+        "success",
+        1,
+    );
+    assert_event_count(&output, "axutils::config", "read", Some("sync"), "error", 1);
+    assert_event_count(&output, "axutils::config", "parse", None, "success", 1);
+    assert_event_count(&output, "axutils::config", "parse", None, "error", 2);
     assert!(!output.contains(CONFIG_SENTINEL));
     assert!(!output.contains('\u{1b}'));
 }
@@ -186,7 +236,8 @@ fn info_filter_hides_success_events_but_keeps_failures() {
     });
 
     let output = captured(&capture);
-    assert_eq!(count_event(&output, "axutils::config", "parse"), 1);
+    assert_event_count(&output, "axutils::config", "parse", None, "error", 1);
+    assert_event_count(&output, "axutils::config", "parse", None, "success", 0);
     assert!(output.contains("outcome=\"error\"") || output.contains("outcome = \"error\""));
     assert!(!output.contains("outcome=\"success\""));
 }
@@ -230,7 +281,15 @@ fn captures_async_http_events_without_sensitive_context() {
         output.contains("request_complete"),
         "captured output:\n{output}"
     );
-    assert_eq!(count_event(&output, "axutils::http", "request_complete"), 1);
+    assert_event_count(
+        &output,
+        "axutils::http",
+        "request_complete",
+        Some("async"),
+        "success",
+        1,
+    );
+    assert_dispatch_count(&output, "async", 1);
     assert!(!output.contains(HTTP_SENTINEL));
     assert!(!output.contains('\u{1b}'));
 }
@@ -335,7 +394,12 @@ fn captures_sqlx_events_and_exact_row_counts_without_sensitive_context() {
     );
     let row_limit_events = output
         .lines()
-        .filter(|line| line.contains("fetch_all") && line.contains("row_limit_exceeded"))
+        .filter(|line| {
+            has_target(line, "axutils::sqlx")
+                && has_field(line, "operation", "fetch_all")
+                && has_field(line, "outcome", "error")
+                && has_field(line, "error_kind", "row_limit_exceeded")
+        })
         .collect::<Vec<_>>();
     assert_eq!(row_limit_events.len(), 1, "captured output:\n{output}");
     assert!(
@@ -344,10 +408,11 @@ fn captures_sqlx_events_and_exact_row_counts_without_sensitive_context() {
             .any(|field| field == "rows=1"),
         "row-limit event must report the retained row count:\n{output}"
     );
-    assert_eq!(count_event(&output, "axutils::sqlx", "connect"), 2);
-    assert_eq!(count_event(&output, "axutils::sqlx", "execute"), 4);
-    assert_eq!(count_event(&output, "axutils::sqlx", "fetch_all"), 1);
-    assert_eq!(count_event(&output, "axutils::sqlx", "fetch_one"), 1);
+    assert_event_count(&output, "axutils::sqlx", "connect", None, "success", 2);
+    assert_event_count(&output, "axutils::sqlx", "execute", None, "success", 3);
+    assert_event_count(&output, "axutils::sqlx", "execute", None, "error", 1);
+    assert_event_count(&output, "axutils::sqlx", "fetch_all", None, "error", 1);
+    assert_event_count(&output, "axutils::sqlx", "fetch_one", None, "error", 1);
     assert!(!output.contains(SQL_SENTINEL));
     assert!(!output.contains(SQL_TEXT_SENTINEL));
     assert!(!output.contains('\u{1b}'));
@@ -394,8 +459,15 @@ fn captures_async_config_events_without_sensitive_context() {
         output.contains("mode=\"async\"") || output.contains("mode = \"async\""),
         "captured output:\n{output}"
     );
-    assert_eq!(count_event(&output, "axutils::config", "read"), 1);
-    assert_eq!(count_event(&output, "axutils::config", "parse"), 1);
+    assert_event_count(
+        &output,
+        "axutils::config",
+        "read",
+        Some("async"),
+        "success",
+        1,
+    );
+    assert_event_count(&output, "axutils::config", "parse", None, "success", 1);
     assert!(!output.contains(CONFIG_SENTINEL));
     assert!(!output.contains('\u{1b}'));
 }
@@ -428,7 +500,10 @@ fn captures_http_retry_and_timeout_failure_events() {
             .expect("retry config");
         let retry_client = HttpClient::new(retry_config).expect("retry client");
         let response = retry_client
-            .execute(HttpRequest::new(HttpMethod::Get, "/retry").expect("retry request"))
+            .execute(
+                HttpRequest::new(HttpMethod::Get, format!("/retry/{HTTP_SENTINEL}"))
+                    .expect("retry request"),
+            )
             .expect("retry response");
         assert_eq!(response.status(), 200);
 
@@ -449,7 +524,10 @@ fn captures_http_retry_and_timeout_failure_events() {
             .expect("timeout config");
         let timeout_result = HttpClient::new(timeout_config)
             .expect("timeout client")
-            .execute(HttpRequest::new(HttpMethod::Get, "/timeout").expect("timeout request"));
+            .execute(
+                HttpRequest::new(HttpMethod::Get, format!("/timeout/{HTTP_SENTINEL}"))
+                    .expect("timeout request"),
+            );
         assert!(matches!(
             timeout_result,
             Err(HttpError::Transport {
@@ -466,8 +544,30 @@ fn captures_http_retry_and_timeout_failure_events() {
         output.contains("request_retry"),
         "captured output:\n{output}"
     );
-    assert_eq!(count_event(&output, "axutils::http", "request_complete"), 2);
-    assert_eq!(count_event(&output, "axutils::http", "request_retry"), 1);
+    assert_event_count(
+        &output,
+        "axutils::http",
+        "request_complete",
+        Some("sync"),
+        "success",
+        1,
+    );
+    assert_event_count(
+        &output,
+        "axutils::http",
+        "request_complete",
+        Some("sync"),
+        "error",
+        1,
+    );
+    assert_event_count(
+        &output,
+        "axutils::http",
+        "request_retry",
+        Some("sync"),
+        "scheduled",
+        1,
+    );
     assert!(output.contains("scheduled"), "captured output:\n{output}");
     assert!(
         output.contains("error_kind=\"timeout\"") || output.contains("error_kind = \"timeout\"")
@@ -480,19 +580,65 @@ fn captured(buffer: &Arc<Mutex<Vec<u8>>>) -> String {
     String::from_utf8(buffer.lock().expect("capture lock").clone()).expect("UTF-8 logs")
 }
 
-fn count_event(output: &str, target: &str, operation: &str) -> usize {
-    output
+fn assert_event_count(
+    output: &str,
+    target: &str,
+    operation: &str,
+    mode: Option<&str>,
+    outcome: &str,
+    expected: usize,
+) {
+    let actual = output
         .lines()
-        .filter(|line| line.contains(target) && line.contains(operation))
-        .count()
+        .filter(|line| {
+            has_target(line, target)
+                && has_field(line, "operation", operation)
+                && mode.is_none_or(|mode| has_field(line, "mode", mode))
+                && has_field(line, "outcome", outcome)
+        })
+        .count();
+    assert_eq!(
+        actual, expected,
+        "expected {expected} event(s) for target={target}, operation={operation}, mode={mode:?}, outcome={outcome}:\n{output}"
+    );
+}
+
+#[cfg(feature = "http")]
+fn assert_dispatch_count(output: &str, mode: &str, expected: usize) {
+    let actual = output
+        .lines()
+        .filter(|line| {
+            has_target(line, "axutils::http")
+                && has_field(line, "operation", "request_dispatch")
+                && has_field(line, "mode", mode)
+                && (has_field(line, "outcome", "direct") || has_field(line, "outcome", "leader"))
+        })
+        .count();
+    assert_eq!(
+        actual, expected,
+        "expected {expected} normal HTTP dispatch event(s) for mode={mode}:\n{output}"
+    );
+}
+
+fn has_target(line: &str, target: &str) -> bool {
+    line.split_ascii_whitespace()
+        .any(|field| field.strip_suffix(':') == Some(target))
+}
+
+fn has_field(line: &str, name: &str, value: &str) -> bool {
+    line.contains(&format!(r#"{name}="{value}""#))
+        || line.contains(&format!(r#"{name} = "{value}""#))
 }
 
 #[cfg(feature = "http")]
 fn spawn_http_server() -> (String, thread::JoinHandle<()>) {
     let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind loopback HTTP server");
+    listener
+        .set_nonblocking(true)
+        .expect("set loopback HTTP listener nonblocking");
     let address = format!("http://{}", listener.local_addr().expect("server address"));
     let handle = thread::spawn(move || {
-        let (mut stream, _) = listener.accept().expect("accept loopback request");
+        let mut stream = accept_request(&listener, "loopback request");
         read_request(&mut stream);
         stream
             .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok")
@@ -504,10 +650,13 @@ fn spawn_http_server() -> (String, thread::JoinHandle<()>) {
 #[cfg(feature = "http")]
 fn spawn_status_http_server(statuses: Vec<u16>) -> (String, thread::JoinHandle<()>) {
     let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind status HTTP server");
+    listener
+        .set_nonblocking(true)
+        .expect("set status HTTP listener nonblocking");
     let address = format!("http://{}", listener.local_addr().expect("server address"));
     let handle = thread::spawn(move || {
         for status in statuses {
-            let (mut stream, _) = listener.accept().expect("accept status HTTP request");
+            let mut stream = accept_request(&listener, "status HTTP request");
             read_request(&mut stream);
             let body = if status >= 500 {
                 b"retry".as_slice()
@@ -530,9 +679,12 @@ fn spawn_status_http_server(statuses: Vec<u16>) -> (String, thread::JoinHandle<(
 #[cfg(feature = "http")]
 fn spawn_delayed_http_server(delay: Duration) -> (String, thread::JoinHandle<()>) {
     let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind delayed HTTP server");
+    listener
+        .set_nonblocking(true)
+        .expect("set delayed HTTP listener nonblocking");
     let address = format!("http://{}", listener.local_addr().expect("server address"));
     let handle = thread::spawn(move || {
-        let (mut stream, _) = listener.accept().expect("accept delayed HTTP request");
+        let mut stream = accept_request(&listener, "delayed HTTP request");
         read_request(&mut stream);
         thread::sleep(delay);
         let _ = stream
@@ -542,19 +694,57 @@ fn spawn_delayed_http_server(delay: Duration) -> (String, thread::JoinHandle<()>
 }
 
 #[cfg(feature = "http")]
+fn accept_request(listener: &TcpListener, label: &str) -> TcpStream {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        match listener.accept() {
+            Ok((stream, _)) => return stream,
+            Err(error) if error.kind() == ErrorKind::WouldBlock => {
+                assert!(Instant::now() < deadline, "timed out waiting for {label}");
+                thread::sleep(Duration::from_millis(5));
+            }
+            Err(error) => panic!("accept {label}: {error}"),
+        }
+    }
+}
+
+#[cfg(feature = "http")]
 fn read_request(stream: &mut TcpStream) {
     stream
-        .set_read_timeout(Some(std::time::Duration::from_secs(5)))
-        .expect("set read timeout");
-    let mut buffer = [0_u8; 1024];
+        .set_read_timeout(Some(Duration::from_secs(2)))
+        .expect("set server read timeout");
+    let mut byte = [0_u8; 1];
     let mut request = Vec::new();
-    while !request.windows(4).any(|window| window == b"\r\n\r\n") {
-        let read = stream.read(&mut buffer).expect("read request");
+    while request.len() < 64 * 1024 {
+        let Ok(read) = stream.read(&mut byte) else {
+            break;
+        };
         if read == 0 {
             break;
         }
-        request.extend_from_slice(&buffer[..read]);
-        assert!(request.len() < 64 * 1024, "request too large");
+        request.push(byte[0]);
+        if request.ends_with(b"\r\n\r\n") {
+            break;
+        }
+    }
+    let header_text = String::from_utf8_lossy(&request);
+    let content_length = header_text
+        .lines()
+        .find_map(|line| {
+            line.strip_prefix("Content-Length:")
+                .or_else(|| line.strip_prefix("content-length:"))
+        })
+        .and_then(|value| value.trim().parse::<usize>().ok())
+        .unwrap_or(0);
+    let mut remaining = content_length;
+    while remaining > 0 {
+        let Ok(read) = stream.read(&mut byte) else {
+            break;
+        };
+        if read == 0 {
+            break;
+        }
+        remaining = remaining.saturating_sub(read);
     }
 }
 

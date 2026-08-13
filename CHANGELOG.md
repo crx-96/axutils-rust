@@ -10,7 +10,11 @@
 - 新增 `tracing` feature，为 HTTP、Redis、SQLx、邮件、配置、JWT 和 AES 初始化/外部 I/O
   提供脱敏结构化事件；新增依赖它的 `logging` feature，提供显式一次性的 `LogUtils` 同步无
   ANSI subscriber，支持标准输出、文件、双输出和 Never/分钟/小时/天轮转；不记录 URL、凭据、
-  正文、SQL、bind、Redis key/value/token 或配置原文，文件日志不负责历史 retention。
+  正文、SQL、bind、Redis key/value/token 或配置原文；支持通过 `with_directives` 配置 EnvFilter
+  target 规则和通过五个等级方法发出 `axutils::log` 消息；`lettre=off,rustls=off` 等规则由调用方
+  显式传入，不是库内固定默认值；初始化不自动读取 `RUST_LOG`、不支持运行时 reload，输出目标和
+  过滤器配置错误分别返回 `InvalidConfig { field: "output" }` 与
+  `InvalidConfig { field: "filter" }`，文件日志不负责历史 retention。
 - 建立按 feature 组织的 Rust 工具库；默认 feature 为空，不会自动引入第三方依赖。
 - 新增 `PathUtils`，提供绝对路径判断、当前工作目录和可执行文件路径获取，以及不访问文件系统的多路径词法拼接。
 - 新增 `TimeUtils`，提供当前 Unix 时间戳获取能力；通过独立的 `chrono`、`time` 或 `jiff` feature

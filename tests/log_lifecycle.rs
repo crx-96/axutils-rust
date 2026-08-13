@@ -55,16 +55,47 @@ fn capture_for(action: impl FnOnce()) -> String {
     String::from_utf8(bytes).expect("UTF-8 logs")
 }
 
-fn assert_single_init_event(output: &str, target: &str, operation: &str) {
+fn assert_event_count(output: &str, target: &str, operation: &str, outcome: &str, expected: usize) {
     let count = output
         .lines()
-        .filter(|line| line.contains(target) && line.contains(operation))
+        .filter(|line| {
+            has_target(line, target)
+                && has_field(line, "operation", operation)
+                && has_field(line, "outcome", outcome)
+        })
         .count();
     assert_eq!(
-        count, 1,
-        "expected one {target}/{operation} event:\n{output}"
+        count, expected,
+        "expected {expected} event(s) for target={target}, operation={operation}, outcome={outcome}:\n{output}"
     );
+}
+
+fn has_target(line: &str, target: &str) -> bool {
+    line.split_ascii_whitespace()
+        .any(|field| field.strip_suffix(':') == Some(target))
+}
+
+fn has_field(line: &str, name: &str, value: &str) -> bool {
+    line.contains(&format!(r#"{name}="{value}""#))
+        || line.contains(&format!(r#"{name} = "{value}""#))
+}
+
+fn assert_single_success_event(output: &str, target: &str, operation: &str) {
+    assert_event_count(output, target, operation, "success", 1);
     assert!(!output.contains('\u{1b}'));
+}
+
+#[test]
+fn tracing_minimal_feature_exercises_scoped_lifecycle_capture() {
+    let output = capture_for(|| {
+        tracing::debug!(
+            target: "axutils::lifecycle_test",
+            operation = "scoped_capture",
+            outcome = "success",
+        );
+    });
+
+    assert_single_success_event(&output, "axutils::lifecycle_test", "scoped_capture");
 }
 
 #[test]
@@ -79,7 +110,7 @@ fn captures_http_init_without_base_url() {
             .expect("HTTP config");
         HttpUtils::init(config).expect("HTTP utility init");
     });
-    assert_single_init_event(&output, "axutils::http", "client_init");
+    assert_single_success_event(&output, "axutils::http", "client_init");
     assert!(!output.contains(URL_SENTINEL));
 }
 
@@ -92,7 +123,7 @@ fn captures_redis_init_without_credentials_or_url() {
         RedisUtils::init(RedisConfig::single(&url).expect("Redis config"))
             .expect("Redis utility init");
     });
-    assert_single_init_event(&output, "axutils::redis", "client_init");
+    assert_single_success_event(&output, "axutils::redis", "client_init");
     assert!(!output.contains(PASSWORD_SENTINEL));
     assert!(!output.contains(&url));
 }
@@ -116,7 +147,7 @@ fn captures_email_init_without_account_data() {
         )
         .expect("email utility init");
     });
-    assert_single_init_event(&output, "axutils::email", "client_init");
+    assert_single_success_event(&output, "axutils::email", "client_init");
     assert!(!output.contains(HOST_SENTINEL));
     assert!(!output.contains(PASSWORD_SENTINEL));
 }
@@ -137,7 +168,7 @@ fn captures_jwt_init_without_secret() {
         )
         .expect("JWT utility init");
     });
-    assert_single_init_event(&output, "axutils::jwt", "codec_init");
+    assert_single_success_event(&output, "axutils::jwt", "codec_init");
     assert!(!output.contains("AXUTILS_JWT_SECRET"));
     assert!(!output.contains(&format!("{SECRET_SENTINEL:?}")));
 }
@@ -149,7 +180,7 @@ fn captures_aes_init_without_key_material() {
     let output = capture_for(|| {
         CryptoUtils::aes_init_from_bytes(KEY_SENTINEL, AesMode::Gcm).expect("AES utility init");
     });
-    assert_single_init_event(&output, "axutils::crypto", "aes_init_from_bytes");
+    assert_single_success_event(&output, "axutils::crypto", "aes_init_from_bytes");
     assert!(!output.contains("AXUTILS_AES_SECRET"));
     assert!(!output.contains(&format!("{KEY_SENTINEL:?}")));
 }
@@ -168,13 +199,6 @@ fn captures_sqlx_global_init_once() {
                 .expect("SQLx utility init");
         });
     });
-    assert_single_init_event(&output, "axutils::sqlx", "client_init");
-    assert_eq!(
-        output
-            .lines()
-            .filter(|line| line.contains("axutils::sqlx") && line.contains("connect"))
-            .count(),
-        1,
-        "expected one SQLx connect event:\n{output}"
-    );
+    assert_single_success_event(&output, "axutils::sqlx", "client_init");
+    assert_event_count(&output, "axutils::sqlx", "connect", "success", 1);
 }

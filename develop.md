@@ -145,6 +145,33 @@ cargo tree --no-default-features --features base64 -e normal
 cargo tree --no-default-features --features md5 -e normal
 cargo tree --no-default-features --features aes -e normal
 cargo tree --no-default-features --features encoding_rs -e normal
+cargo check --no-default-features --features tracing
+cargo check --no-default-features --features logging
+cargo check --no-default-features --features logging,http
+cargo check --no-default-features --features logging,http,tokio
+cargo check --no-default-features --features logging,redis
+cargo check --no-default-features --features logging,redis,tokio
+cargo check --no-default-features --features logging,sqlx
+cargo check --no-default-features --features logging,sqlx,tokio
+cargo check --no-default-features --features logging,lettre
+cargo check --no-default-features --features logging,lettre,tokio
+cargo check --no-default-features --features logging,serde
+cargo check --no-default-features --features logging,serde,tokio
+cargo test --no-default-features --features logging --test log_global --test log_conflict -- --test-threads=1
+cargo test --no-default-features --features tracing,http --test log_observability -- --test-threads=1
+cargo test --no-default-features --features tracing,http,tokio --test log_observability -- --test-threads=1
+cargo test --no-default-features --features tracing,serde --test log_observability -- --test-threads=1
+cargo test --no-default-features --features tracing,serde,tokio --test log_observability -- --test-threads=1
+cargo test --no-default-features --features tracing,sqlx,tokio --test log_observability -- --test-threads=1
+cargo test --no-default-features --features tracing,http --test log_lifecycle -- --test-threads=1
+cargo test --no-default-features --features tracing,redis --test log_lifecycle -- --test-threads=1
+cargo test --no-default-features --features tracing,lettre --test log_lifecycle -- --test-threads=1
+cargo test --no-default-features --features tracing,jwt --test log_lifecycle -- --test-threads=1
+cargo test --no-default-features --features tracing,aes --test log_lifecycle -- --test-threads=1
+cargo test --no-default-features --features tracing,sqlx,tokio --test log_lifecycle -- --test-threads=1
+cargo test --no-default-features --features logging --doc
+cargo tree --no-default-features --features tracing -e normal,build,features
+cargo tree --no-default-features --features logging -e normal,build,features
 cargo package --list
 git diff --check
 ```
@@ -291,12 +318,17 @@ mimalloc = ["dep:mimalloc"]
 rpmalloc = ["dep:rpmalloc"]
 ```
 
-`tracing` feature 只启用事件 facade；`logging` 依赖 `tracing`，并额外启用仅含
-`fmt/registry/std` 的 `tracing-subscriber` 与 `tracing-appender`。appender 会带入其轮转实现必需的
+`tracing` feature 只启用事件 facade；`logging` 依赖 `tracing`，并额外启用
+`fmt/env-filter/registry/std` 的 `tracing-subscriber` 与 `tracing-appender`。EnvFilter 会带入
+`matchers`、`once_cell`、`regex-automata`、`regex-syntax`、`thread_local`，appender 会带入其轮转实现必需的
 `time`、`crossbeam-channel`、`symlink` 和 `thiserror` 传递依赖，但不会启用本 crate 的 `time`
-feature，也不会引入 Tokio、TLS、EnvFilter、JSON、ANSI 或 `tracing-log`。库不会自动安装 global subscriber，`LogUtils::init`
-只执行一次同步、无 ANSI 的 formatter 初始化，不创建 Tokio runtime；日志测试使用独立进程隔离
-全局状态。详细公共 API、事件 target、脱敏字段和轮转副作用见
+feature，也不会引入 Tokio、TLS、JSON、ANSI 或 `tracing-log`。库不会自动安装 global subscriber；
+`LogUtils::init` 只执行一次同步、无 ANSI 的 formatter 初始化；调用方可用 `with_directives`
+动态传入 `lettre=off,rustls=off` 或其他 target 规则，这些规则不是库内固定默认值。初始化不自动
+读取 `RUST_LOG`、不提供运行时 reload handle、也不创建 Tokio runtime；
+`LogUtils::trace/debug/info/warn/error` 使用固定 target `axutils::log`。日志测试使用独立进程隔离
+全局状态，并区分 `InvalidConfig { field: "output" }` 与 `InvalidConfig { field: "filter" }`。
+详细公共 API、事件 target、脱敏字段和轮转副作用见
 [`docs/examples/log.md`](docs/examples/log.md)。
 
 调用方直接依赖 `axutils = "0.1"` 即可使用 `PathUtils` 和 `TimeUtils`；需要

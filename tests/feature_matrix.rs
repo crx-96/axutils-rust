@@ -1010,6 +1010,11 @@ fn assert_tracing_dependency_boundaries() {
         "tracing-subscriber",
         "tracing-appender",
         "crossbeam-channel",
+        "matchers",
+        "once_cell",
+        "regex-automata",
+        "regex-syntax",
+        "thread_local",
     ] {
         assert!(
             !has_package(&no_feature_tree, package),
@@ -1023,6 +1028,10 @@ fn assert_tracing_dependency_boundaries() {
         "tracing-subscriber",
         "tracing-appender",
         "crossbeam-channel",
+        "matchers",
+        "regex-automata",
+        "regex-syntax",
+        "thread_local",
     ] {
         assert!(
             !has_package(&tracing_tree, package),
@@ -1042,6 +1051,11 @@ fn assert_tracing_dependency_boundaries() {
         "tracing-subscriber",
         "tracing-appender",
         "crossbeam-channel",
+        "matchers",
+        "once_cell",
+        "regex-automata",
+        "regex-syntax",
+        "thread_local",
     ] {
         assert!(
             has_package(&logging_tree, package),
@@ -1053,14 +1067,30 @@ fn assert_tracing_dependency_boundaries() {
     assert!(feature_tree.contains("tracing-subscriber feature \"fmt\""));
     assert!(feature_tree.contains("tracing-subscriber feature \"registry\""));
     assert!(feature_tree.contains("tracing-subscriber feature \"std\""));
-    assert!(!feature_tree.contains("tracing-subscriber feature \"env-filter\""));
+    assert!(feature_tree.contains("tracing-subscriber feature \"env-filter\""));
     assert!(!feature_tree.contains("tracing-subscriber feature \"json\""));
     assert!(!feature_tree.contains("tracing-subscriber feature \"ansi\""));
     assert!(!feature_tree.contains("tracing-subscriber feature \"tracing-log\""));
     assert!(!feature_tree.contains("tracing-subscriber feature \"smallvec\""));
     assert!(!feature_tree.contains("tracing-subscriber feature \"time\""));
     assert!(!feature_tree.contains("tracing-subscriber feature \"local-time\""));
-    for package in ["tokio", "native-tls", "openssl", "openssl-sys"] {
+    for package in [
+        "serde_json",
+        "nu-ansi-term",
+        "tracing-log",
+        "tokio",
+        "native-tls",
+        "openssl",
+        "openssl-sys",
+        "rustls",
+        "rustls-webpki",
+        "rustls-pki-types",
+        "tokio-rustls",
+        "hyper-rustls",
+        "rustls-native-certs",
+        "rustls-platform-verifier",
+        "webpki-roots",
+    ] {
         assert!(
             !has_package(&logging_tree, package),
             "logging feature unexpectedly pulls `{package}`"

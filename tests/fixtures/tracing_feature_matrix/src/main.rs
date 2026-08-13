@@ -9,20 +9,26 @@ fn main() {
     use axutils::{LogConfig, LogFileConfig, LogLevel, LogRotation, LogUtils};
 
     let config = LogConfig::new()
-        .with_stdout(false)
         .with_level(LogLevel::Debug)
-        .with_file(LogFileConfig::new("fixture.log").with_rotation(LogRotation::Never));
+        .with_directives("lettre=off,rustls=off");
+    let _file_config = LogFileConfig::new("fixture.log").with_rotation(LogRotation::Never);
     let _init: fn(LogConfig) -> Result<(), axutils::LogError> = LogUtils::init;
     let _state: fn() -> bool = LogUtils::is_initialized;
     let _utils_init: fn(axutils::utils::LogConfig) -> Result<(), axutils::utils::LogError> =
         axutils::utils::LogUtils::init;
-    let _module_init: fn(axutils::utils::log_utils::LogConfig) -> Result<
-        (),
-        axutils::utils::log_utils::LogError,
-    > = axutils::utils::log_utils::LogUtils::init;
-    LogUtils::init(LogConfig::default()).expect("logging fixture init");
+    let _module_init: fn(
+        axutils::utils::log_utils::LogConfig,
+    ) -> Result<(), axutils::utils::log_utils::LogError> =
+        axutils::utils::log_utils::LogUtils::init;
+    LogUtils::init(config).expect("logging fixture init");
     assert!(LogUtils::is_initialized());
-    let _ = config;
+    LogUtils::trace("trace fixture");
+    LogUtils::debug("debug fixture");
+    LogUtils::info("info fixture");
+    LogUtils::warn("warn fixture");
+    LogUtils::error("error fixture");
+    axutils::utils::LogUtils::info("utils fixture");
+    axutils::utils::log_utils::LogUtils::debug("module fixture");
 }
 
 #[cfg(feature = "direct-tracing")]

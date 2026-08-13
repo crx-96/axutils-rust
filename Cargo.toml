@@ -117,7 +117,7 @@ encoding_rs = { version = "0.8.35", default-features = false, features = ["alloc
 mimalloc = { version = "0.1.52", default-features = false, optional = true }
 rpmalloc = { version = "0.2.2", default-features = false, optional = true }
 tracing = { version = "0.1.44", default-features = false, features = ["std"], optional = true }
-tracing-subscriber = { version = "0.3.23", default-features = false, features = ["fmt"], optional = true }
+tracing-subscriber = { version = "0.3.23", default-features = false, features = ["env-filter", "fmt"], optional = true }
 tracing-appender = { version = "0.2.5", default-features = false, optional = true }
 
 [dev-dependencies]
