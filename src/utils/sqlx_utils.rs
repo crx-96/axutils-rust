@@ -37,18 +37,25 @@ impl SqlxUtils {
     /// # }
     /// ```
     pub async fn init(config: SqlxConfig) -> Result<(), SqlxError> {
-        if CLIENT.get().is_some() {
-            return Err(SqlxError::AlreadyInitialized);
-        }
-
-        let client = SqlxClient::connect(config).await?;
-        match CLIENT.set(client.clone()) {
-            Ok(()) => Ok(()),
-            Err(_) => {
-                client.close_async().await?;
-                Err(SqlxError::AlreadyInitialized)
+        #[cfg(feature = "tracing")]
+        let started = std::time::Instant::now();
+        let result = if CLIENT.get().is_some() {
+            Err(SqlxError::AlreadyInitialized)
+        } else {
+            match SqlxClient::connect(config).await {
+                Ok(client) => match CLIENT.set(client.clone()) {
+                    Ok(()) => Ok(()),
+                    Err(_) => match client.close_async().await {
+                        Ok(()) => Err(SqlxError::AlreadyInitialized),
+                        Err(error) => Err(error),
+                    },
+                },
+                Err(error) => Err(error),
             }
-        }
+        };
+        #[cfg(feature = "tracing")]
+        crate::tracing::sqlx::record_client_init(&result, started);
+        result
     }
 
     /// 返回全局 client 是否已经成功初始化。

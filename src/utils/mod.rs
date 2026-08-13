@@ -20,6 +20,9 @@
 //! `ConvertUtils` 始终提供无状态工具类型；整数、浮点数和 UUID 转换分别需要 `itoa`、
 //! `ryu`/`zmij` 和 `uuid` feature。借用型格式化入口使用调用方 buffer，追加型入口直接写入
 //! 已有字符串，拥有型入口才创建独立 `String`。
+//! 库内结构化事件需要显式启用 `tracing` feature；`logging` feature 额外提供 `LogUtils`。
+//! `LogUtils` 使用同步、无 ANSI 的 formatter，初始化成功后不可 reset/replace；文件轮转不
+//! 负责历史文件 retention，日志写入可能阻塞产生日志的线程。
 
 #[cfg(feature = "rand")]
 pub mod random_utils;
@@ -48,6 +51,9 @@ pub mod redis_utils;
 
 #[cfg(all(feature = "sqlx", feature = "tokio"))]
 pub mod sqlx_utils;
+
+#[cfg(feature = "logging")]
+pub mod log_utils;
 
 pub mod convert_utils;
 pub mod crypto_utils;
@@ -83,5 +89,8 @@ pub use redis_utils::RedisUtils;
 
 #[cfg(all(feature = "sqlx", feature = "tokio"))]
 pub use sqlx_utils::SqlxUtils;
+
+#[cfg(feature = "logging")]
+pub use log_utils::{LogConfig, LogError, LogFileConfig, LogLevel, LogRotation, LogUtils};
 
 pub use crypto_utils::CryptoUtils;

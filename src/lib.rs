@@ -159,8 +159,22 @@
 //! # 异步 HTTP 改为 features = ["http", "tokio"]。
 //! ```
 
+//! `tracing` feature 只让库内安全的 I/O 和生命周期边界发出结构化事件，不自动安装
+//! subscriber。`logging` feature 额外提供 `LogUtils`：显式安装一次无 ANSI 的同步 formatter，
+//! 支持标准输出、文件和双输出，以及 Never/分钟/小时/天轮转。调用方需要自行负责日志文件
+//! 权限和历史文件 retention；日志写入可能阻塞产生日志的线程。
+//!
+//! ```toml
+//! [dependencies]
+//! axutils = { version = "0.1", default-features = false, features = ["logging"] }
+//! ```
+//! 只使用库内事件时启用 `tracing` feature，并由应用自行安装 subscriber。
+
 #[cfg(any(feature = "mimalloc", feature = "rpmalloc"))]
 mod allocator;
+
+#[cfg(feature = "tracing")]
+mod tracing;
 
 pub mod convert;
 mod time;
@@ -266,6 +280,9 @@ pub use sqlx::{
 
 #[cfg(all(feature = "sqlx", feature = "tokio"))]
 pub use utils::SqlxUtils;
+
+#[cfg(feature = "logging")]
+pub use utils::{LogConfig, LogError, LogFileConfig, LogLevel, LogRotation, LogUtils};
 
 pub mod crypto;
 

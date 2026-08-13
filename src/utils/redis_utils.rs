@@ -33,10 +33,17 @@ impl RedisUtils {
     /// # Ok::<(), axutils::RedisError>(())
     /// ```
     pub fn init(config: RedisConfig) -> Result<(), RedisError> {
-        let client = RedisClient::new(config)?;
-        REDIS_CLIENT
-            .set(client)
-            .map_err(|_| RedisError::AlreadyInitialized)
+        #[cfg(feature = "tracing")]
+        let started = std::time::Instant::now();
+        let result = match RedisClient::new(config) {
+            Ok(client) => REDIS_CLIENT
+                .set(client)
+                .map_err(|_| RedisError::AlreadyInitialized),
+            Err(error) => Err(error),
+        };
+        #[cfg(feature = "tracing")]
+        crate::tracing::redis::record_client_init(&result, started);
+        result
     }
 
     /// 返回全局 Redis 客户端是否已经成功初始化。

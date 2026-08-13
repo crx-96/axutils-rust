@@ -13,6 +13,8 @@ use super::{SqlxConfig, SqlxError, SqlxRow, SqlxTransaction};
 pub struct SqlxClient {
     pub(crate) pool: sqlx::AnyPool,
     pub(crate) max_rows: usize,
+    #[cfg(feature = "tracing")]
+    driver: &'static str,
 }
 
 impl SqlxClient {
@@ -36,6 +38,24 @@ impl SqlxClient {
     /// # }
     /// ```
     pub async fn connect(config: SqlxConfig) -> Result<Self, SqlxError> {
+        #[cfg(feature = "tracing")]
+        let started = std::time::Instant::now();
+        #[cfg(feature = "tracing")]
+        let metadata = crate::tracing::sqlx::ConnectMetadata {
+            driver: config.driver_name(),
+            sqlite_memory: config.sqlite_memory,
+            max_connections: config.max_connections,
+            min_connections: config.min_connections,
+            acquire_timeout: config.acquire_timeout,
+            max_rows: config.max_rows,
+        };
+        let result = Self::connect_inner(config).await;
+        #[cfg(feature = "tracing")]
+        crate::tracing::sqlx::record_connect(metadata, &result, started);
+        result
+    }
+
+    async fn connect_inner(config: SqlxConfig) -> Result<Self, SqlxError> {
         ensure_runtime()?;
         config.validate()?;
         super::driver::install_default_drivers();
@@ -51,6 +71,8 @@ impl SqlxClient {
         Ok(Self {
             pool,
             max_rows: config.max_rows,
+            #[cfg(feature = "tracing")]
+            driver: config.driver_name(),
         })
     }
 
@@ -139,11 +161,19 @@ impl SqlxClient {
         &self,
         query: sqlx::query::Query<'q, sqlx::Any, sqlx::any::AnyArguments<'q>>,
     ) -> Result<sqlx::any::AnyQueryResult, SqlxError> {
-        ensure_runtime()?;
-        query
-            .execute(&self.pool)
-            .await
-            .map_err(|error| SqlxError::from_upstream(&error))
+        #[cfg(feature = "tracing")]
+        let started = std::time::Instant::now();
+        let result = async {
+            ensure_runtime()?;
+            query
+                .execute(&self.pool)
+                .await
+                .map_err(|error| SqlxError::from_upstream(&error))
+        }
+        .await;
+        #[cfg(feature = "tracing")]
+        crate::tracing::sqlx::record_event("execute", self.driver, 0, 0, &result, started);
+        result
     }
 
     /// 读取一个原生 SQLx row；没有结果时返回 [`SqlxError::RowNotFound`]。
@@ -162,11 +192,26 @@ impl SqlxClient {
         &self,
         query: sqlx::query::Query<'q, sqlx::Any, sqlx::any::AnyArguments<'q>>,
     ) -> Result<SqlxRow, SqlxError> {
-        ensure_runtime()?;
-        query
-            .fetch_one(&self.pool)
-            .await
-            .map_err(|error| SqlxError::from_upstream(&error))
+        #[cfg(feature = "tracing")]
+        let started = std::time::Instant::now();
+        let result = async {
+            ensure_runtime()?;
+            query
+                .fetch_one(&self.pool)
+                .await
+                .map_err(|error| SqlxError::from_upstream(&error))
+        }
+        .await;
+        #[cfg(feature = "tracing")]
+        crate::tracing::sqlx::record_event(
+            "fetch_one",
+            self.driver,
+            usize::from(result.is_ok()),
+            0,
+            &result,
+            started,
+        );
+        result
     }
 
     /// 读取一个映射为 `T` 的 row；没有结果时返回 [`SqlxError::RowNotFound`]。
@@ -190,11 +235,26 @@ impl SqlxClient {
     where
         T: Send + Unpin + for<'r> sqlx::FromRow<'r, SqlxRow>,
     {
-        ensure_runtime()?;
-        query
-            .fetch_one(&self.pool)
-            .await
-            .map_err(|error| SqlxError::from_upstream(&error))
+        #[cfg(feature = "tracing")]
+        let started = std::time::Instant::now();
+        let result = async {
+            ensure_runtime()?;
+            query
+                .fetch_one(&self.pool)
+                .await
+                .map_err(|error| SqlxError::from_upstream(&error))
+        }
+        .await;
+        #[cfg(feature = "tracing")]
+        crate::tracing::sqlx::record_event(
+            "fetch_one_as",
+            self.driver,
+            usize::from(result.is_ok()),
+            0,
+            &result,
+            started,
+        );
+        result
     }
 
     /// 最多读取一个原生 row；没有结果时返回 `None`。
@@ -213,11 +273,26 @@ impl SqlxClient {
         &self,
         query: sqlx::query::Query<'q, sqlx::Any, sqlx::any::AnyArguments<'q>>,
     ) -> Result<Option<SqlxRow>, SqlxError> {
-        ensure_runtime()?;
-        query
-            .fetch_optional(&self.pool)
-            .await
-            .map_err(|error| SqlxError::from_upstream(&error))
+        #[cfg(feature = "tracing")]
+        let started = std::time::Instant::now();
+        let result = async {
+            ensure_runtime()?;
+            query
+                .fetch_optional(&self.pool)
+                .await
+                .map_err(|error| SqlxError::from_upstream(&error))
+        }
+        .await;
+        #[cfg(feature = "tracing")]
+        crate::tracing::sqlx::record_event(
+            "fetch_optional",
+            self.driver,
+            usize::from(result.as_ref().ok().is_some_and(Option::is_some)),
+            0,
+            &result,
+            started,
+        );
+        result
     }
 
     /// 最多读取一个映射为 `T` 的 row；没有结果时返回 `None`。
@@ -241,11 +316,26 @@ impl SqlxClient {
     where
         T: Send + Unpin + for<'r> sqlx::FromRow<'r, SqlxRow>,
     {
-        ensure_runtime()?;
-        query
-            .fetch_optional(&self.pool)
-            .await
-            .map_err(|error| SqlxError::from_upstream(&error))
+        #[cfg(feature = "tracing")]
+        let started = std::time::Instant::now();
+        let result = async {
+            ensure_runtime()?;
+            query
+                .fetch_optional(&self.pool)
+                .await
+                .map_err(|error| SqlxError::from_upstream(&error))
+        }
+        .await;
+        #[cfg(feature = "tracing")]
+        crate::tracing::sqlx::record_event(
+            "fetch_optional_as",
+            self.driver,
+            usize::from(result.as_ref().ok().is_some_and(Option::is_some)),
+            0,
+            &result,
+            started,
+        );
+        result
     }
 
     /// 逐行收集原生 row，并在消费第 `max_rows + 1` 行时返回 [`SqlxError::RowLimitExceeded`]。
@@ -267,28 +357,49 @@ impl SqlxClient {
         &self,
         query: sqlx::query::Query<'q, sqlx::Any, sqlx::any::AnyArguments<'q>>,
     ) -> Result<Vec<SqlxRow>, SqlxError> {
-        ensure_runtime()?;
-        let sentinel_limit = self
-            .max_rows
-            .checked_add(1)
-            .ok_or(SqlxError::InvalidConfig { field: "max_rows" })?;
-        let mut stream = query.fetch(&self.pool);
-        let mut rows = Vec::new();
-
-        while let Some(result) = stream.next().await {
-            let row = result.map_err(|error| SqlxError::from_upstream(&error))?;
-            let seen = rows
-                .len()
+        #[cfg(feature = "tracing")]
+        let started = std::time::Instant::now();
+        let result = async {
+            ensure_runtime()?;
+            let sentinel_limit = self
+                .max_rows
                 .checked_add(1)
                 .ok_or(SqlxError::InvalidConfig { field: "max_rows" })?;
-            if seen == sentinel_limit {
-                return Err(SqlxError::RowLimitExceeded {
-                    limit: self.max_rows,
-                });
+            let mut stream = query.fetch(&self.pool);
+            let mut rows = Vec::new();
+
+            while let Some(result) = stream.next().await {
+                let row = result.map_err(|error| SqlxError::from_upstream(&error))?;
+                let seen = rows
+                    .len()
+                    .checked_add(1)
+                    .ok_or(SqlxError::InvalidConfig { field: "max_rows" })?;
+                if seen == sentinel_limit {
+                    return Err(SqlxError::RowLimitExceeded {
+                        limit: self.max_rows,
+                    });
+                }
+                rows.push(row);
             }
-            rows.push(row);
+            Ok(rows)
         }
-        Ok(rows)
+        .await;
+        #[cfg(feature = "tracing")]
+        let observed_rows = match &result {
+            Ok(rows) => rows.len(),
+            Err(SqlxError::RowLimitExceeded { limit }) => *limit,
+            Err(_) => 0,
+        };
+        #[cfg(feature = "tracing")]
+        crate::tracing::sqlx::record_event(
+            "fetch_all",
+            self.driver,
+            observed_rows,
+            self.max_rows,
+            &result,
+            started,
+        );
+        result
     }
 
     /// 逐行收集映射为 `T` 的结果，并在消费第 `max_rows + 1` 行时返回限制错误。
@@ -312,28 +423,49 @@ impl SqlxClient {
     where
         T: Send + Unpin + for<'r> sqlx::FromRow<'r, SqlxRow>,
     {
-        ensure_runtime()?;
-        let sentinel_limit = self
-            .max_rows
-            .checked_add(1)
-            .ok_or(SqlxError::InvalidConfig { field: "max_rows" })?;
-        let mut stream = query.fetch(&self.pool);
-        let mut rows = Vec::new();
-
-        while let Some(result) = stream.next().await {
-            let row = result.map_err(|error| SqlxError::from_upstream(&error))?;
-            let seen = rows
-                .len()
+        #[cfg(feature = "tracing")]
+        let started = std::time::Instant::now();
+        let result = async {
+            ensure_runtime()?;
+            let sentinel_limit = self
+                .max_rows
                 .checked_add(1)
                 .ok_or(SqlxError::InvalidConfig { field: "max_rows" })?;
-            if seen == sentinel_limit {
-                return Err(SqlxError::RowLimitExceeded {
-                    limit: self.max_rows,
-                });
+            let mut stream = query.fetch(&self.pool);
+            let mut rows = Vec::new();
+
+            while let Some(result) = stream.next().await {
+                let row = result.map_err(|error| SqlxError::from_upstream(&error))?;
+                let seen = rows
+                    .len()
+                    .checked_add(1)
+                    .ok_or(SqlxError::InvalidConfig { field: "max_rows" })?;
+                if seen == sentinel_limit {
+                    return Err(SqlxError::RowLimitExceeded {
+                        limit: self.max_rows,
+                    });
+                }
+                rows.push(row);
             }
-            rows.push(row);
+            Ok(rows)
         }
-        Ok(rows)
+        .await;
+        #[cfg(feature = "tracing")]
+        let observed_rows = match &result {
+            Ok(rows) => rows.len(),
+            Err(SqlxError::RowLimitExceeded { limit }) => *limit,
+            Err(_) => 0,
+        };
+        #[cfg(feature = "tracing")]
+        crate::tracing::sqlx::record_event(
+            "fetch_all_as",
+            self.driver,
+            observed_rows,
+            self.max_rows,
+            &result,
+            started,
+        );
+        result
     }
 
     /// 读取标量查询的第一列；无行时返回 [`SqlxError::RowNotFound`]。
@@ -356,11 +488,26 @@ impl SqlxClient {
         T: Send + Unpin,
         (T,): for<'r> sqlx::FromRow<'r, SqlxRow>,
     {
-        ensure_runtime()?;
-        query
-            .fetch_one(&self.pool)
-            .await
-            .map_err(|error| SqlxError::from_upstream(&error))
+        #[cfg(feature = "tracing")]
+        let started = std::time::Instant::now();
+        let result = async {
+            ensure_runtime()?;
+            query
+                .fetch_one(&self.pool)
+                .await
+                .map_err(|error| SqlxError::from_upstream(&error))
+        }
+        .await;
+        #[cfg(feature = "tracing")]
+        crate::tracing::sqlx::record_event(
+            "fetch_scalar",
+            self.driver,
+            usize::from(result.is_ok()),
+            0,
+            &result,
+            started,
+        );
+        result
     }
 
     /// 开启原生 SQLx Any 事务。
@@ -381,11 +528,19 @@ impl SqlxClient {
     /// # }
     /// ```
     pub async fn begin_async(&self) -> Result<SqlxTransaction<'static>, SqlxError> {
-        ensure_runtime()?;
-        self.pool
-            .begin()
-            .await
-            .map_err(|error| SqlxError::from_upstream(&error))
+        #[cfg(feature = "tracing")]
+        let started = std::time::Instant::now();
+        let result = async {
+            ensure_runtime()?;
+            self.pool
+                .begin()
+                .await
+                .map_err(|error| SqlxError::from_upstream(&error))
+        }
+        .await;
+        #[cfg(feature = "tracing")]
+        crate::tracing::sqlx::record_event("begin", self.driver, 0, 0, &result, started);
+        result
     }
 
     /// 优雅地关闭共享连接池并等待关闭完成。
@@ -404,9 +559,17 @@ impl SqlxClient {
     /// # }
     /// ```
     pub async fn close_async(&self) -> Result<(), SqlxError> {
-        ensure_runtime()?;
-        self.pool.close().await;
-        Ok(())
+        #[cfg(feature = "tracing")]
+        let started = std::time::Instant::now();
+        let result = async {
+            ensure_runtime()?;
+            self.pool.close().await;
+            Ok(())
+        }
+        .await;
+        #[cfg(feature = "tracing")]
+        crate::tracing::sqlx::record_event("close", self.driver, 0, 0, &result, started);
+        result
     }
 
     /// 返回连接池是否已经进入关闭状态。

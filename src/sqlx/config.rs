@@ -224,6 +224,15 @@ impl SqlxConfig {
         }
         Ok(())
     }
+
+    #[cfg(feature = "tracing")]
+    pub(crate) fn driver_name(&self) -> &'static str {
+        match self.driver {
+            SqlxDriver::PostgreSql => "postgres",
+            SqlxDriver::MySql => "mysql",
+            SqlxDriver::Sqlite => "sqlite",
+        }
+    }
 }
 
 impl fmt::Debug for SqlxConfig {

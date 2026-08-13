@@ -338,7 +338,9 @@ impl ConfigLoader {
         text: &str,
         format: ConfigFormat,
     ) -> Result<ConfigValue, ConfigError> {
-        match format {
+        #[cfg(feature = "tracing")]
+        let started = std::time::Instant::now();
+        let result = match format {
             ConfigFormat::Json => json::parse_value(text, self.max_depth),
             ConfigFormat::Env => env::parse_value(text, self.env_substitution, self.max_bytes),
             #[cfg(feature = "serde-saphyr")]
@@ -347,7 +349,10 @@ impl ConfigLoader {
             ConfigFormat::Toml => toml::parse_value(text, self.max_depth),
             #[cfg(feature = "rust-ini")]
             ConfigFormat::Ini => ini::parse_value(text, self.max_depth),
-        }
+        };
+        #[cfg(feature = "tracing")]
+        crate::tracing::config::record_parse(format, text.len(), &result, started);
+        result
     }
 
     /// 把内存中的文本按指定格式直接反序列化为调用方类型 `T`。
@@ -379,19 +384,22 @@ impl ConfigLoader {
         text: &str,
         format: ConfigFormat,
     ) -> Result<T, ConfigError> {
-        match format {
+        #[cfg(feature = "tracing")]
+        let started = std::time::Instant::now();
+        let result = match format {
             ConfigFormat::Json => json::parse(text),
-            ConfigFormat::Env => {
-                let value = env::parse_value(text, self.env_substitution, self.max_bytes)?;
-                de::deserialize(&value)
-            }
+            ConfigFormat::Env => env::parse_value(text, self.env_substitution, self.max_bytes)
+                .and_then(|value| de::deserialize(&value)),
             #[cfg(feature = "serde-saphyr")]
             ConfigFormat::Yaml => yaml::parse(text, self.max_depth),
             #[cfg(feature = "toml")]
             ConfigFormat::Toml => toml::parse(text),
             #[cfg(feature = "rust-ini")]
             ConfigFormat::Ini => ini::parse(text, self.max_depth),
-        }
+        };
+        #[cfg(feature = "tracing")]
+        crate::tracing::config::record_parse(format, text.len(), &result, started);
+        result
     }
 
     fn resolve_format(&self, path: &Path) -> Result<ConfigFormat, ConfigError> {

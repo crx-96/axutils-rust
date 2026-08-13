@@ -37,9 +37,14 @@ impl JwtUtils {
     /// # Ok::<(), axutils::JwtError>(())
     /// ```
     pub fn init(config: JwtConfig) -> Result<(), JwtError> {
-        JWT_CODEC
+        #[cfg(feature = "tracing")]
+        let started = std::time::Instant::now();
+        let result = JWT_CODEC
             .set(JwtCodec::from_config(config))
-            .map_err(|_| JwtError::AlreadyInitialized)
+            .map_err(|_| JwtError::AlreadyInitialized);
+        #[cfg(feature = "tracing")]
+        crate::tracing::jwt::record_client_init(&result, started);
+        result
     }
 
     /// 返回全局 codec 是否已经成功初始化。

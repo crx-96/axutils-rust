@@ -291,12 +291,18 @@ impl CryptoUtils {
     /// ```
     #[cfg(feature = "aes")]
     pub fn aes_init(key: AesKey, mode: AesMode) -> Result<(), CryptoError> {
-        if AES_CIPHER.get().is_some() {
-            return Err(CryptoError::AlreadyInitialized);
-        }
-        AES_CIPHER
-            .set(AesCipher::new(key, mode))
-            .map_err(|_| CryptoError::AlreadyInitialized)
+        #[cfg(feature = "tracing")]
+        let started = std::time::Instant::now();
+        let result = if AES_CIPHER.get().is_some() {
+            Err(CryptoError::AlreadyInitialized)
+        } else {
+            AES_CIPHER
+                .set(AesCipher::new(key, mode))
+                .map_err(|_| CryptoError::AlreadyInitialized)
+        };
+        #[cfg(feature = "tracing")]
+        crate::tracing::crypto::record_init("aes_init", &result, started);
+        result
     }
 
     /// 从 16、24 或 32 字节密钥材料初始化进程级 AES 单例。
@@ -321,11 +327,21 @@ impl CryptoUtils {
     /// ```
     #[cfg(feature = "aes")]
     pub fn aes_init_from_bytes(key: impl AsRef<[u8]>, mode: AesMode) -> Result<(), CryptoError> {
-        if AES_CIPHER.get().is_some() {
-            return Err(CryptoError::AlreadyInitialized);
-        }
-        let key = AesKey::from_bytes(key)?;
-        Self::aes_init(key, mode)
+        #[cfg(feature = "tracing")]
+        let started = std::time::Instant::now();
+        let result = if AES_CIPHER.get().is_some() {
+            Err(CryptoError::AlreadyInitialized)
+        } else {
+            match AesKey::from_bytes(key) {
+                Ok(key) => AES_CIPHER
+                    .set(AesCipher::new(key, mode))
+                    .map_err(|_| CryptoError::AlreadyInitialized),
+                Err(error) => Err(error),
+            }
+        };
+        #[cfg(feature = "tracing")]
+        crate::tracing::crypto::record_init("aes_init_from_bytes", &result, started);
+        result
     }
 
     /// 返回进程级 AES 单例是否已经成功初始化。

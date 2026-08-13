@@ -42,6 +42,19 @@ SQLx 能力通过 `sqlx + tokio` 组合 feature 提供；它使用 SQLx `0.8.6` 
 `fetch_all` 默认限制 1_024 行并逐行消费。完整 API、feature 矩阵和关闭/脱敏边界见
 [SQLx 使用文档](https://github.com/crx-96/axutils-rust/blob/main/docs/examples/sqlx.md)。
 
+库内日志事件通过 `tracing` feature 提供；同步 `LogUtils` 初始化器需要 `logging` feature。
+库不会自动安装全局 subscriber；`LogUtils` 只在调用方显式初始化时安装一次无 ANSI formatter，
+可写标准输出、文件或双输出，并支持 Never/分钟/小时/天轮转。日志写入是同步 I/O，应用负责
+目录权限和历史文件 retention。HTTP URL、Header/body、
+SQL/bind、Redis key/value/token、邮件和配置敏感内容不会写入库内事件。完整事件 target、
+字段和边界见
+[日志与 tracing 使用文档](docs/examples/log.md)。
+
+```toml
+[dependencies]
+axutils = { version = "0.1", default-features = false, features = ["logging"] }
+```
+
 ## 安装
 
 在项目的 `Cargo.toml` 中添加默认依赖：

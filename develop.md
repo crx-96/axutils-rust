@@ -32,8 +32,10 @@ feature 背景和发布操作命令。两者出现冲突时，先按标准文档
     ├── lib.rs          # crate 入口和公共导出
     ├── redis/          # Redis 配置、客户端、命令、事务与错误（需要 redis feature）
     ├── sqlx/           # SQLx Any 配置、客户端、事务与错误（需要 sqlx + tokio）
+    ├── tracing/        # 各领域脱敏 tracing 事件的私有辅助实现（需要 tracing）
     └── utils/
         ├── mod.rs        # 通用工具模块和公共导出
+        ├── log_utils.rs  # LogUtils 同步全局 subscriber 初始化（需要 logging）
         ├── path_utils.rs  # PathUtils 实现与单元测试
         ├── random_utils.rs # RandomUtils 实现与单元测试（需要 rand feature）
         ├── redis_utils.rs # RedisUtils 一次初始化的全局转发（需要 redis feature）
@@ -80,6 +82,23 @@ cargo check --no-default-features --features sqlx,tokio
 cargo test --no-default-features --features sqlx,tokio --test sqlx -- --test-threads=1
 cargo test --no-default-features --features sqlx,tokio --doc
 cargo tree --no-default-features --features sqlx,tokio -e normal,build,features
+cargo check --no-default-features --features tracing
+cargo check --no-default-features --features logging
+cargo test --no-default-features --features logging --test log_global --test log_conflict -- --test-threads=1
+cargo test --no-default-features --features tracing,http --test log_observability -- --test-threads=1
+cargo test --no-default-features --features tracing,http,tokio --test log_observability -- --test-threads=1
+cargo test --no-default-features --features tracing,serde --test log_observability -- --test-threads=1
+cargo test --no-default-features --features tracing,serde,tokio --test log_observability -- --test-threads=1
+cargo test --no-default-features --features tracing,sqlx,tokio --test log_observability -- --test-threads=1
+cargo test --no-default-features --features tracing,http --test log_lifecycle -- --test-threads=1
+cargo test --no-default-features --features tracing,redis --test log_lifecycle -- --test-threads=1
+cargo test --no-default-features --features tracing,lettre --test log_lifecycle -- --test-threads=1
+cargo test --no-default-features --features tracing,jwt --test log_lifecycle -- --test-threads=1
+cargo test --no-default-features --features tracing,aes --test log_lifecycle -- --test-threads=1
+cargo test --no-default-features --features tracing,sqlx,tokio --test log_lifecycle -- --test-threads=1
+cargo test --no-default-features --features logging --doc
+cargo tree --no-default-features --features tracing -e normal,build,features
+cargo tree --no-default-features --features logging -e normal,build,features
 
 # 需要覆盖所有已启用模块、feature/API 依赖边界和文档时，使用下面的完整清单；其中
 # feature/API/依赖边界矩阵是慢速测试，默认 cargo test 会跳过。allocator 后端必须分别验证；
@@ -265,10 +284,20 @@ md5 = ["dep:md5"]
 aes = ["dep:aes", "dep:aes-gcm", "dep:cbc", "dep:zeroize"]
 encoding_rs = ["dep:encoding_rs"]
 jwt = ["dep:jsonwebtoken", "dep:serde", "dep:serde_json"]
+tracing = ["dep:tracing"]
+logging = ["tracing", "dep:tracing-subscriber", "dep:tracing-appender"]
 sqlx = ["dep:sqlx", "dep:futures-util"]
 mimalloc = ["dep:mimalloc"]
 rpmalloc = ["dep:rpmalloc"]
 ```
+
+`tracing` feature 只启用事件 facade；`logging` 依赖 `tracing`，并额外启用仅含
+`fmt/registry/std` 的 `tracing-subscriber` 与 `tracing-appender`。appender 会带入其轮转实现必需的
+`time`、`crossbeam-channel`、`symlink` 和 `thiserror` 传递依赖，但不会启用本 crate 的 `time`
+feature，也不会引入 Tokio、TLS、EnvFilter、JSON、ANSI 或 `tracing-log`。库不会自动安装 global subscriber，`LogUtils::init`
+只执行一次同步、无 ANSI 的 formatter 初始化，不创建 Tokio runtime；日志测试使用独立进程隔离
+全局状态。详细公共 API、事件 target、脱敏字段和轮转副作用见
+[`docs/examples/log.md`](docs/examples/log.md)。
 
 调用方直接依赖 `axutils = "0.1"` 即可使用 `PathUtils` 和 `TimeUtils`；需要
 `RandomUtils` 时显式选择：

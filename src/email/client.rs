@@ -120,11 +120,17 @@ impl EmailClient {
     /// # }
     /// ```
     pub fn send(&self, message: EmailMessage) -> Result<(), EmailError> {
-        let message = message.into_lettre_from(&self.from)?;
-        self.transport
-            .send(&message)
-            .map(|_| ())
-            .map_err(|error| EmailError::from_smtp(&error))
+        #[cfg(feature = "tracing")]
+        let started = std::time::Instant::now();
+        let result = message.into_lettre_from(&self.from).and_then(|message| {
+            self.transport
+                .send(&message)
+                .map(|_| ())
+                .map_err(|error| EmailError::from_smtp(&error))
+        });
+        #[cfg(feature = "tracing")]
+        crate::tracing::email::record_send("sync", &result, started);
+        result
     }
 
     /// 在调用方已有的 Tokio runtime 中异步发送一封邮件。
@@ -167,14 +173,27 @@ impl EmailClient {
     /// ```
     #[cfg(all(feature = "lettre", feature = "tokio"))]
     pub async fn send_async(&self, message: EmailMessage) -> Result<(), EmailError> {
+        #[cfg(feature = "tracing")]
+        let started = std::time::Instant::now();
+        let result = self.send_async_inner(message).await;
+        #[cfg(feature = "tracing")]
+        crate::tracing::email::record_send("async", &result, started);
+        result
+    }
+
+    #[cfg(all(feature = "lettre", feature = "tokio"))]
+    async fn send_async_inner(&self, message: EmailMessage) -> Result<(), EmailError> {
         let message = message.into_lettre_from(&self.from)?;
         if tokio::runtime::Handle::try_current().is_err() {
             return Err(EmailError::Transport(EmailTransportErrorKind::Client));
         }
 
-        let async_transport = self
-            .async_transport
-            .get_or_init(|| build_async_transport(&self.async_config));
+        let async_transport = self.async_transport.get_or_init(|| {
+            let result = build_async_transport(&self.async_config);
+            #[cfg(feature = "tracing")]
+            crate::tracing::email::record_transport_init(result.as_ref().map(|_| ()));
+            result
+        });
 
         match async_transport {
             Ok(transport) => transport

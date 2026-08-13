@@ -18,6 +18,15 @@ const UTF8_BOM: [u8; 3] = [0xEF, 0xBB, 0xBF];
 /// 判定为超限；不依赖 `fs::metadata` 报告的大小，避免 TOCTOU 竞争，以及命名管道、`/proc`
 /// 等大小汇报为 0 却可能无限输出的特殊文件耗尽内存。
 pub(crate) fn read_bounded(path: &Path, max_bytes: usize) -> Result<String, ConfigError> {
+    #[cfg(feature = "tracing")]
+    let started = std::time::Instant::now();
+    let result = read_bounded_inner(path, max_bytes);
+    #[cfg(feature = "tracing")]
+    crate::tracing::config::record_read("sync", max_bytes, &result, started);
+    result
+}
+
+fn read_bounded_inner(path: &Path, max_bytes: usize) -> Result<String, ConfigError> {
     let mut file = File::open(path).map_err(|error| io_error(path, &error))?;
 
     let mut buffer = Vec::new();
@@ -44,6 +53,16 @@ pub(crate) async fn read_bounded_async(
     path: &Path,
     max_bytes: usize,
 ) -> Result<String, ConfigError> {
+    #[cfg(feature = "tracing")]
+    let started = std::time::Instant::now();
+    let result = read_bounded_async_inner(path, max_bytes).await;
+    #[cfg(feature = "tracing")]
+    crate::tracing::config::record_read("async", max_bytes, &result, started);
+    result
+}
+
+#[cfg(all(feature = "serde", feature = "tokio"))]
+async fn read_bounded_async_inner(path: &Path, max_bytes: usize) -> Result<String, ConfigError> {
     let file = tokio::fs::File::open(path)
         .await
         .map_err(|error| io_error(path, &error))?;

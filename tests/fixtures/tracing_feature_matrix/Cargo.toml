@@ -1,0 +1,22 @@
+[package]
+name = "axutils-tracing-feature-matrix"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[features]
+none = []
+tracing = ["axutils/tracing", "dep:tracing"]
+logging = ["axutils/logging", "dep:tracing"]
+direct-tracing = ["dep:tracing"]
+negative-none-root = []
+negative-none-config = []
+negative-tracing-root = ["axutils/tracing"]
+negative-tracing-config = ["axutils/tracing"]
+negative-tracing-utils = ["axutils/tracing"]
+negative-tracing-module = ["axutils/tracing"]
+negative-no-root-module = ["axutils/logging"]
+
+[dependencies]
+axutils = { path = "../../..", default-features = false }
+tracing = { version = "0.1.44", default-features = false, features = ["std"], optional = true }

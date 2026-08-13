@@ -44,14 +44,21 @@ impl EmailUtils {
     /// # }
     /// ```
     pub fn init(config: EmailConfig) -> Result<(), EmailError> {
-        if EMAIL_CLIENT.get().is_some() {
-            return Err(EmailError::AlreadyInitialized);
-        }
-
-        let client = EmailClient::new(config)?;
-        EMAIL_CLIENT
-            .set(client)
-            .map_err(|_| EmailError::AlreadyInitialized)
+        #[cfg(feature = "tracing")]
+        let started = std::time::Instant::now();
+        let result = if EMAIL_CLIENT.get().is_some() {
+            Err(EmailError::AlreadyInitialized)
+        } else {
+            match EmailClient::new(config) {
+                Ok(client) => EMAIL_CLIENT
+                    .set(client)
+                    .map_err(|_| EmailError::AlreadyInitialized),
+                Err(error) => Err(error),
+            }
+        };
+        #[cfg(feature = "tracing")]
+        crate::tracing::email::record_client_init(&result, started);
+        result
     }
 
     /// 返回全局邮件客户端是否已经成功初始化。

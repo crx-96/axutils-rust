@@ -66,6 +66,53 @@ fn verifies_feature_api_matrix_and_dependency_boundaries() {
 
 #[test]
 #[ignore = "慢速 feature/依赖契约矩阵；使用 cargo test --no-default-features --test feature_matrix -- --ignored 执行"]
+fn verifies_tracing_feature_api_matrix_and_dependency_boundaries() {
+    let fixture_manifest = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("fixtures")
+        .join("tracing_feature_matrix")
+        .join("Cargo.toml");
+    let target_dir = unique_target("axutils-tracing-feature-matrix");
+
+    for (feature, expected_success, diagnostic_token) in [
+        ("none", true, ""),
+        ("tracing", true, ""),
+        ("logging", true, ""),
+        ("direct-tracing", true, ""),
+        ("negative-none-root", false, "logutils"),
+        ("negative-none-config", false, "logconfig"),
+        ("negative-tracing-root", false, "logutils"),
+        ("negative-tracing-config", false, "logconfig"),
+        ("negative-tracing-utils", false, "logutils"),
+        ("negative-tracing-module", false, "logutils"),
+        ("negative-no-root-module", false, "log_utils"),
+    ] {
+        let action = if expected_success {
+            FixtureAction::Run
+        } else {
+            FixtureAction::Check
+        };
+        let output = run_fixture_action(&fixture_manifest, &target_dir.0, feature, action);
+        if expected_success {
+            assert!(
+                output.status.success(),
+                "tracing fixture feature `{feature}` should compile successfully: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        } else {
+            assert!(
+                !output.status.success(),
+                "tracing fixture feature `{feature}` should fail to compile"
+            );
+            assert_expected_diagnostic(&output, diagnostic_token, feature);
+        }
+    }
+
+    assert_tracing_dependency_boundaries();
+}
+
+#[test]
+#[ignore = "慢速 feature/依赖契约矩阵；使用 cargo test --no-default-features --test feature_matrix -- --ignored 执行"]
 fn verifies_http_feature_api_matrix_and_dependency_boundaries() {
     let fixture_manifest = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests")
@@ -954,6 +1001,71 @@ fn assert_dependency_boundaries() {
     assert!(has_package(&combined_tree, "ring"));
     assert!(has_package(&combined_tree, "webpki-roots"));
     assert_forbidden_tls_packages(&combined_tree);
+}
+
+fn assert_tracing_dependency_boundaries() {
+    let no_feature_tree = cargo_tree("");
+    for package in [
+        "tracing",
+        "tracing-subscriber",
+        "tracing-appender",
+        "crossbeam-channel",
+    ] {
+        assert!(
+            !has_package(&no_feature_tree, package),
+            "tracing dependency `{package}` is present without the feature"
+        );
+    }
+
+    let tracing_tree = cargo_tree("tracing");
+    assert!(has_package(&tracing_tree, "tracing"));
+    for package in [
+        "tracing-subscriber",
+        "tracing-appender",
+        "crossbeam-channel",
+    ] {
+        assert!(
+            !has_package(&tracing_tree, package),
+            "tracing feature unexpectedly pulls `{package}`"
+        );
+    }
+    for package in ["tokio", "ureq", "reqwest", "lettre", "sqlx", "redis"] {
+        assert!(
+            !has_package(&tracing_tree, package),
+            "tracing feature unexpectedly pulls `{package}`"
+        );
+    }
+
+    let logging_tree = cargo_tree("logging");
+    for package in [
+        "tracing",
+        "tracing-subscriber",
+        "tracing-appender",
+        "crossbeam-channel",
+    ] {
+        assert!(
+            has_package(&logging_tree, package),
+            "logging dependency `{package}` is missing"
+        );
+    }
+
+    let feature_tree = cargo_tree_with_edges("logging", "normal,build,features");
+    assert!(feature_tree.contains("tracing-subscriber feature \"fmt\""));
+    assert!(feature_tree.contains("tracing-subscriber feature \"registry\""));
+    assert!(feature_tree.contains("tracing-subscriber feature \"std\""));
+    assert!(!feature_tree.contains("tracing-subscriber feature \"env-filter\""));
+    assert!(!feature_tree.contains("tracing-subscriber feature \"json\""));
+    assert!(!feature_tree.contains("tracing-subscriber feature \"ansi\""));
+    assert!(!feature_tree.contains("tracing-subscriber feature \"tracing-log\""));
+    assert!(!feature_tree.contains("tracing-subscriber feature \"smallvec\""));
+    assert!(!feature_tree.contains("tracing-subscriber feature \"time\""));
+    assert!(!feature_tree.contains("tracing-subscriber feature \"local-time\""));
+    for package in ["tokio", "native-tls", "openssl", "openssl-sys"] {
+        assert!(
+            !has_package(&logging_tree, package),
+            "logging feature unexpectedly pulls `{package}`"
+        );
+    }
 }
 
 fn assert_allocator_dependency_boundaries() {

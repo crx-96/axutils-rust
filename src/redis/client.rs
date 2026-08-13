@@ -1,7 +1,7 @@
 use std::{fmt, sync::Arc, time::Duration};
 
 use ::redis::ConnectionLike;
-use r2d2::{ManageConnection, Pool, PooledConnection};
+use r2d2::{ManageConnection, Pool};
 use serde::{de::DeserializeOwned, Serialize};
 
 #[cfg(all(feature = "redis", feature = "tokio"))]
@@ -19,9 +19,6 @@ use super::lock::RedisAsyncLockGuard;
 
 type SinglePool = Pool<SingleManager>;
 type ClusterPool = Pool<ClusterManager>;
-type SinglePooledConnection = PooledConnection<SingleManager>;
-type ClusterPooledConnection = PooledConnection<ClusterManager>;
-
 /// 可复用的 Redis 客户端实例。
 ///
 /// 一个实例可以独立配置为单机或 Cluster；`Clone` 只共享同一个连接池和异步连接状态，不会
@@ -2509,36 +2506,56 @@ impl RedisClient {
         &self,
         command: &::redis::Cmd,
     ) -> Result<T, RedisError> {
-        match &self.inner.sync {
-            SyncBackend::Single(pool) => {
-                let mut connection: SinglePooledConnection =
-                    pool.get().map_err(|error| pool_error(&error))?;
-                match command.query(&mut *connection) {
+        #[cfg(feature = "tracing")]
+        let started = std::time::Instant::now();
+        let mut connection_discarded = false;
+        #[cfg(feature = "tracing")]
+        let backend = if self.inner.config.is_cluster() {
+            "cluster"
+        } else {
+            "single"
+        };
+        let result = match &self.inner.sync {
+            SyncBackend::Single(pool) => match pool.get() {
+                Ok(mut connection) => match command.query(&mut *connection) {
                     Ok(value) => Ok(value),
                     Err(error) => {
                         let mapped = RedisError::from_upstream(&error);
                         if should_discard_connection(&mapped, connection.is_open()) {
                             connection.mark_broken();
+                            connection_discarded = true;
                         }
                         Err(mapped)
                     }
-                }
-            }
-            SyncBackend::Cluster(pool) => {
-                let mut connection: ClusterPooledConnection =
-                    pool.get().map_err(|error| pool_error(&error))?;
-                match command.query(&mut *connection) {
+                },
+                Err(error) => Err(pool_error(&error)),
+            },
+            SyncBackend::Cluster(pool) => match pool.get() {
+                Ok(mut connection) => match command.query(&mut *connection) {
                     Ok(value) => Ok(value),
                     Err(error) => {
                         let mapped = RedisError::from_upstream(&error);
                         if should_discard_connection(&mapped, connection.is_open()) {
                             connection.mark_broken();
+                            connection_discarded = true;
                         }
                         Err(mapped)
                     }
-                }
-            }
-        }
+                },
+                Err(error) => Err(pool_error(&error)),
+            },
+        };
+        #[cfg(not(feature = "tracing"))]
+        let _ = connection_discarded;
+        #[cfg(feature = "tracing")]
+        crate::tracing::redis::record_command(
+            "sync",
+            backend,
+            &result,
+            connection_discarded,
+            started,
+        );
+        result
     }
 
     pub(crate) fn release_lock_sync(&self, key: &[u8], token: &[u8]) -> Result<i64, RedisError> {
@@ -2561,25 +2578,37 @@ impl RedisClient {
         &self,
         command: &::redis::Cmd,
     ) -> Result<T, RedisError> {
-        if tokio::runtime::Handle::try_current().is_err() {
-            return Err(RedisError::RuntimeRequired);
-        }
-        match &self.inner.async_backend {
-            AsyncBackend::Single { .. } => {
-                let mut connection = self.async_single_connection().await?;
-                command
-                    .query_async(&mut connection)
-                    .await
-                    .map_err(|error| RedisError::from_upstream(&error))
+        #[cfg(feature = "tracing")]
+        let started = std::time::Instant::now();
+        #[cfg(feature = "tracing")]
+        let backend = if self.inner.config.is_cluster() {
+            "cluster"
+        } else {
+            "single"
+        };
+        let result = if tokio::runtime::Handle::try_current().is_err() {
+            Err(RedisError::RuntimeRequired)
+        } else {
+            match &self.inner.async_backend {
+                AsyncBackend::Single { .. } => match self.async_single_connection().await {
+                    Ok(mut connection) => command
+                        .query_async(&mut connection)
+                        .await
+                        .map_err(|error| RedisError::from_upstream(&error)),
+                    Err(error) => Err(error),
+                },
+                AsyncBackend::Cluster { .. } => match self.async_cluster_connection().await {
+                    Ok(mut connection) => command
+                        .query_async(&mut connection)
+                        .await
+                        .map_err(|error| RedisError::from_upstream(&error)),
+                    Err(error) => Err(error),
+                },
             }
-            AsyncBackend::Cluster { .. } => {
-                let mut connection = self.async_cluster_connection().await?;
-                command
-                    .query_async(&mut connection)
-                    .await
-                    .map_err(|error| RedisError::from_upstream(&error))
-            }
-        }
+        };
+        #[cfg(feature = "tracing")]
+        crate::tracing::redis::record_command("async", backend, &result, false, started);
+        result
     }
 
     #[cfg(all(feature = "redis", feature = "tokio"))]
@@ -2620,9 +2649,30 @@ impl RedisClient {
             .set_max_delay(ASYNC_RECONNECT_MAX_DELAY)
             .set_connection_timeout(Some(self.inner.config.connection_timeout))
             .set_response_timeout(Some(self.inner.config.response_timeout));
-        let connection = client
+        #[cfg(feature = "tracing")]
+        let started = std::time::Instant::now();
+        let connection_result = client
             .get_connection_manager_lazy(config)
-            .map_err(|error| RedisError::from_upstream(&error))?;
+            .map_err(|error| RedisError::from_upstream(&error));
+        #[cfg(feature = "tracing")]
+        match &connection_result {
+            Ok(_) => crate::tracing::redis::record_connection(
+                "connection_manager_init",
+                "single",
+                "ready",
+                None,
+                started,
+            ),
+            Err(error) => crate::tracing::redis::record_connection(
+                "connection_manager_init",
+                "single",
+                "error",
+                Some(error),
+                started,
+            ),
+        }
+        let connection = connection_result;
+        let connection = connection?;
         *guard = Some(connection.clone());
         Ok(connection)
     }
@@ -2641,10 +2691,31 @@ impl RedisClient {
         let config = ::redis::cluster::ClusterConfig::new()
             .set_connection_timeout(self.inner.config.connection_timeout)
             .set_response_timeout(self.inner.config.response_timeout);
-        let connection = client
+        #[cfg(feature = "tracing")]
+        let started = std::time::Instant::now();
+        let connection_result = client
             .get_async_connection_with_config(config)
             .await
-            .map_err(|error| RedisError::from_upstream(&error))?;
+            .map_err(|error| RedisError::from_upstream(&error));
+        #[cfg(feature = "tracing")]
+        match &connection_result {
+            Ok(_) => crate::tracing::redis::record_connection(
+                "connection",
+                "cluster",
+                "success",
+                None,
+                started,
+            ),
+            Err(error) => crate::tracing::redis::record_connection(
+                "connection",
+                "cluster",
+                "error",
+                Some(error),
+                started,
+            ),
+        }
+        let connection = connection_result;
+        let connection = connection?;
         *guard = Some(connection.clone());
         Ok(connection)
     }

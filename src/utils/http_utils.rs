@@ -17,10 +17,17 @@ impl HttpUtils {
     ///
     /// 客户端会在成功构造后才写入 `OnceLock`；配置错误不会消耗初始化机会。
     pub fn init(config: HttpConfig) -> Result<(), HttpError> {
-        let client = HttpClient::new(config)?;
-        HTTP_CLIENT
-            .set(client)
-            .map_err(|_| HttpError::AlreadyInitialized)
+        #[cfg(feature = "tracing")]
+        let started = std::time::Instant::now();
+        let result = match HttpClient::new(config) {
+            Ok(client) => HTTP_CLIENT
+                .set(client)
+                .map_err(|_| HttpError::AlreadyInitialized),
+            Err(error) => Err(error),
+        };
+        #[cfg(feature = "tracing")]
+        crate::tracing::http::record_client_init(&result, started);
+        result
     }
 
     /// 返回全局客户端是否已经初始化。

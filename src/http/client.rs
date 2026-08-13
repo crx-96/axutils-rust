@@ -87,6 +87,15 @@ impl HttpClient {
     /// 在启用了 `tokio` feature 的进程中，如果当前线程已经处于 Tokio runtime，方法会
     /// 返回 [`HttpError::BlockingInAsyncRuntime`]，避免同步网络调用阻塞异步执行器。
     pub fn execute(&self, request: HttpRequest) -> Result<HttpResponse, HttpError> {
+        #[cfg(feature = "tracing")]
+        let started = Instant::now();
+        let result = self.execute_sync_inner(request);
+        #[cfg(feature = "tracing")]
+        crate::tracing::http::record_completion("sync", &result, started);
+        result
+    }
+
+    fn execute_sync_inner(&self, request: HttpRequest) -> Result<HttpResponse, HttpError> {
         #[cfg(feature = "tokio")]
         if tokio::runtime::Handle::try_current().is_ok() {
             return Err(HttpError::BlockingInAsyncRuntime);
@@ -95,6 +104,8 @@ impl HttpClient {
         let prepared = self.prepare(request)?;
         let deadline = Instant::now() + prepared.timeout;
         let Some(key) = self.coalesce_key(&prepared) else {
+            #[cfg(feature = "tracing")]
+            crate::tracing::http::record_dispatch("sync", &prepared.method, "direct");
             return self.execute_network_sync(&prepared, deadline);
         };
 
@@ -111,6 +122,8 @@ impl HttpClient {
                 (Arc::clone(existing), false, None)
             } else if state.in_flight.len() >= prepared.deduplication_policy.max_inflight_keys() {
                 drop(state);
+                #[cfg(feature = "tracing")]
+                crate::tracing::http::record_dispatch("sync", &prepared.method, "capacity_bypass");
                 return self.execute_network_sync(&prepared, deadline);
             } else {
                 let flight = Arc::new(SyncFlight::new());
@@ -120,11 +133,18 @@ impl HttpClient {
         };
 
         if let Some(response) = cached {
+            #[cfg(feature = "tracing")]
+            crate::tracing::http::record_dispatch("sync", &prepared.method, "cache_hit");
             return Ok(response);
         }
         if !leader {
+            #[cfg(feature = "tracing")]
+            crate::tracing::http::record_dispatch("sync", &prepared.method, "follower");
             return flight.wait(deadline);
         }
+
+        #[cfg(feature = "tracing")]
+        crate::tracing::http::record_dispatch("sync", &prepared.method, "leader");
 
         let guard = SyncLeaderGuard::new(self, key, flight, prepared);
         let result = self.execute_network_sync(&guard.prepared, deadline);
@@ -137,6 +157,16 @@ impl HttpClient {
     /// Tokio runtime 中；crate 不创建 runtime，也不会在异步入口中调用 `block_on`。
     #[cfg(all(feature = "http", feature = "tokio"))]
     pub async fn execute_async(&self, request: HttpRequest) -> Result<HttpResponse, HttpError> {
+        #[cfg(feature = "tracing")]
+        let started = Instant::now();
+        let result = self.execute_async_inner(request).await;
+        #[cfg(feature = "tracing")]
+        crate::tracing::http::record_completion("async", &result, started);
+        result
+    }
+
+    #[cfg(all(feature = "http", feature = "tokio"))]
+    async fn execute_async_inner(&self, request: HttpRequest) -> Result<HttpResponse, HttpError> {
         if tokio::runtime::Handle::try_current().is_err() {
             return Err(HttpError::RuntimeRequired);
         }
@@ -144,6 +174,8 @@ impl HttpClient {
         let prepared = self.prepare(request)?;
         let deadline = Instant::now() + prepared.timeout;
         let Some(key) = self.coalesce_key(&prepared) else {
+            #[cfg(feature = "tracing")]
+            crate::tracing::http::record_dispatch("async", &prepared.method, "direct");
             return self.execute_network_async(&prepared, deadline).await;
         };
 
@@ -168,14 +200,23 @@ impl HttpClient {
         };
 
         if bypass {
+            #[cfg(feature = "tracing")]
+            crate::tracing::http::record_dispatch("async", &prepared.method, "capacity_bypass");
             return self.execute_network_async(&prepared, deadline).await;
         }
         if let Some(response) = cached {
+            #[cfg(feature = "tracing")]
+            crate::tracing::http::record_dispatch("async", &prepared.method, "cache_hit");
             return Ok(response);
         }
         if !leader {
+            #[cfg(feature = "tracing")]
+            crate::tracing::http::record_dispatch("async", &prepared.method, "follower");
             return flight.wait(deadline).await;
         }
+
+        #[cfg(feature = "tracing")]
+        crate::tracing::http::record_dispatch("async", &prepared.method, "leader");
 
         let guard = AsyncLeaderGuard::new(self, key, flight, prepared);
         let result = self.execute_network_async(&guard.prepared, deadline).await;
@@ -373,6 +414,8 @@ impl HttpClient {
         let delay = policy.delay_for_retry(retry_number);
         let remaining = deadline.saturating_duration_since(Instant::now());
         if delay >= remaining {
+            #[cfg(feature = "tracing")]
+            crate::tracing::http::record_retry("sync", retry_number, attempts, delay, "timeout");
             return Err(transport_error(
                 HttpTransportErrorKind::Timeout,
                 attempts,
@@ -381,12 +424,16 @@ impl HttpClient {
         }
         std::thread::sleep(delay);
         if Instant::now() >= deadline {
+            #[cfg(feature = "tracing")]
+            crate::tracing::http::record_retry("sync", retry_number, attempts, delay, "timeout");
             return Err(transport_error(
                 HttpTransportErrorKind::Timeout,
                 attempts,
                 true,
             ));
         }
+        #[cfg(feature = "tracing")]
+        crate::tracing::http::record_retry("sync", retry_number, attempts, delay, "scheduled");
         Ok(())
     }
 
@@ -523,6 +570,8 @@ impl HttpClient {
         let delay = policy.delay_for_retry(retry_number);
         let remaining = deadline.saturating_duration_since(Instant::now());
         if delay >= remaining {
+            #[cfg(feature = "tracing")]
+            crate::tracing::http::record_retry("async", retry_number, attempts, delay, "timeout");
             return Err(transport_error(
                 HttpTransportErrorKind::Timeout,
                 attempts,
@@ -531,12 +580,16 @@ impl HttpClient {
         }
         tokio::time::sleep(delay).await;
         if Instant::now() >= deadline {
+            #[cfg(feature = "tracing")]
+            crate::tracing::http::record_retry("async", retry_number, attempts, delay, "timeout");
             return Err(transport_error(
                 HttpTransportErrorKind::Timeout,
                 attempts,
                 true,
             ));
         }
+        #[cfg(feature = "tracing")]
+        crate::tracing::http::record_retry("async", retry_number, attempts, delay, "scheduled");
         Ok(())
     }
 

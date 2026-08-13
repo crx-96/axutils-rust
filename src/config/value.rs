@@ -13,6 +13,7 @@ const MAX_DEPTH_CEILING: usize = 256;
 /// 字段的“伪表”来传递原始字符串表示，而不是直接调用 `visit_str`；本 crate 的 TOML 后端据此
 /// 识别并还原为 [`ConfigValue::String`]，其余后端不做这一特殊处理，避免把恰好使用同名键的
 /// 普通表误判为日期时间。
+#[cfg(feature = "toml")]
 pub(crate) const TOML_DATETIME_FIELD: &str = "$__toml_private_datetime";
 
 const DEPTH_MARKER: &str = "\u{0}axutils:config:depth\u{0}";
