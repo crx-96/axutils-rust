@@ -46,6 +46,7 @@ axutils = "0.1"
 ```toml
 [dependencies]
 axutils = { version = "0.1", features = ["serde", "strfmt"] }
+serde = { version = "1", features = ["derive"] }
 ```
 
 启用 `minijinja`：
@@ -53,6 +54,7 @@ axutils = { version = "0.1", features = ["serde", "strfmt"] }
 ```toml
 [dependencies]
 axutils = { version = "0.1", features = ["serde", "minijinja"] }
+serde = { version = "1", features = ["derive"] }
 ```
 
 后端 feature 不会自动启用 `serde`；两个后端都启用时使用

@@ -185,16 +185,23 @@ assert!(ConvertUtils::string_to_integer::<i32>(" 42").is_err());
 分支。
 
 ```rust
-use axutils::FloatFormat;
+#[cfg(any(feature = "ryu", feature = "zmij"))]
+{
+    use axutils::FloatFormat;
 
-let format = FloatFormat::Ryu;
-let label = match format {
-    FloatFormat::Ryu => "ryu",
-    #[cfg(feature = "zmij")]
-    FloatFormat::Zmij => "zmij",
-    _ => "future-backend",
-};
-assert_eq!(label, "ryu");
+    #[cfg(feature = "ryu")]
+    let format = FloatFormat::Ryu;
+    #[cfg(all(not(feature = "ryu"), feature = "zmij"))]
+    let format = FloatFormat::Zmij;
+    let label = match format {
+        #[cfg(feature = "ryu")]
+        FloatFormat::Ryu => "ryu",
+        #[cfg(feature = "zmij")]
+        FloatFormat::Zmij => "zmij",
+        _ => "future-backend",
+    };
+    assert_eq!(label, if cfg!(feature = "ryu") { "ryu" } else { "zmij" });
+}
 ```
 
 ### `FloatFormat::Ryu`
@@ -202,9 +209,12 @@ assert_eq!(label, "ryu");
 仅在 `ryu` feature 下存在，选择 `ryu::Buffer::format` 的最短十进制表示。
 
 ```rust
-use axutils::FloatFormat;
+#[cfg(feature = "ryu")]
+{
+    use axutils::FloatFormat;
 
-let _format = FloatFormat::Ryu;
+    let _format = FloatFormat::Ryu;
+}
 ```
 
 ### `FloatFormat::Zmij`
@@ -212,9 +222,12 @@ let _format = FloatFormat::Ryu;
 仅在 `zmij` feature 下存在，选择 `zmij::Buffer::format` 的最短十进制表示。
 
 ```rust
-use axutils::FloatFormat;
+#[cfg(feature = "zmij")]
+{
+    use axutils::FloatFormat;
 
-let _format = FloatFormat::Zmij;
+    let _format = FloatFormat::Zmij;
+}
 ```
 
 ### `FloatBuffer`
@@ -227,10 +240,13 @@ let _format = FloatFormat::Zmij;
 按显式后端创建 buffer。
 
 ```rust
-use axutils::{ConvertUtils, FloatBuffer, FloatFormat};
+#[cfg(feature = "ryu")]
+{
+    use axutils::{ConvertUtils, FloatBuffer, FloatFormat};
 
-let mut buffer = FloatBuffer::new(FloatFormat::Ryu);
-assert_eq!(ConvertUtils::float_to_str(1.5_f64, &mut buffer), "1.5");
+    let mut buffer = FloatBuffer::new(FloatFormat::Ryu);
+    assert_eq!(ConvertUtils::float_to_str(1.5_f64, &mut buffer), "1.5");
+}
 ```
 
 ### `FloatValue`
@@ -251,10 +267,13 @@ pub trait FloatValue: sealed::FloatSealed + FromStr<Err = ParseFloatError> {
 使用 `buffer` 构造时固定的后端格式化浮点数，并返回借用结果。
 
 ```rust
-use axutils::{FloatBuffer, FloatFormat, FloatValue};
+#[cfg(feature = "ryu")]
+{
+    use axutils::{FloatBuffer, FloatFormat, FloatValue};
 
-let mut buffer = FloatBuffer::new(FloatFormat::Ryu);
-assert_eq!(<f64 as FloatValue>::format_into(2.5, &mut buffer), "2.5");
+    let mut buffer = FloatBuffer::new(FloatFormat::Ryu);
+    assert_eq!(<f64 as FloatValue>::format_into(2.5, &mut buffer), "2.5");
+}
 ```
 
 ### `ConvertUtils::float_to_str<'a, T>(value, buffer) -> &'a str`
@@ -266,10 +285,13 @@ assert_eq!(<f64 as FloatValue>::format_into(2.5, &mut buffer), "2.5");
 - **特殊值**：使用选定后端 `Buffer::format` 的 `NaN`、无穷和负零语义。
 
 ```rust
-use axutils::{ConvertUtils, FloatBuffer, FloatFormat};
+#[cfg(feature = "ryu")]
+{
+    use axutils::{ConvertUtils, FloatBuffer, FloatFormat};
 
-let mut buffer = FloatBuffer::new(FloatFormat::Ryu);
-assert_eq!(ConvertUtils::float_to_str(-0.0_f64, &mut buffer), "-0.0");
+    let mut buffer = FloatBuffer::new(FloatFormat::Ryu);
+    assert_eq!(ConvertUtils::float_to_str(-0.0_f64, &mut buffer), "-0.0");
+}
 ```
 
 ### `ConvertUtils::append_float<T>(output, value, format)`
@@ -280,11 +302,14 @@ assert_eq!(ConvertUtils::float_to_str(-0.0_f64, &mut buffer), "-0.0");
 - **分配语义**：使用局部后端 buffer，不创建中间 `String`；`output` 容量不足时允许自身扩容。
 
 ```rust
-use axutils::{ConvertUtils, FloatFormat};
+#[cfg(feature = "ryu")]
+{
+    use axutils::{ConvertUtils, FloatFormat};
 
-let mut output = String::from("value=");
-ConvertUtils::append_float(&mut output, 1.25_f64, FloatFormat::Ryu);
-assert_eq!(output, "value=1.25");
+    let mut output = String::from("value=");
+    ConvertUtils::append_float(&mut output, 1.25_f64, FloatFormat::Ryu);
+    assert_eq!(output, "value=1.25");
+}
 ```
 
 ### `ConvertUtils::float_to_string<T>(value, format) -> String`
@@ -295,10 +320,13 @@ assert_eq!(output, "value=1.25");
 - **分配语义**：承担拥有型 `String` 的分配和复制；不依赖调用方 buffer。
 
 ```rust
-use axutils::{ConvertUtils, FloatFormat};
+#[cfg(feature = "ryu")]
+{
+    use axutils::{ConvertUtils, FloatFormat};
 
-let text = ConvertUtils::float_to_string(1.5_f64, FloatFormat::Ryu);
-assert_eq!(text, "1.5");
+    let text = ConvertUtils::float_to_string(1.5_f64, FloatFormat::Ryu);
+    assert_eq!(text, "1.5");
+}
 ```
 
 ### `ConvertUtils::string_to_float<T>(input) -> Result<T, ParseFloatError>`

@@ -46,6 +46,7 @@
 //! ```toml
 //! [dependencies]
 //! axutils = { version = "0.1", features = ["serde", "minijinja"] }
+//! serde = { version = "1", features = ["derive"] }
 //! ```
 //!
 //! `TimeUtils` 的日期格式化能力分别由 `chrono`、`time` 和 `jiff` feature 提供。三个
@@ -59,14 +60,16 @@
 //! JSON 与自实现 `.env`（dotenv）读取；YAML、TOML、INI 分别需要额外启用
 //! `serde-saphyr`、`toml`、`rust-ini` feature。每种格式都提供无类型 `ConfigValue`（点号
 //! 路径访问）与有类型 `serde::Deserialize` 两条读取路径；文件大小上限统一，JSON/TOML/YAML/INI
-//! 的无类型路径以及 YAML/INI 的有类型路径使用配置的嵌套深度上限，JSON/TOML 有类型路径使用
-//! 各自后端的递归保护；错误不回显配置文件内容：
+//! 的无类型路径以及 YAML/INI 的有类型路径使用配置的嵌套深度上限；JSON 无类型路径关闭
+//! serde_json 较小的默认递归限制，严格使用 loader 的 1..=256 预算；JSON/TOML 有类型路径
+//! 使用各自后端的递归保护；错误不回显配置文件内容。
 //! 同时启用 `tokio` feature 后还可使用六个异步文件入口；调用方必须自行提供 Tokio runtime，
 //! crate 不创建 runtime 或调用 `block_on`，解析阶段仍在当前异步任务中执行。
 //!
 //! ```toml
 //! [dependencies]
 //! axutils = { version = "0.1", features = ["serde", "serde-saphyr", "toml", "rust-ini"] }
+//! serde = { version = "1", features = ["derive"] }
 //! ```
 //!
 //! `CryptoUtils` 的十六进制编解码（`hex_encode`/`hex_encode_upper`/`hex_decode`）与
@@ -134,6 +137,7 @@
 //! ```toml
 //! [dependencies]
 //! axutils = { version = "0.1", features = ["jwt"] }
+//! serde = { version = "1", features = ["derive"] }
 //! ```
 
 //! HTTP 能力需要显式启用 `http` feature；它提供关闭代理、重定向、压缩和隐式重试的
@@ -148,16 +152,17 @@
 //! ```toml
 //! [dependencies]
 //! axutils = { version = "0.1", features = ["http"] }
+//! ```
 //!
 //! JSON/query/字节快捷方法需要：
 //!
-//! ~~~toml
+//! ```toml
 //! [dependencies]
 //! axutils = { version = "0.1", features = ["http", "serde"] }
-//! ~~~
+//! serde = { version = "1", features = ["derive"] }
+//! ```
 //!
 //! # 异步 HTTP 改为 features = ["http", "tokio"]。
-//! ```
 
 //! `tracing` feature 只让库内安全的 I/O 和生命周期边界发出结构化事件，不自动安装
 //! subscriber。`logging` feature 额外提供 `LogUtils`：显式安装一次无 ANSI 的同步 formatter，

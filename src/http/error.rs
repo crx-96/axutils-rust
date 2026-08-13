@@ -4,6 +4,7 @@ use std::fmt;
 
 /// 可归类的传输层错误类型。
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[non_exhaustive]
 pub enum HttpTransportErrorKind {
     /// DNS、连接建立或连接复用失败。
     Connection,
@@ -23,6 +24,7 @@ pub enum HttpTransportErrorKind {
 /// 复制到日志和共享的 single-flight 结果中。需要诊断底层库时，应在应用边界自行记录
 /// 受控的上下文，而不要把敏感请求内容放入错误消息。
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[non_exhaustive]
 pub enum HttpError {
     /// 配置字段无效。
     InvalidConfig { field: &'static str },
@@ -56,7 +58,10 @@ pub enum HttpError {
         kind: HttpTransportErrorKind,
         /// 已使用的网络尝试次数。
         attempts: u32,
-        /// 是否已经耗尽重试预算。
+        /// 是否已经达到 `RetryPolicy::max_retries()` 总尝试次数。
+        ///
+        /// 不可重试的方法、提前到达请求 deadline 或单次等待超时本身不会把该字段置为
+        /// `true`，除非当时的尝试次数已经达到预算。
         exhausted: bool,
     },
     /// 异步入口需要在 Tokio runtime 中调用。

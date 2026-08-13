@@ -51,6 +51,7 @@
 ```toml
 [dependencies]
 axutils = { version = "0.1", features = ["serde"] }
+serde = { version = "1", features = ["derive"] }
 ```
 
 所有格式和异步入口：
@@ -58,6 +59,7 @@ axutils = { version = "0.1", features = ["serde"] }
 ```toml
 [dependencies]
 axutils = { version = "0.1", features = ["serde", "tokio", "serde-saphyr", "toml", "rust-ini"] }
+serde = { version = "1", features = ["derive"] }
 tokio = { version = "1.53.1", features = ["macros", "rt-multi-thread"] }
 ```
 
@@ -239,7 +241,12 @@ assert_eq!(config.port, 8080);
 std::fs::remove_file(path).ok();
 ```
 
-JSON/TOML 的有类型递归保护由对应后端提供；YAML/INI 的有类型路径使用 loader 深度上限。
+JSON 无类型解析使用 loader 的 `max_depth`（默认 64，允许 1–256），不会被 serde_json 的较小
+默认递归限制提前截断；JSON/TOML 的有类型递归保护由对应后端提供，YAML/INI 的有类型路径使用
+loader 深度上限。有类型 JSON 为了在交给目标类型前稳定拒绝任意对象中的重复键，会先做一遍
+完整的重复键扫描，再由 serde_json 做第二遍有类型反序列化；文件读取的 `max_bytes` 会限制
+两遍输入的大小，但这会带来接近两倍的解析工作。`parse`/`ConfigUtils::parse` 处理内存文本时
+不做文件大小校验，调用方应自行限制输入来源和长度。
 
 ### `async ConfigLoader::load_async<T: DeserializeOwned>(&self, path: impl AsRef<Path>) -> Result<T, ConfigError>`
 
@@ -739,8 +746,8 @@ assert!(config.enabled);
 assert_eq!(config.port, 8080);
 ```
 
-无类型与有类型 JSON 都拒绝任意嵌套对象中的重复键；非法语法、无类型路径超过深度或整数超出
-`i64` 等情况会返回对应错误。有类型 JSON 的递归深度由后端自身保护。
+无类型与有类型 JSON 都拒绝任意嵌套对象中的重复键；非法语法、无类型路径超过配置的
+`max_depth` 或整数超出 `i64` 等情况会返回对应错误。有类型 JSON 的递归深度由后端自身保护。
 
 ### `.env`（`serde`）
 
@@ -876,7 +883,9 @@ assert_eq!(description, "json");
 文件读取统一使用 1 KiB–16 MiB 的可配置上限（默认 1 MiB），通过 `take(max_bytes + 1)` 检测
 超限；`.env` 解析在每次追加普通字符或插值内容前检查同一上限，所有解析后 key/value 的累计
 字节数也不能超过该上限，避免短输入通过重复插值产生指数级内存占用。无类型
-YAML/JSON/TOML/INI 及 YAML/INI 有类型读取受嵌套深度限制，默认 64、允许 1–256。
+YAML/JSON/TOML/INI 及 YAML/INI 有类型读取受嵌套深度限制，默认 64、允许 1–256；
+JSON 有类型读取使用 serde_json 自身的递归保护，并额外进行一次重复键预扫描；JSON 无类型
+读取使用 loader 的显式预算。文件上限约束每次解析输入，内存解析不自动增加大小上限。
 每个异步并发读取最多约占用 `max_bytes + 1` 字节独立缓冲区，crate 不提供全局并发或总内存
 配额；调用方应限制路径来源、任务数、文件总量、解析调度和日志内容。解析阶段仍在当前 Tokio
 任务同步执行，如需 CPU 隔离由调用方自行设计 `spawn_blocking` 和并发上限。

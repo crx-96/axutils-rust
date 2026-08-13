@@ -18,9 +18,25 @@ pub enum TimeZoneOffsetError {
 
 impl TimeZoneOffset {
     /// UTC（零偏移）。
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use axutils::TimeZoneOffset;
+    ///
+    /// assert_eq!(TimeZoneOffset::UTC.as_seconds(), 0);
+    /// ```
     pub const UTC: Self = Self(0);
 
     /// 默认固定偏移（`+08:00`）。
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use axutils::TimeZoneOffset;
+    ///
+    /// assert_eq!(TimeZoneOffset::DEFAULT.as_seconds(), 28_800);
+    /// ```
     pub const DEFAULT: Self = Self(8 * 3_600);
 
     /// 从整小时构造固定偏移。

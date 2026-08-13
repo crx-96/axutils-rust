@@ -114,6 +114,8 @@ impl JwtSigningKey {
     /// 从 RSA PKCS#1 私钥 DER 构造签名 key。
     ///
     /// 构造器只执行非空和大小检查；DER 的结构错误会在 encode 时返回 key-format 错误。
+    /// 输入语义仍固定为 RSA PKCS#1 私钥 DER；opaque bytes 只表示延迟结构校验，不扩大为
+    /// PKCS#8、SPKI 或其他未验证 DER 格式的支持范围。
     ///
     /// # Examples
     ///
@@ -360,6 +362,8 @@ impl JwtVerificationKey {
     /// 从 RSA PKCS#1 公钥 DER 构造验证 key。
     ///
     /// 构造器只执行非空和大小检查；DER 结构和角色错误延迟到 decode 阶段。
+    /// 输入语义仍固定为 RSA PKCS#1 公钥 DER；opaque bytes 只表示延迟结构校验，不扩大为
+    /// PKCS#8、SPKI 或其他未验证 DER 格式的支持范围。
     ///
     /// # Examples
     ///

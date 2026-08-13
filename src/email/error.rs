@@ -93,14 +93,7 @@ impl EmailError {
         } else if error.is_transport_shutdown() {
             EmailTransportErrorKind::Shutdown
         } else if error.is_response() {
-            if matches!(
-                error.status().map(u16::from),
-                Some(432 | 454 | 530 | 534 | 535)
-            ) {
-                EmailTransportErrorKind::Authentication
-            } else {
-                EmailTransportErrorKind::SmtpResponse
-            }
+            classify_response_status(error.status().map(u16::from))
         } else if error.is_client() {
             EmailTransportErrorKind::Client
         } else if is_connection_error(error) {
@@ -110,6 +103,14 @@ impl EmailError {
         };
 
         Self::Transport(kind)
+    }
+}
+
+fn classify_response_status(status: Option<u16>) -> EmailTransportErrorKind {
+    if matches!(status, Some(432 | 454 | 530 | 534 | 535)) {
+        EmailTransportErrorKind::Authentication
+    } else {
+        EmailTransportErrorKind::SmtpResponse
     }
 }
 
@@ -187,7 +188,27 @@ impl std::error::Error for EmailError {}
 
 #[cfg(test)]
 mod tests {
-    use super::{EmailError, EmailTransportErrorKind};
+    use super::{classify_response_status, EmailError, EmailTransportErrorKind};
+
+    #[test]
+    fn classifies_authentication_response_codes_without_network() {
+        for status in [432, 454, 530, 534, 535] {
+            assert_eq!(
+                classify_response_status(Some(status)),
+                EmailTransportErrorKind::Authentication
+            );
+        }
+        for status in [421, 450, 550, 554] {
+            assert_eq!(
+                classify_response_status(Some(status)),
+                EmailTransportErrorKind::SmtpResponse
+            );
+        }
+        assert_eq!(
+            classify_response_status(None),
+            EmailTransportErrorKind::SmtpResponse
+        );
+    }
 
     #[test]
     fn error_output_does_not_include_sensitive_values() {

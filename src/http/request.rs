@@ -187,11 +187,29 @@ impl HttpRequest {
     }
 
     /// 返回请求方法。
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use axutils::{HttpMethod, HttpRequest};
+    ///
+    /// let request = HttpRequest::new(HttpMethod::Get, "/health").unwrap();
+    /// assert_eq!(request.method(), &HttpMethod::Get);
+    /// ```
     pub fn method(&self) -> &HttpMethod {
         &self.method
     }
 
     /// 返回原始 URL 或相对路径。
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use axutils::{HttpMethod, HttpRequest};
+    ///
+    /// let request = HttpRequest::new(HttpMethod::Get, "/health?full=1").unwrap();
+    /// assert_eq!(request.url(), "/health?full=1");
+    /// ```
     pub fn url(&self) -> &str {
         match &self.target {
             RequestTarget::Absolute(url) => url.as_str(),
@@ -200,11 +218,35 @@ impl HttpRequest {
     }
 
     /// 返回请求 Header。
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use axutils::{HttpMethod, HttpRequest};
+    ///
+    /// let request = HttpRequest::new(HttpMethod::Get, "/health")
+    ///     .unwrap()
+    ///     .with_header("x-request-id", "demo")
+    ///     .unwrap();
+    /// assert_eq!(request.headers().get("x-request-id"), Some(&b"demo"[..]));
+    /// ```
     pub fn headers(&self) -> &HttpHeaders {
         &self.headers
     }
 
     /// 返回请求体。
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use axutils::{HttpMethod, HttpRequest};
+    ///
+    /// let request = HttpRequest::new(HttpMethod::Post, "/events")
+    ///     .unwrap()
+    ///     .with_body(b"payload".to_vec())
+    ///     .unwrap();
+    /// assert_eq!(request.body(), Some(&b"payload"[..]));
+    /// ```
     pub fn body(&self) -> Option<&[u8]> {
         self.body.as_deref()
     }
@@ -214,16 +256,51 @@ impl HttpRequest {
     }
 
     /// 返回请求级时间预算。
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use axutils::{HttpMethod, HttpRequest};
+    /// use std::time::Duration;
+    ///
+    /// let request = HttpRequest::new(HttpMethod::Get, "/health")
+    ///     .unwrap()
+    ///     .with_timeout(Duration::from_secs(2))
+    ///     .unwrap();
+    /// assert_eq!(request.timeout(), Some(Duration::from_secs(2)));
+    /// ```
     pub fn timeout(&self) -> Option<Duration> {
         self.timeout
     }
 
     /// 返回请求级重试策略。
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use axutils::{HttpMethod, HttpRequest, RetryPolicy};
+    ///
+    /// let request = HttpRequest::new(HttpMethod::Get, "/health")
+    ///     .unwrap()
+    ///     .with_retry_policy(RetryPolicy::new());
+    /// assert!(request.retry_policy().is_some());
+    /// ```
     pub fn retry_policy(&self) -> Option<&RetryPolicy> {
         self.retry_policy.as_ref()
     }
 
     /// 返回请求级去重策略。
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use axutils::{DeduplicationPolicy, HttpMethod, HttpRequest};
+    ///
+    /// let request = HttpRequest::new(HttpMethod::Get, "/health")
+    ///     .unwrap()
+    ///     .with_deduplication_policy(DeduplicationPolicy::in_flight(8).unwrap());
+    /// assert!(request.deduplication_policy().is_some());
+    /// ```
     pub fn deduplication_policy(&self) -> Option<&DeduplicationPolicy> {
         self.deduplication_policy.as_ref()
     }

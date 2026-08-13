@@ -3,7 +3,7 @@
 use std::io::ErrorKind;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -41,7 +41,7 @@ fn spawn_server(responses: Vec<TestResponse>) -> (String, thread::JoinHandle<()>
                     Err(error) => panic!("accept test request: {error}"),
                 }
             };
-            read_request(&mut stream);
+            let _ = read_request(&mut stream);
             if !response.delay.is_zero() {
                 thread::sleep(response.delay);
             }
@@ -50,19 +50,15 @@ fn spawn_server(responses: Vec<TestResponse>) -> (String, thread::JoinHandle<()>
                 response.status,
                 response.body.len()
             );
-            stream
-                .write_all(header.as_bytes())
-                .expect("write response headers");
-            stream
-                .write_all(response.body)
-                .expect("write response body");
-            stream.flush().expect("flush response");
+            let _ = stream.write_all(header.as_bytes());
+            let _ = stream.write_all(response.body);
+            let _ = stream.flush();
         }
     });
     (address, handle)
 }
 
-fn read_request(stream: &mut TcpStream) {
+fn read_request(stream: &mut TcpStream) -> Vec<u8> {
     stream
         .set_read_timeout(Some(Duration::from_secs(2)))
         .expect("set server read timeout");
@@ -100,6 +96,45 @@ fn read_request(stream: &mut TcpStream) {
         }
         remaining -= read;
     }
+    request
+}
+
+fn spawn_observing_server(
+    response: TestResponse,
+) -> (String, Arc<Mutex<Vec<u8>>>, thread::JoinHandle<()>) {
+    // Bind the wildcard loopback-compatible IPv4 socket so the test can use two different
+    // loopback host strings without depending on platform-specific `localhost` resolution.
+    let listener = TcpListener::bind(("0.0.0.0", 0)).expect("bind observing server");
+    listener
+        .set_nonblocking(true)
+        .expect("set observing listener nonblocking");
+    let port = listener.local_addr().expect("server address").port();
+    let address = format!("http://127.0.0.1:{port}");
+    let observed = Arc::new(Mutex::new(Vec::new()));
+    let observed_for_thread = Arc::clone(&observed);
+    let handle = thread::spawn(move || {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let mut stream = loop {
+            match listener.accept() {
+                Ok((stream, _)) => break stream,
+                Err(error) if error.kind() == ErrorKind::WouldBlock => {
+                    assert!(Instant::now() < deadline, "observing server timed out");
+                    thread::sleep(Duration::from_millis(5));
+                }
+                Err(error) => panic!("accept observing request: {error}"),
+            }
+        };
+        let request = read_request(&mut stream);
+        *observed_for_thread.lock().expect("observed request lock") = request;
+        let header = format!(
+            "HTTP/1.1 {} Test\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+            response.status,
+            response.body.len()
+        );
+        let _ = stream.write_all(header.as_bytes());
+        let _ = stream.write_all(response.body);
+    });
+    (address, observed, handle)
 }
 
 fn client(base_url: &str) -> HttpClient {
@@ -206,6 +241,80 @@ fn one_total_attempt_disables_automatic_retries() {
 }
 
 #[test]
+fn transport_error_reports_retry_budget_separately_from_method_retryability() {
+    let listener = TcpListener::bind(("127.0.0.1", 0)).expect("reserve closed port");
+    let address = listener.local_addr().expect("closed port address");
+    drop(listener);
+
+    let retry = RetryPolicy::new()
+        .with_max_retries(3)
+        .expect("retry count")
+        .with_backoff(Duration::from_millis(1), Duration::from_millis(2))
+        .expect("backoff");
+    let config = HttpConfig::builder()
+        .base_url(format!("http://{address}/"))
+        .expect("base URL")
+        .request_timeout(Duration::from_secs(1))
+        .expect("timeout")
+        .retry_policy(retry)
+        .build()
+        .expect("config");
+    let error = HttpClient::new(config)
+        .expect("client")
+        .execute(
+            HttpRequest::new(HttpMethod::Post, "/closed")
+                .expect("request")
+                .with_body(b"payload".to_vec())
+                .expect("body"),
+        )
+        .expect_err("closed port should produce transport error");
+
+    assert!(matches!(
+        error,
+        HttpError::Transport {
+            attempts: 1,
+            exhausted: false,
+            ..
+        }
+    ));
+}
+
+#[test]
+fn retry_wait_timeout_does_not_claim_retry_budget_is_exhausted() {
+    let (address, server) = spawn_server(vec![TestResponse {
+        status: 503,
+        body: b"temporary",
+        delay: Duration::ZERO,
+    }]);
+    let retry = RetryPolicy::new()
+        .with_max_retries(3)
+        .expect("retry count")
+        .with_backoff(Duration::from_millis(200), Duration::from_millis(200))
+        .expect("backoff");
+    let config = HttpConfig::builder()
+        .base_url(&address)
+        .expect("base URL")
+        .request_timeout(Duration::from_millis(50))
+        .expect("timeout")
+        .retry_policy(retry)
+        .build()
+        .expect("config");
+    let error = HttpClient::new(config)
+        .expect("client")
+        .execute(HttpRequest::new(HttpMethod::Get, "/deadline").expect("request"))
+        .expect_err("retry delay should exceed deadline");
+    assert!(matches!(
+        error,
+        HttpError::Transport {
+            kind: axutils::HttpTransportErrorKind::Timeout,
+            attempts: 1,
+            exhausted: false,
+        }
+    ));
+    server.join().expect("server thread");
+}
+
+#[test]
 fn absolute_request_url_takes_precedence_over_configured_base_url() {
     let (address, server) = spawn_server(vec![TestResponse {
         status: 200,
@@ -303,6 +412,48 @@ fn response_limits_and_header_validation_are_enforced() {
 }
 
 #[test]
+fn cross_origin_requests_filter_sensitive_defaults_at_the_network_boundary() {
+    let (address, observed, server) = spawn_observing_server(TestResponse {
+        status: 200,
+        body: b"ok",
+        delay: Duration::ZERO,
+    });
+    let mut headers = HttpHeaders::new();
+    headers
+        .set("Authorization", "Bearer should-not-cross-origin")
+        .expect("authorization header");
+    headers
+        .set("Cookie", "session=should-not-cross-origin")
+        .expect("cookie header");
+    headers.set("X-Visible", "kept").expect("ordinary header");
+    let config = HttpConfig::builder()
+        .base_url(&address)
+        .expect("base URL")
+        .default_headers(headers)
+        .build()
+        .expect("config");
+    let client = HttpClient::new(config).expect("client");
+    let port = address.rsplit(':').next().expect("port");
+    let response = client
+        .execute(
+            HttpRequest::new(
+                HttpMethod::Get,
+                format!("http://127.0.0.2:{port}/cross-origin"),
+            )
+            .expect("request"),
+        )
+        .expect("cross-origin response");
+    assert_eq!(response.body(), b"ok");
+    server.join().expect("observing server");
+
+    let observed = observed.lock().expect("observed request lock").clone();
+    let request = String::from_utf8_lossy(&observed);
+    assert!(!request.to_ascii_lowercase().contains("authorization:"));
+    assert!(!request.to_ascii_lowercase().contains("cookie:"));
+    assert!(request.to_ascii_lowercase().contains("x-visible: kept"));
+}
+
+#[test]
 fn sync_single_flight_merges_concurrent_safe_requests() {
     let (address, server) = spawn_server(vec![TestResponse {
         status: 200,
@@ -323,6 +474,45 @@ fn sync_single_flight_merges_concurrent_safe_requests() {
         let response = worker.join().expect("worker");
         assert_eq!(response.body(), b"shared");
     }
+    server.join().expect("server thread");
+}
+
+#[test]
+fn in_flight_capacity_bypasses_new_keys_without_blocking_existing_request() {
+    let (address, server) = spawn_server(vec![
+        TestResponse {
+            status: 200,
+            body: b"first",
+            delay: Duration::from_millis(100),
+        },
+        TestResponse {
+            status: 200,
+            body: b"second",
+            delay: Duration::ZERO,
+        },
+    ]);
+    let policy = DeduplicationPolicy::in_flight(1).expect("in-flight policy");
+    let config = HttpConfig::builder()
+        .base_url(&address)
+        .expect("base URL")
+        .deduplication_policy(policy)
+        .build()
+        .expect("config");
+    let client = Arc::new(HttpClient::new(config).expect("client"));
+    let first_client = Arc::clone(&client);
+    let first = thread::spawn(move || {
+        first_client
+            .execute(HttpRequest::new(HttpMethod::Get, "/first").expect("request"))
+            .expect("first response")
+    });
+    thread::sleep(Duration::from_millis(20));
+    let second = client
+        .execute(HttpRequest::new(HttpMethod::Get, "/second").expect("request"))
+        .expect("capacity-bypassed response");
+    let first = first.join().expect("first worker");
+    assert!(matches!(first.body(), b"first" | b"second"));
+    assert!(matches!(second.body(), b"first" | b"second"));
+    assert_ne!(first.body(), second.body());
     server.join().expect("server thread");
 }
 
@@ -436,6 +626,49 @@ fn completed_cache_requires_explicit_ttl_and_expires() {
     server.join().expect("server thread");
 }
 
+#[test]
+fn completed_cache_evicts_by_entry_and_body_budgets() {
+    let (address, server) = spawn_server(vec![
+        TestResponse {
+            status: 200,
+            body: b"one",
+            delay: Duration::ZERO,
+        },
+        TestResponse {
+            status: 200,
+            body: b"two",
+            delay: Duration::ZERO,
+        },
+        TestResponse {
+            status: 200,
+            body: b"three",
+            delay: Duration::ZERO,
+        },
+    ]);
+    let policy = DeduplicationPolicy::with_completed_ttl(Duration::from_secs(30), 8, 2, 4)
+        .expect("cache policy");
+    let config = HttpConfig::builder()
+        .base_url(&address)
+        .expect("base URL")
+        .deduplication_policy(policy)
+        .build()
+        .expect("config");
+    let client = HttpClient::new(config).expect("client");
+    let first = client
+        .execute(HttpRequest::new(HttpMethod::Get, "/first").expect("request"))
+        .expect("first response");
+    let second = client
+        .execute(HttpRequest::new(HttpMethod::Get, "/second").expect("request"))
+        .expect("second response");
+    let first_again = client
+        .execute(HttpRequest::new(HttpMethod::Get, "/first").expect("request"))
+        .expect("evicted first response");
+    assert_eq!(first.body(), b"one");
+    assert_eq!(second.body(), b"two");
+    assert_eq!(first_again.body(), b"three");
+    server.join().expect("server thread");
+}
+
 #[cfg(feature = "tokio")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn sync_entry_rejects_tokio_runtime_and_async_entry_works() {
@@ -509,5 +742,79 @@ async fn async_single_flight_merges_safe_requests() {
     for task in tasks {
         assert_eq!(task.await.expect("task").body(), b"async-shared");
     }
+    server.join().expect("server thread");
+}
+
+#[cfg(feature = "tokio")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn follower_timeout_does_not_cancel_a_longer_leader() {
+    let (address, server) = spawn_server(vec![TestResponse {
+        status: 200,
+        body: b"shared-after-follower-timeout",
+        delay: Duration::from_millis(150),
+    }]);
+    let client = Arc::new(client(&address));
+    let leader_client = Arc::clone(&client);
+    let leader = tokio::spawn(async move {
+        leader_client
+            .execute_async(
+                HttpRequest::new(HttpMethod::Get, "/follower-timeout")
+                    .expect("request")
+                    .with_timeout(Duration::from_millis(500))
+                    .expect("leader timeout"),
+            )
+            .await
+    });
+    tokio::time::sleep(Duration::from_millis(20)).await;
+    let follower = client
+        .execute_async(
+            HttpRequest::new(HttpMethod::Get, "/follower-timeout")
+                .expect("request")
+                .with_timeout(Duration::from_millis(30))
+                .expect("follower timeout"),
+        )
+        .await
+        .expect_err("follower should time out independently");
+    assert_eq!(follower, HttpError::CoalescedWaitTimeout);
+    let leader_response = leader.await.expect("leader task").expect("leader response");
+    assert_eq!(leader_response.body(), b"shared-after-follower-timeout");
+    server.join().expect("server thread");
+}
+
+#[cfg(feature = "tokio")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn cancelled_leader_publishes_coalesced_cancellation_to_follower() {
+    let (address, server) = spawn_server(vec![TestResponse {
+        status: 200,
+        body: b"leader-was-cancelled",
+        delay: Duration::from_millis(200),
+    }]);
+    let client = Arc::new(client(&address));
+    let leader_client = Arc::clone(&client);
+    let leader = tokio::spawn(async move {
+        leader_client
+            .execute_async(HttpRequest::new(HttpMethod::Get, "/leader-cancel").expect("request"))
+            .await
+    });
+    tokio::time::sleep(Duration::from_millis(20)).await;
+    let follower_client = Arc::clone(&client);
+    let follower = tokio::spawn(async move {
+        follower_client
+            .execute_async(HttpRequest::new(HttpMethod::Get, "/leader-cancel").expect("request"))
+            .await
+    });
+    tokio::time::sleep(Duration::from_millis(20)).await;
+    leader.abort();
+    assert!(leader
+        .await
+        .expect_err("leader should be cancelled")
+        .is_cancelled());
+    assert_eq!(
+        follower
+            .await
+            .expect("follower task")
+            .expect_err("follower should receive cancellation"),
+        HttpError::CoalescedRequestCancelled
+    );
     server.join().expect("server thread");
 }

@@ -115,10 +115,17 @@
 
 ### Changed
 
+- `HttpError` 和 `HttpTransportErrorKind` 现在标记为 `#[non_exhaustive]`；这是对下游穷尽匹配
+  的兼容性约束，调用方匹配 HTTP 错误时必须保留 wildcard，以允许后续增加脱敏错误分类。
 - HTTP 配置 builder 的字段均可省略；`HttpConfig::default()` 和空 builder 可以直接构造配置，
   默认提供 30 秒请求总超时、10 秒连接超时和最多 3 次（包括首次请求）网络尝试。未设置
   `base_url` 时，相对 URL 会返回 `HttpError::InvalidUrl`；即使配置了基地址，请求自身的绝对
   HTTP/HTTPS URL 也始终优先。
+- HTTP single-flight key 不再把请求级 timeout 纳入匹配条件；相同请求可以共享 leader 的网络
+  结果，而每个 follower 仍按自己的 timeout 等待，超时只返回 `CoalescedWaitTimeout`，不会取消
+  leader。
+- `HttpError::Transport.exhausted` 现在只在已达到 `RetryPolicy::max_retries()` 总尝试次数时为
+  `true`；不可重试方法、提前到达 deadline 或重试等待超时不会仅因自身原因标记为预算耗尽。
 - `RetryPolicy::with_max_retries`、`RetryPolicy::max_retries` 和
   `HttpRequestOptions::with_max_retries` 的数值语义改为“包括首次请求的最大总网络尝试次数”，
   方法名保持不变以兼容现有调用路径；默认值为 3，设置为 1 表示不自动重试，0 不再是有效值。
@@ -136,6 +143,8 @@
   single-flight 通知和受总时间预算约束的异步退避；crate 仍不创建 runtime 或调用 `block_on`。
 - `serde` feature 追加可选的 `serde_urlencoded 0.7.1`，用于 HTTP 快捷方法的 query 编码；
   `http` 不会自动启用 `serde`，因此不改变仅启用 HTTP 时的公共 API 和依赖边界。
+- `LogConfig::with_directives` 在初始化前规范化逗号和等号两侧空白，并拒绝 directive 内部空白，
+  使带格式空格的 `target = level` 规则按调用方预期生效或返回稳定的 filter 配置错误。
 - `redis` 单 feature 只启用同步连接池与 Cluster 所需的 redis-rs 子 feature；异步
   `cluster-async`、`connection-manager`、`tokio-comp` 子 feature 改由 `tokio` 对 Redis 的弱依赖
   映射在 `redis + tokio` 组合下启用，避免同步用户编译无公共 API 可用的异步依赖。
@@ -147,13 +156,21 @@
 
 ### Fixed
 
+- JSON 无类型解析会关闭 `serde_json` 较小的默认递归限制，严格执行 `ConfigLoader` 的
+  `max_depth` 1–256 预算；超过预算稳定返回 `DepthLimitExceeded`，不再在 128 层处提前落入
+  通用解析错误。JSON 有类型解析仍保留重复键预扫描和后端递归保护。
 - HTTP 配置存在 `base_url` 且请求使用跨 origin 绝对 URL 时，不再继承默认
   `Authorization`、`Cookie` 或 `Set-Cookie`，避免把默认凭据发送到另一个 origin；请求上显式设置
   的敏感 Header 仍按调用方意图发送。
 - `.env` 插值的逐次追加和解析后累计 key/value 现在受 `max_bytes` 限制，超限返回新增的
   `ConfigError::ExpandedValueTooLarge`，避免短配置通过链式重复引用产生指数级 CPU/内存占用。
-- Redis 同步/异步事务遇到已完整读取的普通服务端命令错误时保留健康连接，只在协议、网络、
-  连接、超时或关闭状态下淘汰连接，避免可重复的 `WRONGTYPE` 等错误造成持续重连。
+- Redis 同步/异步事务遇到已完整读取的普通服务端命令错误时保留可复用连接，只在协议、网络、
+  连接、超时或关闭状态下淘汰连接，避免可重复的 `WRONGTYPE` 等错误造成持续重连；异步
+  multiplexed connection 没有主动 liveness probe，未知失效连接可能被下一次事务试用一次后
+  才按传输错误淘汰。
+- SQLx 全局初始化的 OnceLock 竞争输家即使 `close_async` 清理失败，也始终返回
+  `SqlxError::AlreadyInitialized`；启用 `tracing` 时仅记录脱敏的清理错误类别，不用清理错误
+  替换公共竞争结果。
 - 配置无类型 JSON 与有类型 JSON 均拒绝任意嵌套层级的重复对象键；TOML 无类型转换在遇到内部日期时间伪表时先完整消费当前映射，并将同名的合法用户表保留为表，不再因提前返回丢弃同层字段或误判用户数据。
 - HTTP 同步与异步响应读取在追加数据块前检查响应体上限，避免超限数据造成上限之外的瞬时缓冲区扩容。
 - HTTP 完成缓存同时遵守请求侧和响应侧的 `Cache-Control: no-store`/`no-cache` 指令，避免调用方明确禁止缓存的请求被写入完成缓存。

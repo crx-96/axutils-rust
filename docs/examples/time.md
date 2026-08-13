@@ -58,9 +58,13 @@ axutils = "0.1"
 ```toml
 [dependencies]
 axutils = { version = "0.1", features = ["chrono"] }
+chrono = { version = "0.4", default-features = false }
 # 或 features = ["time"]
 # 或 features = ["jiff"]
 ```
+
+选择 `time` 或 `jiff` 时，也要在应用的 `[dependencies]` 中直接声明对应版本的
+`time` 或 `jiff` crate；日期类型会出现在公开方法签名中，不能依赖 axutils 的传递依赖。
 
 多个后端可以同时启用，但调用时使用 `format_*_chrono`、`format_*_time` 或
 `format_*_jiff` 区分具体日期类型；无后缀简写只在恰好一个后端启用时存在。

@@ -122,3 +122,13 @@ pub(crate) fn record_client_init(result: &Result<(), SqlxError>, started: Instan
         ),
     }
 }
+
+pub(crate) fn record_init_cleanup(error: &SqlxError, started: Instant) {
+    ::tracing::warn!(
+        target: "axutils::sqlx",
+        operation = "client_init_cleanup",
+        outcome = "error",
+        error_kind = error_kind(error),
+        duration_ms = super::duration_ms(started),
+    );
+}

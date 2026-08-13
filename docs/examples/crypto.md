@@ -875,7 +875,7 @@ assert_eq!(CryptoUtils::aes_mode().unwrap(), AesMode::CbcPkcs7);
 `aes_decrypt`/`aes_decrypt_with_iv` 首先按上表检查绝对长度下限，不足返回
 `CryptoError::CiphertextTooShort`；CBC 密文部分若不是 16 字节整数倍，或进入实际解密/填充/认证
 校验阶段后失败，一律归为 `CryptoError::Decrypt`（不区分具体原因，避免 padding oracle）。
-跨语言对接：Java 的 `AES/GCM/NoPadding` 对应本模块 `AesMode::Gcm` 的 `_with_iv` 路径（tag 前置
+跨语言对接：Java 的 `AES/GCM/NoPadding` 对应本模块 `AesMode::Gcm` 的 `_with_iv` 路径（tag 追加
 到输出末尾，与 Java 一致），`AES/CBC/PKCS5Padding` 对应 `AesMode::CbcPkcs7` 的 `_with_iv` 路径
 （Java 的 `PKCS5Padding` 在 AES 场景下与 PKCS#7 等价）。
 

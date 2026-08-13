@@ -17,6 +17,7 @@ axutils = { version = "0.1", features = ["http"] }
 ```toml
 [dependencies]
 axutils = { version = "0.1", features = ["http", "serde"] }
+serde = { version = "1", features = ["derive"] }
 ```
 
 异步调用方还需要直接依赖 Tokio 并提供 runtime：
@@ -32,6 +33,7 @@ tokio = { version = "1.53.1", features = ["macros", "rt-multi-thread"] }
 ```toml
 [dependencies]
 axutils = { version = "0.1", features = ["http", "serde", "tokio"] }
+serde = { version = "1", features = ["derive"] }
 tokio = { version = "1.53.1", features = ["macros", "rt-multi-thread"] }
 ```
 
@@ -81,9 +83,12 @@ HTTP 模块可从以下路径访问：
 - 默认请求总时间预算为 30 秒、连接预算为 10 秒、请求体和响应体上限均为 1 MiB。
   `max_retries` 沿用现有方法名，但表示包括首次请求在内的最大总网络尝试次数；默认值为 3，
   `1` 表示禁用自动重试。退避是有限的指数退避，不带随机抖动且受总时间预算约束。
+  显式设置 `connect_timeout` 大于 `request_timeout` 时，`build()` 返回
+  `HttpError::InvalidConfig { field: "connect_timeout" }`。
 - 默认只对无体 `GET`、`HEAD`、`OPTIONS` 做 single-flight。`POST`、`PUT`、`PATCH`、
   `DELETE` 和带体请求只有在请求级显式设置去重策略后才允许合并。leader 取消或异常退出时，
-  follower 收到 `CoalescedRequestCancelled`；follower 自己超时不会取消 leader。
+  follower 收到 `CoalescedRequestCancelled`；follower 使用自己的 timeout 等待共享结果，超时
+  返回 `CoalescedWaitTimeout`，不会取消仍在执行的 leader。
 - 完成缓存必须通过 `DeduplicationPolicy::with_completed_ttl` 显式开启，只缓存满足安全条件的
   2xx 无体 `GET`/`HEAD`；请求带认证、Cookie、Range、条件 Header、`Pragma`，请求或响应的
   `Cache-Control` 含 `no-store`/`no-cache`，或响应带 `Set-Cookie`、`Vary: *` 时不缓存。缓存
@@ -94,8 +99,10 @@ HTTP 模块可从以下路径访问：
 
 ## `HttpError` 和传输错误分类
 
-`HttpError` 是 `Clone + Debug + Eq + PartialEq` 的稳定错误枚举，实现 `Display` 和
-`std::error::Error`，但不提供 `source()` 以避免把第三方错误文本或敏感 URL 带出边界。
+`HttpError` 是 `Clone + Debug + Eq + PartialEq` 的 `#[non_exhaustive]` 错误枚举，实现
+`Display` 和 `std::error::Error`，但不提供 `source()` 以避免把第三方错误文本或敏感 URL 带出
+边界；外部 `match` 必须保留 wildcard。`HttpTransportErrorKind` 同样是 non-exhaustive，按
+当前分类处理时也应保留 wildcard。
 公开变体包括：
 
 - `InvalidConfig`、`InvalidRequest`、`InvalidUrl`：配置或请求结构不合法；字段名是固定的，
@@ -105,7 +112,9 @@ HTTP 模块可从以下路径访问：
 - `RequestBodyTooLarge`、`ResponseTooLarge`、`InvalidUtf8`：大小或文本解码失败。
 - `JsonSerialize`、`QuerySerialize`、`JsonDeserialize`：Serde JSON body、query 或响应解码失败；
   错误不会包含底层 Serde 文本。
-- `Transport { kind, attempts, exhausted }`：网络传输失败；`attempts` 为已发起的网络尝试数。
+- `Transport { kind, attempts, exhausted }`：网络传输失败；`attempts` 为已发起的网络尝试数，
+  `exhausted` 只有达到 `RetryPolicy::max_retries()` 总尝试次数时才为 `true`。不可重试方法、
+  提前到达请求 deadline 或重试等待超时不会仅因自身原因把它标为已耗尽。
 - `RuntimeRequired`、`BlockingInAsyncRuntime`：异步 runtime 缺失或同步入口误入 Tokio runtime。
 - `NotInitialized`、`AlreadyInitialized`：`HttpUtils` 全局入口状态错误。
 - `CoalescedRequestCancelled`、`CoalescedWaitTimeout`：single-flight leader/follower 状态。
@@ -761,6 +770,23 @@ assert_eq!(config.max_response_body_bytes(), 1024 * 1024);
 # fn main() {}
 ```
 
+`build()` 会校验两个时间预算的关系：
+
+```rust
+# #[cfg(feature = "http")]
+# fn main() -> Result<(), axutils::HttpError> {
+let error = axutils::HttpConfig::builder()
+    .request_timeout(std::time::Duration::from_secs(1))?
+    .connect_timeout(std::time::Duration::from_secs(2))
+    .and_then(|builder| builder.build())
+    .unwrap_err();
+assert_eq!(error, axutils::HttpError::InvalidConfig { field: "connect_timeout" });
+# Ok(())
+# }
+# #[cfg(not(feature = "http"))]
+# fn main() {}
+```
+
 ### `HttpConfig::base_url`
 
 ```rust
@@ -1388,6 +1414,9 @@ let _text = response.text()?;
 ```
 
 ### `HttpResponse::attempts`
+
+网络响应的该值是本次请求实际发起的尝试数；完成缓存命中不发起网络请求，返回缓存项时会
+保留缓存项原始记录的尝试数。
 
 ```rust,no_run
 # #[cfg(feature = "http")]

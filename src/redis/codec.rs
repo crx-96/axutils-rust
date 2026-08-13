@@ -1,3 +1,9 @@
+//! Redis MessagePack 编解码。
+//!
+//! `rmp-serde` 的默认反序列化递归预算约为 1024 层；本 crate 不额外开放调整该后端预算。
+//! `RedisConfig::max_value_bytes` 仍限制编码和响应字节数，调用方应避免把不可信的深层对象
+//! 直接作为 MessagePack 值交给 Redis。
+
 use serde::{de::DeserializeOwned, Serialize};
 
 use super::error::RedisError;

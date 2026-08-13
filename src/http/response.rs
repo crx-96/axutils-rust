@@ -26,26 +26,96 @@ impl HttpResponse {
     }
 
     /// 返回 HTTP 状态码。
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # fn main() -> Result<(), axutils::HttpError> {
+    /// let client = axutils::HttpClient::new(axutils::HttpConfig::default())?;
+    /// let response = client.execute(axutils::HttpRequest::new(
+    ///     axutils::HttpMethod::Get,
+    ///     "https://example.com/health",
+    /// )?)?;
+    /// let _status = response.status();
+    /// # Ok(())
+    /// # }
+    /// ```
     pub fn status(&self) -> u16 {
         self.status
     }
 
     /// 返回状态码是否处于 2xx 成功范围。
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # fn main() -> Result<(), axutils::HttpError> {
+    /// let client = axutils::HttpClient::new(axutils::HttpConfig::default())?;
+    /// let response = client.execute(axutils::HttpRequest::new(
+    ///     axutils::HttpMethod::Get,
+    ///     "https://example.com/health",
+    /// )?)?;
+    /// let _is_success = response.is_success();
+    /// # Ok(())
+    /// # }
+    /// ```
     pub fn is_success(&self) -> bool {
         (200..300).contains(&self.status)
     }
 
     /// 返回响应 Header。
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # fn main() -> Result<(), axutils::HttpError> {
+    /// let client = axutils::HttpClient::new(axutils::HttpConfig::default())?;
+    /// let response = client.execute(axutils::HttpRequest::new(
+    ///     axutils::HttpMethod::Get,
+    ///     "https://example.com/health",
+    /// )?)?;
+    /// let _headers = response.headers();
+    /// # Ok(())
+    /// # }
+    /// ```
     pub fn headers(&self) -> &HttpHeaders {
         &self.headers
     }
 
     /// 返回第一个同名响应 Header。
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # fn main() -> Result<(), axutils::HttpError> {
+    /// let client = axutils::HttpClient::new(axutils::HttpConfig::default())?;
+    /// let response = client.execute(axutils::HttpRequest::new(
+    ///     axutils::HttpMethod::Get,
+    ///     "https://example.com/health",
+    /// )?)?;
+    /// let _content_type = response.header("content-type");
+    /// # Ok(())
+    /// # }
+    /// ```
     pub fn header(&self, name: impl AsRef<[u8]>) -> Option<&[u8]> {
         self.headers.get(name)
     }
 
     /// 返回响应体字节。
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # fn main() -> Result<(), axutils::HttpError> {
+    /// let client = axutils::HttpClient::new(axutils::HttpConfig::default())?;
+    /// let response = client.execute(axutils::HttpRequest::new(
+    ///     axutils::HttpMethod::Get,
+    ///     "https://example.com/bytes",
+    /// )?)?;
+    /// let _body: &[u8] = response.body();
+    /// # Ok(())
+    /// # }
+    /// ```
     pub fn body(&self) -> &[u8] {
         &self.body
     }
@@ -76,11 +146,42 @@ impl HttpResponse {
     }
 
     /// 将响应体按严格 UTF-8 解码。
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # fn main() -> Result<(), axutils::HttpError> {
+    /// let client = axutils::HttpClient::new(axutils::HttpConfig::default())?;
+    /// let response = client.execute(axutils::HttpRequest::new(
+    ///     axutils::HttpMethod::Get,
+    ///     "https://example.com/text",
+    /// )?)?;
+    /// let _text = response.text()?;
+    /// # Ok(())
+    /// # }
+    /// ```
     pub fn text(&self) -> Result<&str, HttpError> {
         std::str::from_utf8(&self.body).map_err(|_| HttpError::InvalidUtf8)
     }
 
-    /// 返回实际网络尝试次数。
+    /// 返回记录在响应中的网络尝试次数。
+    ///
+    /// 网络响应会记录本次请求的实际尝试次数；完成缓存命中不会重新发起网络请求，返回的
+    /// 是缓存项连同其原始尝试次数。
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # fn main() -> Result<(), axutils::HttpError> {
+    /// let client = axutils::HttpClient::new(axutils::HttpConfig::default())?;
+    /// let response = client.execute(axutils::HttpRequest::new(
+    ///     axutils::HttpMethod::Get,
+    ///     "https://example.com/health",
+    /// )?)?;
+    /// let _attempts = response.attempts();
+    /// # Ok(())
+    /// # }
+    /// ```
     pub fn attempts(&self) -> u32 {
         self.attempts
     }

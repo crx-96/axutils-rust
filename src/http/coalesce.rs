@@ -18,7 +18,6 @@ pub(crate) struct RequestKey {
     pub(crate) url: String,
     pub(crate) headers: Vec<HeaderEntry>,
     pub(crate) body: Option<Vec<u8>>,
-    pub(crate) timeout: std::time::Duration,
     pub(crate) retry_policy: RetryPolicy,
     pub(crate) deduplication_policy: DeduplicationPolicy,
 }

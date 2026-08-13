@@ -25,7 +25,9 @@ impl SqlxUtils {
     ///
     /// 已初始化时会先返回 [`SqlxError::AlreadyInitialized`]，不会再次连接传入的 URL。连接失败、
     /// 配置失败或 runtime 缺失都不会占用初始化机会；并发初始化中未赢得 `OnceLock` 的 client
-    /// 会在返回前优雅关闭。成功连接会访问数据库并可能产生网络或 SQLite 文件 I/O。
+    /// 会在返回前优雅关闭；清理失败不会改变公开结果，仍返回
+    /// [`SqlxError::AlreadyInitialized`]，并在启用 `tracing` 时记录脱敏的清理错误类别。成功
+    /// 连接会访问数据库并可能产生网络或 SQLite 文件 I/O。
     ///
     /// # Examples
     ///
@@ -45,10 +47,15 @@ impl SqlxUtils {
             match SqlxClient::connect(config).await {
                 Ok(client) => match CLIENT.set(client.clone()) {
                     Ok(()) => Ok(()),
-                    Err(_) => match client.close_async().await {
-                        Ok(()) => Err(SqlxError::AlreadyInitialized),
-                        Err(error) => Err(error),
-                    },
+                    Err(_) => {
+                        let cleanup_result = client.close_async().await;
+                        #[cfg(feature = "tracing")]
+                        if let Err(error) = &cleanup_result {
+                            crate::tracing::sqlx::record_init_cleanup(error, started);
+                        }
+                        let _ = cleanup_result;
+                        Err(SqlxError::AlreadyInitialized)
+                    }
                 },
                 Err(error) => Err(error),
             }

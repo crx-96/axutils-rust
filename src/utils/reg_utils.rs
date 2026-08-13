@@ -353,6 +353,8 @@ mod tests {
     #[test]
     fn rejects_invalid_international_mobile_numbers() {
         let invalid_values = [
+            "+",
+            "+1234567890123456",
             "13812345678",
             "+861381234567",
             "+8612812345678",

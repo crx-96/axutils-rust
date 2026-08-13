@@ -337,6 +337,8 @@ async fn main() -> Result<(), axutils::EmailError> {
 ```
 
 该方法不创建 runtime、不调用 `block_on`；服务端不支持 STARTTLS 时失败，不回退到明文认证。
+`EmailClient` 的异步 transport 首次发送时才初始化，依赖 Tokio 的池清理任务；应在同一个
+仍然存活的 runtime 中创建/首次使用并持续复用实例，不保证跨已结束 runtime 迁移。
 
 ## `EmailUtils` 方法
 

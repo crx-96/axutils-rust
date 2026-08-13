@@ -14,6 +14,10 @@ use super::{
 
 pub(crate) fn parse_value(text: &str, max_depth: usize) -> Result<ConfigValue, ConfigError> {
     let mut deserializer = serde_json::Deserializer::from_str(text);
+    // `ConfigValueSeed` applies the crate's explicit 1..=256 depth budget and maps its
+    // marker to `ConfigError::DepthLimitExceeded`; do not let serde_json's smaller default
+    // recursion limit preempt that stable error contract.
+    deserializer.disable_recursion_limit();
     let value = ConfigValueSeed::root(max_depth)
         .deserialize(&mut deserializer)
         .map_err(|error| map_value_error(&error, max_depth))?;
@@ -24,6 +28,10 @@ pub(crate) fn parse_value(text: &str, max_depth: usize) -> Result<ConfigValue, C
 }
 
 pub(crate) fn parse<T: DeserializeOwned>(text: &str) -> Result<T, ConfigError> {
+    // Typed JSON intentionally uses two bounded passes: the first preserves the crate's
+    // duplicate-key error contract, and the second lets serde_json deserialize into `T`.
+    // File callers are bounded by the loader's max-bytes check; in-memory callers still own
+    // the size of `text`.
     reject_duplicate_keys(text)?;
     serde_json::from_str(text).map_err(|error| map_parse_error(&error))
 }
@@ -208,6 +216,20 @@ mod tests {
             ConfigError::DepthLimitExceeded { limit: 1 }
         ));
         assert!(parse_value(nested, 2).is_ok());
+    }
+
+    #[test]
+    fn untyped_json_uses_loader_depth_above_serde_default_limit() {
+        let mut text = String::from("null");
+        for _ in 0..129 {
+            text = format!(r#"{{"nested":{text}}}"#);
+        }
+
+        assert!(parse_value(&text, 256).is_ok());
+        assert!(matches!(
+            parse_value(&text, 128),
+            Err(ConfigError::DepthLimitExceeded { limit: 128 })
+        ));
     }
 
     #[test]

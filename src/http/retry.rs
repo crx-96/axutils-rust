@@ -98,11 +98,31 @@ impl RetryPolicy {
     }
 
     /// 返回初始退避时间。
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use axutils::RetryPolicy;
+    /// use std::time::Duration;
+    ///
+    /// let policy = RetryPolicy::new();
+    /// assert_eq!(policy.base_delay(), Duration::from_millis(100));
+    /// ```
     pub fn base_delay(&self) -> Duration {
         self.base_delay
     }
 
     /// 返回最大退避时间。
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use axutils::RetryPolicy;
+    /// use std::time::Duration;
+    ///
+    /// let policy = RetryPolicy::new();
+    /// assert_eq!(policy.max_delay(), Duration::from_secs(2));
+    /// ```
     pub fn max_delay(&self) -> Duration {
         self.max_delay
     }
@@ -113,6 +133,15 @@ impl RetryPolicy {
     }
 
     /// 返回当前配置的重试状态码。
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use axutils::RetryPolicy;
+    ///
+    /// let policy = RetryPolicy::new();
+    /// assert!(policy.retry_statuses().any(|status| *status == 503));
+    /// ```
     pub fn retry_statuses(&self) -> impl Iterator<Item = &u16> {
         self.statuses.iter()
     }

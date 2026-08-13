@@ -285,6 +285,10 @@ crates.io 上的 `phonenumber`；模板、日期和邮件能力使用下列独�
 ```toml
 [features]
 default = []
+itoa = ["dep:itoa"]
+ryu = ["dep:ryu"]
+zmij = ["dep:zmij"]
+uuid = ["dep:uuid"]
 rand = ["dep:rand"]
 regex = ["dep:regex"]
 libphonenumber = ["dep:libphonenumber"]
@@ -295,6 +299,16 @@ chrono = ["dep:chrono"]
 time = ["dep:time"]
 jiff = ["dep:jiff"]
 lettre = ["dep:lettre"]
+http = ["dep:ureq", "dep:reqwest", "dep:url"]
+redis = [
+  "dep:redis",
+  "dep:r2d2",
+  "dep:rand",
+  "dep:serde",
+  "dep:rmp-serde",
+  "redis/r2d2",
+  "redis/cluster",
+]
 tokio = [
   "dep:tokio",
   "lettre?/tokio1-rustls",

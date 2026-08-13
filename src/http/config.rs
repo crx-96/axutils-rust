@@ -47,6 +47,15 @@ impl Default for DeduplicationPolicy {
 
 impl DeduplicationPolicy {
     /// 禁用请求去重。
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use axutils::DeduplicationPolicy;
+    ///
+    /// let policy = DeduplicationPolicy::disabled();
+    /// assert!(!policy.is_enabled());
+    /// ```
     pub fn disabled() -> Self {
         Self {
             mode: DeduplicationMode::Disabled,
@@ -55,6 +64,15 @@ impl DeduplicationPolicy {
     }
 
     /// 创建只合并 in-flight 请求的策略。
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use axutils::DeduplicationPolicy;
+    ///
+    /// let policy = DeduplicationPolicy::in_flight(16).unwrap();
+    /// assert_eq!(policy.max_inflight_keys(), 16);
+    /// ```
     pub fn in_flight(max_inflight_keys: usize) -> Result<Self, HttpError> {
         validate_key_limit(max_inflight_keys)?;
         Ok(Self {
@@ -65,6 +83,22 @@ impl DeduplicationPolicy {
     }
 
     /// 创建带完成缓存 TTL 的策略。
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use axutils::DeduplicationPolicy;
+    /// use std::time::Duration;
+    ///
+    /// let policy = DeduplicationPolicy::with_completed_ttl(
+    ///     Duration::from_secs(5),
+    ///     16,
+    ///     8,
+    ///     1024,
+    /// )
+    /// .unwrap();
+    /// assert!(policy.cache_enabled());
+    /// ```
     pub fn with_completed_ttl(
         ttl: Duration,
         max_inflight_keys: usize,
@@ -97,36 +131,127 @@ impl DeduplicationPolicy {
     }
 
     /// 返回去重模式。
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use axutils::{DeduplicationMode, DeduplicationPolicy};
+    ///
+    /// let policy = DeduplicationPolicy::disabled();
+    /// assert_eq!(policy.mode(), DeduplicationMode::Disabled);
+    /// ```
     pub fn mode(&self) -> DeduplicationMode {
         self.mode
     }
 
     /// 返回完成缓存 TTL；仅 `WithCompletedTtl` 模式生效。
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use axutils::DeduplicationPolicy;
+    /// use std::time::Duration;
+    ///
+    /// let policy = DeduplicationPolicy::with_completed_ttl(
+    ///     Duration::from_secs(5),
+    ///     16,
+    ///     8,
+    ///     1024,
+    /// )
+    /// .unwrap();
+    /// assert_eq!(policy.ttl(), Duration::from_secs(5));
+    /// ```
     pub fn ttl(&self) -> Duration {
         self.ttl
     }
 
     /// 返回允许同时追踪的 in-flight key 数量。
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use axutils::DeduplicationPolicy;
+    ///
+    /// let policy = DeduplicationPolicy::in_flight(16).unwrap();
+    /// assert_eq!(policy.max_inflight_keys(), 16);
+    /// ```
     pub fn max_inflight_keys(&self) -> usize {
         self.max_inflight_keys
     }
 
     /// 返回完成缓存最大条目数。
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use axutils::DeduplicationPolicy;
+    /// use std::time::Duration;
+    ///
+    /// let policy = DeduplicationPolicy::with_completed_ttl(
+    ///     Duration::from_secs(5),
+    ///     16,
+    ///     8,
+    ///     1024,
+    /// )
+    /// .unwrap();
+    /// assert_eq!(policy.max_completed_entries(), 8);
+    /// ```
     pub fn max_completed_entries(&self) -> usize {
         self.max_completed_entries
     }
 
     /// 返回完成缓存允许占用的响应体总字节数。
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use axutils::DeduplicationPolicy;
+    /// use std::time::Duration;
+    ///
+    /// let policy = DeduplicationPolicy::with_completed_ttl(
+    ///     Duration::from_secs(5),
+    ///     16,
+    ///     8,
+    ///     1024,
+    /// )
+    /// .unwrap();
+    /// assert_eq!(policy.max_cached_body_bytes(), 1024);
+    /// ```
     pub fn max_cached_body_bytes(&self) -> usize {
         self.max_cached_body_bytes
     }
 
     /// 返回是否开启请求去重。
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use axutils::DeduplicationPolicy;
+    ///
+    /// assert!(DeduplicationPolicy::in_flight(16).unwrap().is_enabled());
+    /// assert!(!DeduplicationPolicy::disabled().is_enabled());
+    /// ```
     pub fn is_enabled(&self) -> bool {
         self.mode != DeduplicationMode::Disabled
     }
 
     /// 返回是否开启成功响应缓存。
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use axutils::DeduplicationPolicy;
+    /// use std::time::Duration;
+    ///
+    /// let policy = DeduplicationPolicy::with_completed_ttl(
+    ///     Duration::from_secs(5),
+    ///     16,
+    ///     8,
+    ///     1024,
+    /// )
+    /// .unwrap();
+    /// assert!(policy.cache_enabled());
+    /// ```
     pub fn cache_enabled(&self) -> bool {
         self.mode == DeduplicationMode::WithCompletedTtl && !self.ttl.is_zero()
     }
@@ -367,7 +492,8 @@ impl HttpConfigBuilder {
     ///
     /// 所有 builder 字段都是可选的。未设置时使用有限默认值：请求总超时 30 秒、连接
     /// 超时 10 秒、请求/响应体上限 1 MiB、空闲连接超时 60 秒，以及包含首次请求在内的
-    /// 3 次最大网络尝试。未设置 `base_url` 时只允许执行绝对 URL。
+    /// 3 次最大网络尝试。未设置 `base_url` 时只允许执行绝对 URL。若显式设置的
+    /// `connect_timeout` 大于 `request_timeout`，返回 `InvalidConfig { field: "connect_timeout" }`。
     pub fn build(self) -> Result<HttpConfig, HttpError> {
         let request_timeout = self.request_timeout.unwrap_or(Duration::from_secs(30));
         let connect_timeout = self

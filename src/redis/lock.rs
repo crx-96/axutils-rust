@@ -22,6 +22,12 @@ pub(crate) fn lock_ttl_millis(ttl: Duration) -> Result<i64, RedisError> {
     super::commands::duration_millis(ttl)
 }
 
+pub(crate) fn lock_ttl_duration(ttl: Duration) -> Result<Duration, RedisError> {
+    let millis = lock_ttl_millis(ttl)?;
+    let millis = u64::try_from(millis).map_err(|_| RedisError::invalid_config("ttl"))?;
+    Ok(Duration::from_millis(millis))
+}
+
 pub(crate) fn token() -> Result<[u8; TOKEN_BYTES], RedisError> {
     use rand::{rngs::OsRng, TryRngCore};
 
@@ -68,6 +74,27 @@ pub(crate) fn script_result(value: i64) -> Result<bool, RedisError> {
             super::error::RedisTransportErrorKind::Protocol,
         )),
     }
+}
+
+fn finish_release(active: &mut bool, result: Result<i64, RedisError>) -> Result<bool, RedisError> {
+    let released = script_result(result?)?;
+    *active = false;
+    Ok(released)
+}
+
+fn finish_renew(
+    active: &mut bool,
+    ttl: &mut Duration,
+    effective_ttl: Duration,
+    result: Result<i64, RedisError>,
+) -> Result<bool, RedisError> {
+    let renewed = script_result(result?)?;
+    if renewed {
+        *ttl = effective_ttl;
+    } else {
+        *active = false;
+    }
+    Ok(renewed)
 }
 
 /// 同步 Redis 单键租约锁 guard。
@@ -132,10 +159,8 @@ impl RedisLockGuard {
         if !self.active {
             return Ok(false);
         }
-        let result = self.client.release_lock_sync(&self.key, &self.token)?;
-        let released = script_result(result)?;
-        self.active = false;
-        Ok(released)
+        let result = self.client.release_lock_sync(&self.key, &self.token);
+        finish_release(&mut self.active, result)
     }
 
     /// 在当前 token 仍持有锁时原子刷新 TTL。
@@ -165,19 +190,14 @@ impl RedisLockGuard {
     /// ```
     pub fn renew(&mut self, ttl: Duration) -> Result<bool, RedisError> {
         let ttl_millis = lock_ttl_millis(ttl)?;
+        let effective_ttl = lock_ttl_duration(ttl)?;
         if !self.active {
             return Ok(false);
         }
         let result = self
             .client
-            .renew_lock_sync(&self.key, &self.token, ttl_millis)?;
-        let renewed = script_result(result)?;
-        if renewed {
-            self.ttl = ttl;
-        } else {
-            self.active = false;
-        }
-        Ok(renewed)
+            .renew_lock_sync(&self.key, &self.token, ttl_millis);
+        finish_renew(&mut self.active, &mut self.ttl, effective_ttl, result)
     }
 }
 
@@ -264,13 +284,8 @@ impl RedisAsyncLockGuard {
         if !self.active {
             return Ok(false);
         }
-        let result = self
-            .client
-            .release_lock_async(&self.key, &self.token)
-            .await?;
-        let released = script_result(result)?;
-        self.active = false;
-        Ok(released)
+        let result = self.client.release_lock_async(&self.key, &self.token).await;
+        finish_release(&mut self.active, result)
     }
 
     /// 在当前 token 仍持有锁时原子刷新 TTL。
@@ -302,20 +317,15 @@ impl RedisAsyncLockGuard {
     /// ```
     pub async fn renew(&mut self, ttl: Duration) -> Result<bool, RedisError> {
         let ttl_millis = lock_ttl_millis(ttl)?;
+        let effective_ttl = lock_ttl_duration(ttl)?;
         if !self.active {
             return Ok(false);
         }
         let result = self
             .client
             .renew_lock_async(&self.key, &self.token, ttl_millis)
-            .await?;
-        let renewed = script_result(result)?;
-        if renewed {
-            self.ttl = ttl;
-        } else {
-            self.active = false;
-        }
-        Ok(renewed)
+            .await;
+        finish_renew(&mut self.active, &mut self.ttl, effective_ttl, result)
     }
 }
 
@@ -342,8 +352,8 @@ mod tests {
     use redis_test::{MockCmd, MockRedisConnection};
 
     use super::{
-        acquire_command, lock_ttl_millis, release_command, renew_command, script_result, token,
-        RELEASE_SCRIPT, RENEW_SCRIPT,
+        acquire_command, finish_release, finish_renew, lock_ttl_duration, lock_ttl_millis,
+        release_command, renew_command, script_result, token, RELEASE_SCRIPT, RENEW_SCRIPT,
     };
     use crate::redis::{RedisClient, RedisConfig, RedisError};
 
@@ -362,6 +372,41 @@ mod tests {
             lock_ttl_millis(Duration::from_secs(24 * 60 * 60)),
             Ok(24 * 60 * 60 * 1000)
         );
+    }
+
+    #[test]
+    fn lock_ttl_debug_state_matches_redis_rounding() {
+        assert_eq!(
+            lock_ttl_duration(Duration::from_nanos(1_000_001)).unwrap(),
+            Duration::from_millis(2)
+        );
+    }
+
+    #[test]
+    fn guard_result_transitions_are_explicit_and_preserve_retry_after_errors() {
+        let mut active = true;
+        assert_eq!(finish_release(&mut active, Ok(1)), Ok(true));
+        assert!(!active);
+
+        let mut active = true;
+        let error = RedisError::Transport(crate::redis::RedisTransportErrorKind::Network);
+        assert_eq!(finish_release(&mut active, Err(error)), Err(error));
+        assert!(active);
+
+        let mut active = true;
+        let mut ttl = Duration::from_millis(1);
+        assert_eq!(
+            finish_renew(&mut active, &mut ttl, Duration::from_millis(2), Ok(1),),
+            Ok(true)
+        );
+        assert!(active);
+        assert_eq!(ttl, Duration::from_millis(2));
+
+        assert_eq!(
+            finish_renew(&mut active, &mut ttl, Duration::from_millis(3), Ok(0),),
+            Ok(false)
+        );
+        assert!(!active);
     }
 
     #[test]
@@ -391,6 +436,24 @@ mod tests {
         assert!(debug.contains("RedisLockGuard"));
         assert!(!debug.contains("secret-lock-key"));
         assert!(!debug.contains("SSSS"));
+    }
+
+    #[test]
+    fn inactive_guard_release_and_renew_are_local_and_idempotent() {
+        let client =
+            RedisClient::new(RedisConfig::single("redis://127.0.0.1:1/0").expect("fixture config"))
+                .expect("client construction should be local");
+        let mut guard = super::RedisLockGuard::new(
+            client,
+            b"inactive-lock-key".to_vec(),
+            [b'I'; 32],
+            Duration::from_secs(30),
+        );
+        guard.active = false;
+
+        assert_eq!(guard.release(), Ok(false));
+        assert_eq!(guard.renew(Duration::from_secs(30)), Ok(false));
+        assert_eq!(guard.release(), Ok(false));
     }
 
     #[cfg(all(feature = "redis", feature = "tokio"))]

@@ -265,7 +265,8 @@ impl LogConfig {
     ///
     /// 字符串会在 [`LogUtils::init`] 时解析；解析失败返回
     /// `LogError::InvalidConfig { field: "filter" }`。后一次调用会替换前一次配置；空白字符串
-    /// 表示不追加 target directive。
+    /// 表示不追加 target directive。逗号、等号两侧的空白会被规范化，directive 内部的空白
+    /// 会被拒绝。
     ///
     /// # Examples
     ///
@@ -416,11 +417,12 @@ impl LogUtils {
             return Err(LogError::InvalidConfig { field: "output" });
         }
         let filter = build_filter(&config)?;
-        let writer = match (config.stdout, config.file.as_ref()) {
-            (true, None) => BoxMakeWriter::new(std::io::stdout),
-            (false, Some(file)) => BoxMakeWriter::new(file.appender()?),
-            (true, Some(file)) => BoxMakeWriter::new(std::io::stdout.and(file.appender()?)),
-            (false, None) => return Err(LogError::InvalidConfig { field: "output" }),
+        let writer = match config.file.as_ref() {
+            Some(file) if config.stdout => {
+                BoxMakeWriter::new(std::io::stdout.and(file.appender()?))
+            }
+            Some(file) => BoxMakeWriter::new(file.appender()?),
+            None => BoxMakeWriter::new(std::io::stdout),
         };
         let subscriber = tracing_subscriber::fmt()
             .with_env_filter(filter)
@@ -538,9 +540,66 @@ impl LogUtils {
 fn build_filter(config: &LogConfig) -> Result<EnvFilter, LogError> {
     let mut directives = config.level.as_directive().to_owned();
     if let Some(extra) = config.directives.as_deref() {
+        let extra =
+            normalize_directives(extra).map_err(|_| LogError::InvalidConfig { field: "filter" })?;
         directives.push(',');
-        directives.push_str(extra);
+        directives.push_str(&extra);
     }
 
     EnvFilter::try_new(directives).map_err(|_| LogError::InvalidConfig { field: "filter" })
+}
+
+fn normalize_directives(value: &str) -> Result<String, ()> {
+    let mut normalized = String::new();
+    for (index, raw_directive) in value.split(',').enumerate() {
+        let directive = raw_directive.trim();
+        if directive.is_empty() {
+            return Err(());
+        }
+
+        let directive = if let Some((target, level)) = directive.split_once('=') {
+            let target = target.trim();
+            let level = level.trim();
+            if target.is_empty()
+                || level.is_empty()
+                || target.chars().any(char::is_whitespace)
+                || level.chars().any(char::is_whitespace)
+            {
+                return Err(());
+            }
+            format!("{target}={level}")
+        } else {
+            if directive.chars().any(char::is_whitespace) {
+                return Err(());
+            }
+            directive.to_owned()
+        };
+
+        if index > 0 {
+            normalized.push(',');
+        }
+        normalized.push_str(&directive);
+    }
+    Ok(normalized)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::normalize_directives;
+
+    #[test]
+    fn normalizes_directive_separator_and_assignment_whitespace() {
+        assert_eq!(
+            normalize_directives("  lettre = off, rustls= off  ").unwrap(),
+            "lettre=off,rustls=off"
+        );
+        assert_eq!(normalize_directives("off").unwrap(), "off");
+    }
+
+    #[test]
+    fn rejects_empty_or_internal_directive_whitespace() {
+        for value in ["lettre=off,,rustls=off", "rust ls=off", "rustls=off now"] {
+            assert!(normalize_directives(value).is_err(), "accepted {value:?}");
+        }
+    }
 }

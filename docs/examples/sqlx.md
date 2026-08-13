@@ -297,7 +297,8 @@ async fn close(client: &axutils::SqlxClient) -> Result<(), axutils::SqlxError> {
 
 `init(config).await` 在首次调用时连接并在成功后写入全局 slot；失败不会消耗初始化机会。已
 初始化时会在连接前快速返回 `AlreadyInitialized`，不会再次连接传入的 URL。并发初始化中输掉
-`OnceLock` 竞争的 client 会先执行 `close_async`，不会泄漏已建立的 pool。
+`OnceLock` 竞争的 client 会先执行 `close_async`；即使清理本身失败，公开结果仍稳定返回
+`AlreadyInitialized`，启用 `tracing` 时只记录脱敏的清理错误类别。
 
 ```rust,no_run
 async fn init_global() -> Result<(), axutils::SqlxError> {

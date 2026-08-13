@@ -185,6 +185,7 @@ let _key = JwtSigningKey::from_rsa_der([0x01, 0x02, 0x03]);
 
 输入语义是 RSA PKCS#1 私钥 DER，最多 128 KiB。该构造器只承诺大小和算法族边界；opaque DER
 的 ASN.1 结构无法在构造期证明时，会在 encode 阶段返回 `UnsupportedKeyFormat` 或 `InvalidKey`。
+opaque 只表示延迟校验，不表示支持 PKCS#8、SPKI 或其他未验证 DER 格式。
 
 ### `from_ec_pem`
 
@@ -269,7 +270,8 @@ let _key = JwtVerificationKey::from_rsa_der([0x01, 0x02, 0x03]);
 ```
 
 输入语义是 RSA PKCS#1 公钥 DER，最多 128 KiB。opaque DER 可暂存，但结构错误或私钥 DER
-不能完成验证，decode 时返回稳定的 key-format 错误。
+不能完成验证，decode 时返回稳定的 key-format 错误；opaque 只表示延迟校验，不表示支持
+PKCS#8、SPKI 或其他未验证 DER 格式。
 
 ### `from_ec_pem`
 
@@ -620,7 +622,8 @@ let _claims: Claims = JwtUtils::decode("token-created-by-the-same-fixed-config")
 - 全局 `OnceLock` 中的 codec/key 与进程同寿命，不支持热轮换；正常退出前不承诺触发第三方 key
   内部数据的可观察清零。
 - 本期不提供实例 codec、JWKS、远程 key 获取、`kid` 路由、多 key 轮换或自动密钥发现。
-- 本期不提供撤销、黑名单、重放保护、密钥托管或时钟同步；调用方仍需设计这些业务边界。
+- 本期不提供撤销、黑名单、重放保护、密钥托管、时钟同步或公共时钟注入；启用 `exp`/`nbf`
+  校验时使用当前系统 Unix 时钟，调用方仍需设计这些业务边界。
 - Header 不接受 `kid`、`jku`、`jwk`、`x5u`、`x5c`、`crit`、`zip` 等未支持字段，也不会根据它们
   选择 key 或访问网络。
 - 在本 crate 依赖树只有 `rust_crypto` 且外部代码未预先安装 provider 时，`jsonwebtoken` 使用其

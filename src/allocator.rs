@@ -19,3 +19,7 @@ static AXUTILS_RPMALLOC: rpmalloc::RpMalloc = rpmalloc::RpMalloc;
 #[cfg(all(feature = "rpmalloc", target_os = "windows"))]
 #[link(name = "advapi32")]
 unsafe extern "system" {}
+
+// Both optional allocator backends contain native C code. Consumers enabling either feature
+// therefore need a target C compiler/linker and SDK; Windows rpmalloc additionally needs the
+// Advapi32 import library linked above.

@@ -21,8 +21,9 @@ tokio = { version = "1.53.1", features = ["macros", "rt-multi-thread"] }
 ```
 
 第一阶段只接受 `redis://` endpoint，不启用 TLS，也不接受 `rediss://`。配置、客户端和
-`RedisUtils::init` 只做本地构造，不发送 PING 或建立网络连接；第一次命令调用才可能建立
-连接并返回传输错误。同步命令会阻塞当前线程，Tokio 任务应使用异步方法；库不会创建
+`RedisUtils::init` 只做本地构造，不发送 PING 或建立网络连接；同步 r2d2 checkout 只检查
+连接的本地 open 状态，不为每次 checkout 发送 PING。第一次命令调用才可能建立连接并返回
+传输错误。同步命令会阻塞当前线程，Tokio 任务应使用异步方法；库不会创建
 runtime、调用 `block_on` 或把同步调用转移到线程池。
 
 ## 公共导出路径
@@ -77,6 +78,11 @@ Serde 值使用受限 writer 生成紧凑 MessagePack。读取值会在反序列
 读取还检查累计 response 字节数和集合 item 数。由于 `redis-rs` 可能已经读入完整响应，
 这些检查不是 socket 层的硬内存上限。MessagePack 数据按同一应用版本管理；结构体字段
 变化可能影响兼容性，建议通过 key version/namespace 管理 schema。
+
+`rmp-serde` 的反序列化沿用约 1024 层的默认递归预算，本 crate 不提供调整该后端预算的
+入口；`max_value_bytes` 只限制字节数，不等同于深度限制。对于不可信的深层 MessagePack
+对象，调用方应在业务边界自行限制或拒绝其嵌套深度，避免把默认递归预算和线程栈风险留给
+后端处理。
 
 `*_bytes` 是完全 raw 的 `Vec<u8>`，不做 UTF-8 转换；list/set 暂不提供 raw 变体。counter
 方法操作 Redis 原生十进制整数，不兼容 `set<T: Serialize>` 生成的 MessagePack bytes。
@@ -1854,7 +1860,9 @@ let _ = RedisClient::transaction::<fn(&mut RedisTransaction) -> Result<(), Redis
 callback 仍是一次性的同步闭包，不接受 async callback；网络执行发生在返回 future 中。
 取消或 callback panic 会使 future 无法归还专用连接；协议、网络、连接、超时等状态不确定的
 执行失败也会丢弃连接。已完整读取的普通 Redis 服务端命令错误会保留健康连接；不会污染普通
-`ConnectionManager`，也不会重放 callback。
+`ConnectionManager`，也不会重放 callback。异步 multiplexed connection 没有独立的 liveness
+probe：完整读取的普通服务端错误会保留连接，未知失效连接可能被下一次事务试用一次，随后按
+传输错误丢弃。
 
 调用示例：`client.transaction_async(|tx| { tx.set("key", value)?; tx.persist("key") }).await`。
 

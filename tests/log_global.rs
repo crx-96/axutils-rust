@@ -423,7 +423,7 @@ fn target_filter_case() {
     LogUtils::init(
         LogConfig::new()
             .with_level(LogLevel::Trace)
-            .with_directives("lettre=off,rustls=off"),
+            .with_directives("  lettre = off, rustls = off  "),
     )
     .expect("target filter init");
     tracing::error!(target: "lettre", message = LETTRE_FILTERED_SENTINEL);

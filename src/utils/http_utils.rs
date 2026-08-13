@@ -16,6 +16,18 @@ impl HttpUtils {
     /// 初始化全局 HTTP 客户端。
     ///
     /// 客户端会在成功构造后才写入 `OnceLock`；配置错误不会消耗初始化机会。
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use axutils::{HttpConfig, HttpError, HttpUtils};
+    ///
+    /// fn initialize(config: HttpConfig) -> Result<(), HttpError> {
+    ///     HttpUtils::init(config)
+    /// }
+    ///
+    /// let _ = initialize;
+    /// ```
     pub fn init(config: HttpConfig) -> Result<(), HttpError> {
         #[cfg(feature = "tracing")]
         let started = std::time::Instant::now();
@@ -31,6 +43,15 @@ impl HttpUtils {
     }
 
     /// 返回全局客户端是否已经初始化。
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use axutils::HttpUtils;
+    ///
+    /// let initialized: bool = HttpUtils::is_initialized();
+    /// let _ = initialized;
+    /// ```
     pub fn is_initialized() -> bool {
         HTTP_CLIENT.get().is_some()
     }
@@ -40,12 +61,46 @@ impl HttpUtils {
     }
 
     /// 使用全局客户端同步执行请求。
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use axutils::{HttpError, HttpMethod, HttpRequest, HttpUtils};
+    ///
+    /// fn execute_request() -> Result<(), HttpError> {
+    ///     let request = HttpRequest::new(HttpMethod::Get, "https://example.com/health")?;
+    ///     let _response = HttpUtils::execute(request)?;
+    ///     Ok(())
+    /// }
+    ///
+    /// let _ = execute_request;
+    /// ```
     pub fn execute(request: HttpRequest) -> Result<HttpResponse, HttpError> {
         Self::client()?.execute(request)
     }
 
     /// 使用全局客户端异步执行请求。
     #[cfg(all(feature = "http", feature = "tokio"))]
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[cfg(all(feature = "http", feature = "tokio"))]
+    /// async fn execute_request() -> Result<(), axutils::HttpError> {
+    ///     let request = axutils::HttpRequest::new(
+    ///         axutils::HttpMethod::Get,
+    ///         "https://example.com/health",
+    ///     )?;
+    ///     let _response = axutils::HttpUtils::execute_async(request).await?;
+    ///     Ok(())
+    /// }
+    /// # #[cfg(all(feature = "http", feature = "tokio"))]
+    /// # fn main() {
+    /// #     let _ = execute_request;
+    /// # }
+    /// # #[cfg(not(all(feature = "http", feature = "tokio")))]
+    /// # fn main() {}
+    /// ```
     pub async fn execute_async(request: HttpRequest) -> Result<HttpResponse, HttpError> {
         Self::client()?.execute_async(request).await
     }

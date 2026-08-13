@@ -165,6 +165,8 @@ impl ManageConnection for SingleManager {
     }
 
     fn is_valid(&self, connection: &mut Self::Connection) -> Result<(), Self::Error> {
+        // r2d2 checkout validation is intentionally local only. A PING here would add network
+        // I/O to every checkout and change the documented no-implicit-health-check contract.
         if connection.is_open() {
             Ok(())
         } else {
@@ -193,6 +195,7 @@ impl ManageConnection for ClusterManager {
     }
 
     fn is_valid(&self, connection: &mut Self::Connection) -> Result<(), Self::Error> {
+        // Cluster checkout validation is intentionally local only; it does not send PING.
         if connection.is_open() {
             Ok(())
         } else {
@@ -2684,6 +2687,9 @@ impl RedisClient {
         let AsyncBackend::Cluster { client, connection } = &self.inner.async_backend else {
             return Err(RedisError::UnsupportedMode);
         };
+        // The first cluster connection is established while holding this slot lock. Concurrent
+        // first commands therefore serialize behind the bounded connection timeout; cancellation
+        // releases the lock, and later commands only clone an established connection.
         let mut guard = connection.lock().await;
         if let Some(connection) = guard.as_ref() {
             return Ok(connection.clone());
@@ -2789,7 +2795,11 @@ impl RedisClient {
                 Ok(())
             }
             Err(error) => {
-                if !should_discard_transaction_connection(&error, true) {
+                // MultiplexedConnection has no active `is_open` probe. A complete server error
+                // is retained; connection/protocol/network/timeout errors are discarded. An
+                // unknown dead connection can consequently be tried once more and will be
+                // discarded when the next transaction reports its transport error.
+                if !should_discard_multiplexed_transaction_connection(&error) {
                     *slot.lock().await = Some(connection);
                 }
                 Err(RedisError::transaction_failure(&error))
@@ -3083,6 +3093,11 @@ fn should_discard_transaction_connection(error: &::redis::RedisError, is_open: b
     should_discard_connection(&RedisError::from_upstream(error), is_open)
 }
 
+#[cfg(feature = "tokio")]
+fn should_discard_multiplexed_transaction_connection(error: &::redis::RedisError) -> bool {
+    should_discard_transaction_connection(error, true)
+}
+
 fn parse_manager_error_kind(value: &str) -> Option<RedisTransportErrorKind> {
     match value {
         "connection" => Some(RedisTransportErrorKind::Connection),
@@ -3105,6 +3120,8 @@ fn compile_assertions() {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(feature = "tokio")]
+    use super::should_discard_multiplexed_transaction_connection;
     use super::{
         check_optional_values, collect_keys, collect_raw_pairs, decode_collection,
         decode_hash_entries, should_discard_connection, should_discard_transaction_connection,
@@ -3227,6 +3244,27 @@ mod tests {
         let protocol_error =
             ::redis::RedisError::from((::redis::ErrorKind::Parse, "invalid Redis response"));
         assert!(should_discard_transaction_connection(&protocol_error, true));
+    }
+
+    #[cfg(feature = "tokio")]
+    #[test]
+    fn multiplexed_transaction_keeps_complete_server_errors_but_discards_transport_errors() {
+        let server_error = ::redis::RedisError::from((
+            ::redis::ErrorKind::Server(::redis::ServerErrorKind::ResponseError),
+            "server error",
+            "WRONGTYPE operation against a key holding the wrong kind of value".to_owned(),
+        ));
+        let protocol_error =
+            ::redis::RedisError::from((::redis::ErrorKind::Parse, "invalid Redis response"));
+
+        // MultiplexedConnection has no active liveness probe; a complete server response is
+        // observable and can be retained, while protocol/transport errors make state uncertain.
+        assert!(!should_discard_multiplexed_transaction_connection(
+            &server_error
+        ));
+        assert!(should_discard_multiplexed_transaction_connection(
+            &protocol_error
+        ));
     }
 
     #[cfg(all(feature = "redis", feature = "tokio"))]

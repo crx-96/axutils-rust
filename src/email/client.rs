@@ -25,7 +25,9 @@ const POOL_IDLE_TIMEOUT: Duration = Duration::from_secs(60);
 /// 保存独立的 Tokio 异步连接池配置，并在首次异步发送时于调用方的 runtime 中初始化连接池。
 /// 构造实例不会建立网络连接或要求 Tokio runtime，实际连接只在发送时发生。每个池最多 10
 /// 条连接、空闲 60 秒回收；同时启用同步和异步时单实例最多持有两组池，调用方应按账号
-/// 实例数量和并发量控制总资源。
+/// 实例数量和并发量控制总资源。异步 transport 的池清理任务依赖 Tokio runtime；同一个
+/// `EmailClient` 应在同一个仍然存活的 Tokio runtime 中创建/首次使用并持续复用，不保证跨
+/// 已结束 runtime 的迁移。
 pub struct EmailClient {
     from: lettre::message::Mailbox,
     transport: SmtpTransport,
@@ -41,7 +43,8 @@ impl EmailClient {
     /// 根据 [`crate::EmailSecurity`] 选择强制 SMTPS 或强制 STARTTLS，显式设置端口、凭据、
     /// 命令超时和同步连接池上限；同时启用异步 feature 时保存经过校验的异步 transport
     /// 配置，并由首次 `send_async` 在调用方 Tokio runtime 中完成异步连接池初始化。构造
-    /// 失败时不会留下可发送的半初始化客户端。
+    /// 失败时不会留下可发送的半初始化客户端。首次异步使用后应在同一个仍然存活的 Tokio
+    /// runtime 中继续复用该实例；不要把它迁移到已经结束的 runtime。
     ///
     /// # Errors
     ///

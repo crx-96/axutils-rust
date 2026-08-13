@@ -36,6 +36,15 @@ pub struct HttpClient {
 
 impl HttpClient {
     /// 根据配置创建客户端。
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use axutils::{HttpClient, HttpConfig};
+    ///
+    /// let client = HttpClient::new(HttpConfig::default()).unwrap();
+    /// let _ = client;
+    /// ```
     pub fn new(config: HttpConfig) -> Result<Self, HttpError> {
         let sync_agent = ureq::Agent::config_builder()
             .http_status_as_error(false)
@@ -78,6 +87,15 @@ impl HttpClient {
     }
 
     /// 返回客户端配置。
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use axutils::{HttpClient, HttpConfig};
+    ///
+    /// let client = HttpClient::new(HttpConfig::default()).unwrap();
+    /// assert_eq!(client.config().request_timeout(), std::time::Duration::from_secs(30));
+    /// ```
     pub fn config(&self) -> &HttpConfig {
         &self.config
     }
@@ -288,7 +306,6 @@ impl HttpClient {
             url: prepared.url.as_str().to_owned(),
             headers: prepared.headers.entries().to_vec(),
             body: prepared.body.clone(),
-            timeout: prepared.timeout,
             retry_policy: prepared.retry_policy.clone(),
             deduplication_policy: prepared.deduplication_policy.clone(),
         })
@@ -307,7 +324,7 @@ impl HttpClient {
                 return Err(transport_error(
                     HttpTransportErrorKind::Timeout,
                     attempts,
-                    true,
+                    attempts >= prepared.retry_policy.max_retries(),
                 ));
             }
             attempts += 1;
@@ -346,8 +363,7 @@ impl HttpClient {
                             return Err(transport_error(
                                 kind,
                                 attempts,
-                                !prepared.retry_policy.can_retry_method(&prepared.method)
-                                    || attempts >= prepared.retry_policy.max_retries(),
+                                attempts >= prepared.retry_policy.max_retries(),
                             ));
                         }
                     }
@@ -364,8 +380,7 @@ impl HttpClient {
                     return Err(transport_error(
                         kind,
                         attempts,
-                        !prepared.retry_policy.can_retry_method(&prepared.method)
-                            || attempts >= prepared.retry_policy.max_retries(),
+                        attempts >= prepared.retry_policy.max_retries(),
                     ));
                 }
             }
@@ -419,7 +434,7 @@ impl HttpClient {
             return Err(transport_error(
                 HttpTransportErrorKind::Timeout,
                 attempts,
-                true,
+                attempts >= policy.max_retries(),
             ));
         }
         std::thread::sleep(delay);
@@ -429,7 +444,7 @@ impl HttpClient {
             return Err(transport_error(
                 HttpTransportErrorKind::Timeout,
                 attempts,
-                true,
+                attempts >= policy.max_retries(),
             ));
         }
         #[cfg(feature = "tracing")]
@@ -451,7 +466,7 @@ impl HttpClient {
                 return Err(transport_error(
                     HttpTransportErrorKind::Timeout,
                     attempts,
-                    true,
+                    attempts >= prepared.retry_policy.max_retries(),
                 ));
             }
             attempts += 1;
@@ -499,8 +514,7 @@ impl HttpClient {
                             return Err(transport_error(
                                 kind,
                                 attempts,
-                                !prepared.retry_policy.can_retry_method(&prepared.method)
-                                    || attempts >= prepared.retry_policy.max_retries(),
+                                attempts >= prepared.retry_policy.max_retries(),
                             ));
                         }
                     }
@@ -523,8 +537,7 @@ impl HttpClient {
                     return Err(transport_error(
                         kind,
                         attempts,
-                        !prepared.retry_policy.can_retry_method(&prepared.method)
-                            || attempts >= prepared.retry_policy.max_retries(),
+                        attempts >= prepared.retry_policy.max_retries(),
                     ));
                 }
             }
@@ -575,7 +588,7 @@ impl HttpClient {
             return Err(transport_error(
                 HttpTransportErrorKind::Timeout,
                 attempts,
-                true,
+                attempts >= policy.max_retries(),
             ));
         }
         tokio::time::sleep(delay).await;
@@ -585,7 +598,7 @@ impl HttpClient {
             return Err(transport_error(
                 HttpTransportErrorKind::Timeout,
                 attempts,
-                true,
+                attempts >= policy.max_retries(),
             ));
         }
         #[cfg(feature = "tracing")]
