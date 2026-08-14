@@ -2,7 +2,7 @@
 name = "axutils"
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.88"
+rust-version = "1.95"
 resolver = "3"
 description = "Rust utility library with opt-in feature modules"
 license = "MIT"

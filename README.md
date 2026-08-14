@@ -2,9 +2,9 @@
 
 `axutils` 是一个按 feature 组织的 Rust 常用工具库。
 
-当前项目最低支持 Rust 1.88。配置文件 YAML 后端使用 `serde-saphyr 1.0.0`，其 `edition = "2024"`
-和 let-chains 语法要求 Rust 1.88；邮件能力使用的 `lettre 0.11.22` 只要求 Rust 1.85。
-因此，使用新版本 `axutils` 的 Rust 1.76—1.87 项目需要先升级工具链。
+当前项目最低支持 Rust 1.95。本版本将 Rust 1.95 作为发布兼容性下限；配置文件 YAML 后端使用
+`serde-saphyr 1.0.0`，其 `edition = "2024"` 和 let-chains 语法要求 Rust 1.88；邮件能力使用的
+`lettre 0.11.22` 只要求 Rust 1.85。因此，使用新版本 `axutils` 的 Rust 1.88—1.94 项目需要先升级工具链。
 
 默认 feature 为空。默认可用的是 `PathUtils`、`TimeUtils`、`FormatUtils::seconds_to_human`，以及时间
 格式化共用的根类型；`CryptoUtils` 的十六进制编解码和 `TextEncoding::Utf8` 文本编解码同样默认可用。
@@ -686,7 +686,7 @@ USER 65532:65532
 ENTRYPOINT ["/usr/local/bin/app"]
 ```
 
-`RUST_VERSION` 应由消费方替换为不低于 1.88 的固定版本，正式部署还应按供应链策略固定
+`RUST_VERSION` 应由消费方替换为不低于 1.95 的固定版本，正式部署还应按供应链策略固定
 基础镜像 digest。runtime 阶段不需要为 axutils 邮件功能安装 OpenSSL 或 CA 包；应用其他
 功能需要的动态库、时区数据或健康检查工具须单独评估。
 

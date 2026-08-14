@@ -115,6 +115,7 @@
 
 ### Changed
 
+- 当前最低支持 Rust 版本从 1.88 提升为 1.95；使用 Rust 1.88—1.94 的下游项目需要先升级工具链。edition、依赖版本和 feature 边界未因本次 MSRV 调整改变。
 - `HttpError` 和 `HttpTransportErrorKind` 现在标记为 `#[non_exhaustive]`；这是对下游穷尽匹配
   的兼容性约束，调用方匹配 HTTP 错误时必须保留 wildcard，以允许后续增加脱敏错误分类。
 - HTTP 配置 builder 的字段均可省略；`HttpConfig::default()` 和空 builder 可以直接构造配置，

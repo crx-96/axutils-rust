@@ -69,7 +69,7 @@
 | 项目 | 当前基线与权威文件 |
 | --- | --- |
 | crate 类型 | Rust library crate，包名和 crate 名为 `axutils`，入口为 `src/lib.rs` |
-| Rust 版本 | edition、`rust-version` 和 resolver 以 `Cargo.toml` 为准；当前 MSRV 为 `1.88` |
+| Rust 版本 | edition、`rust-version` 和 resolver 以 `Cargo.toml` 为准；当前 MSRV 为 `1.95` |
 | 默认能力 | `default = []`；不依赖第三方 crate 的能力默认可用 |
 | feature 组织 | 第三方能力通过显式 feature 提供；需要多个能力的 API 使用精确的组合 feature 守卫 |
 | 公共导出 | crate 根、领域模块和 `utils` 兼容重导出由 `src/lib.rs` 与 `docs/module-map.md` 共同维护 |

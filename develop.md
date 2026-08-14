@@ -60,7 +60,7 @@ src/
 
 ## 本地开发
 
-项目当前最低支持 Rust 1.88，要求 Rust 工具链满足 `Cargo.toml` 中声明的
+项目当前最低支持 Rust 1.95，要求 Rust 工具链满足 `Cargo.toml` 中声明的
 `rust-version`。常用检查命令如下：
 
 第三方依赖统一声明最低兼容版本，使用 Cargo 默认 caret 约束，不在 `version` 字段使用等号前缀
@@ -404,7 +404,7 @@ dev-dependency。`lettre` 最低版本为经核验的 `0.11.22`，使用 Cargo �
 `ring` 和 `webpki-roots`，不启用 native-tls、OpenSSL 或
 机会式 STARTTLS。
 
-本仓库不再维护 GitHub Actions CI 工作流。跨平台验证需要维护者在 Windows、Linux、macOS 的 Rust 1.88
+本仓库不再维护 GitHub Actions CI 工作流。跨平台验证需要维护者在 Windows、Linux、macOS 的 Rust 1.95
 和 stable 环境中自行执行；mimalloc/rpmalloc 还需要目标平台可用的 C compiler、linker 和 SDK，缺少
 时不得自动修改系统工具链。当前仓库只提供不连接 SMTP relay 的测试和 feature/依赖边界验证，不会连接
 SMTP relay。`axutils` 是 library crate，不新增 Dockerfile；README 中的 Debian/Ubuntu 与 Alpine Docker
