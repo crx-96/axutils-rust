@@ -3,8 +3,8 @@
 `axutils` 是一个按 feature 组织的 Rust 常用工具库。
 
 当前项目最低支持 Rust 1.95。本版本将 Rust 1.95 作为发布兼容性下限；配置文件 YAML 后端使用
-`serde-saphyr 1.0.0`，其 `edition = "2024"` 和 let-chains 语法要求 Rust 1.88；邮件能力使用的
-`lettre 0.11.22` 只要求 Rust 1.85。因此，使用新版本 `axutils` 的 Rust 1.88—1.94 项目需要先升级工具链。
+`serde-saphyr 1.0.1`，其 `edition = "2024"` 和 let-chains 语法要求 Rust 1.88；邮件能力使用的
+`lettre 0.11.23` 只要求 Rust 1.85。因此，使用新版本 `axutils` 的 Rust 1.88—1.94 项目需要先升级工具链。
 
 默认 feature 为空。默认可用的是 `PathUtils`、`TimeUtils`、`FormatUtils::seconds_to_human`，以及时间
 格式化共用的根类型；`CryptoUtils` 的十六进制编解码和 `TextEncoding::Utf8` 文本编解码同样默认可用。
@@ -35,11 +35,12 @@ raw 字节 API，支持单机/Cluster 普通命令、批量操作、TTL、counte
 或全局入口不会访问网络，锁不是 Redlock 或 fencing token；完整 API 和边界见
 [Redis 使用文档](https://github.com/crx-96/axutils-rust/blob/main/docs/examples/redis.md)。
 
-SQLx 能力通过 `sqlx + tokio` 组合 feature 提供；它使用 SQLx `0.8.6` 的 `AnyPool` 在运行时
+SQLx 能力通过 `sqlx + tokio` 组合 feature 提供；它使用 SQLx `0.9.0` 的 `AnyPool` 在运行时
 选择 PostgreSQL、MySQL/MariaDB 或 SQLite driver。`SqlxClient` 支持多个独立实例，`SqlxUtils`
 是只能成功初始化一次的全局入口；调用方仍直接使用 SQLx 的 `.bind(...)`、`FromRow`、
-`QueryBuilder` 和原生事务。crate 不创建 Tokio runtime、不调用 `block_on`，首版不配置 TLS，
-`fetch_all` 默认限制 1_024 行并逐行消费。完整 API、feature 矩阵和关闭/脱敏边界见
+`QueryBuilder` 和原生事务。查询入口接受 SQLx 0.9 的 `SqlSafeStr`：静态 SQL 可直接传入，经过
+审计的动态 SQL 必须显式包装 `sqlx::AssertSqlSafe`；参数值应优先使用 `.bind(...)`。crate 不创建
+Tokio runtime、不调用 `block_on`，首版不配置 TLS，`fetch_all` 默认限制 1_024 行并逐行消费。完整 API、feature 矩阵和关闭/脱敏边界见
 [SQLx 使用文档](https://github.com/crx-96/axutils-rust/blob/main/docs/examples/sqlx.md)。
 
 库内日志事件通过 `tracing` feature 提供；同步 `LogUtils` 初始化器需要 `logging` feature。
@@ -170,12 +171,12 @@ let _ = client.set("example:key", "value");
 
 Redis 方法、feature 矩阵、大小上限、raw/MessagePack 区分、Cluster 和事务边界见 [Redis 使用文档](https://github.com/crx-96/axutils-rust/blob/main/docs/examples/redis.md)。
 
-SQLx 异步 Any 客户端必须同时启用 `sqlx` 与 `tokio`，并直接依赖匹配的 SQLx 0.8.x 与 Tokio：
+SQLx 异步 Any 客户端必须同时启用 `sqlx` 与 `tokio`，并直接依赖匹配的 SQLx 0.9.x 与 Tokio：
 
 ```toml
 [dependencies]
 axutils = { version = "0.1", default-features = false, features = ["sqlx", "tokio"] }
-sqlx = { version = "0.8.6", default-features = false, features = ["any", "postgres", "mysql", "sqlite", "runtime-tokio"] }
+sqlx = { version = "0.9.0", default-features = false, features = ["any", "postgres", "mysql", "sqlite-bundled", "runtime-tokio"] }
 tokio = { version = "1.53.1", features = ["macros", "rt-multi-thread"] }
 ```
 
@@ -467,6 +468,10 @@ client.send(message)?;
 有限大小与总时间预算。默认最多进行 3 次网络尝试（包括首次请求），设置为 1 可禁用自动重试。
 不配置 `base_url` 时只能使用绝对 HTTP/HTTPS URL；配置了 `base_url` 时，请求自身的绝对 URL 优先，
 但跨 origin 的绝对 URL 不会继承配置中的默认 `Authorization`、`Cookie` 或 `Set-Cookie`。
+同步后端为 `ureq 3.4.0` 的 Rustls + `ring` + 静态 `webpki-roots`，异步后端为 `reqwest 0.13.4`
+的 Rustls + AWS-LC/platform verifier 方案：未预安装进程级 provider 时使用 AWS-LC，根证书来自目标
+平台系统信任库。生产路径不启用 native-tls/OpenSSL，也不跳过证书或 hostname 校验；私有 CA 不会
+自动受信任。跨平台系统根证书行为应在目标平台单独验证。
 下面的 `no_run` 示例只编译，不会访问网络：
 
 ```rust,no_run

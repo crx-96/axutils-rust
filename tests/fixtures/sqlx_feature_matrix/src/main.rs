@@ -31,9 +31,6 @@ fn compile_api() {
     let config = SqlxConfig::new("sqlite::memory:").expect("fixture config");
     let _ = config.with_max_rows(8).expect("fixture row limit");
     let _ = SqlxClient::connect;
-    let _ = SqlxClient::query;
-    let _ = SqlxClient::query_as::<(i64,)>;
-    let _ = SqlxClient::query_scalar::<i64>;
     let _ = SqlxClient::execute_async;
     let _ = SqlxClient::fetch_one_async;
     let _ = SqlxClient::fetch_one_as_async::<(i64,)>;
@@ -48,9 +45,6 @@ fn compile_api() {
 
     let _ = SqlxUtils::init;
     let _ = SqlxUtils::is_initialized;
-    let _ = SqlxUtils::query;
-    let _ = SqlxUtils::query_as::<(i64,)>;
-    let _ = SqlxUtils::query_scalar::<i64>;
     let _ = SqlxUtils::execute_async;
     let _ = SqlxUtils::fetch_one_async;
     let _ = SqlxUtils::fetch_one_as_async::<(i64,)>;
@@ -71,6 +65,28 @@ async fn compile_async_api(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let query = client.query("SELECT ?").bind(1_i64);
     let _ = client.execute_async(query).await;
+
+    let _ = client.query_as::<(i64,)>("SELECT 1");
+    let _ = client.query_scalar::<i64>("SELECT 1");
+    let _ = axutils::SqlxUtils::query("SELECT 1");
+    let _ = axutils::SqlxUtils::query_as::<(i64,)>("SELECT 1");
+    let _ = axutils::SqlxUtils::query_scalar::<i64>("SELECT 1");
+
+    let dynamic_sql = String::from("SELECT 1");
+    let _ = client.query(sqlx::AssertSqlSafe(dynamic_sql));
+    let dynamic_sql = String::from("SELECT 1");
+    let _ = client.query_as::<(i64,)>(sqlx::AssertSqlSafe(dynamic_sql));
+    let dynamic_sql = String::from("SELECT 1");
+    let _ = client.query_scalar::<i64>(sqlx::AssertSqlSafe(dynamic_sql));
+    let dynamic_sql = String::from("SELECT 1");
+    let _ = axutils::SqlxUtils::query(sqlx::AssertSqlSafe(dynamic_sql));
+    let dynamic_sql = String::from("SELECT 1");
+    let _ = axutils::SqlxUtils::query_as::<(i64,)>(sqlx::AssertSqlSafe(dynamic_sql));
+    let dynamic_sql = String::from("SELECT 1");
+    let _ = axutils::SqlxUtils::query_scalar::<i64>(sqlx::AssertSqlSafe(dynamic_sql));
+
+    let dynamic_sql = String::from("SELECT 1");
+    let _ = sqlx::query::<sqlx::Any>(sqlx::AssertSqlSafe(dynamic_sql));
 
     let mut builder = sqlx::QueryBuilder::<sqlx::Any>::new("SELECT ");
     builder.push_bind(1_i64);
@@ -147,6 +163,12 @@ fn main() {
     let _ = axutils::SqlxUtils::execute_async;
 }
 
+#[cfg(feature = "negative-dynamic-sql")]
+fn main() {
+    let dynamic_sql = String::from("SELECT 1");
+    let _ = axutils::SqlxUtils::query(dynamic_sql);
+}
+
 #[cfg(not(any(
     feature = "sqlx-tokio",
     feature = "none",
@@ -162,6 +184,7 @@ fn main() {
     feature = "negative-tokio-module",
     feature = "negative-tokio-root",
     feature = "negative-tokio-utils",
-    feature = "negative-tokio-async"
+    feature = "negative-tokio-async",
+    feature = "negative-dynamic-sql"
 )))]
 fn main() {}

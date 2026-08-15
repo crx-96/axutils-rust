@@ -115,16 +115,18 @@
 //! tokio = { version = "1.53.1", features = ["macros", "rt-multi-thread"] }
 //! ```
 
-//! SQLx 能力需要同时显式启用 `sqlx` 与 `tokio` feature；它使用 SQLx `0.8.6` 的 `AnyPool`
+//! SQLx 能力需要同时显式启用 `sqlx` 与 `tokio` feature；它使用 SQLx `0.9.0` 的 `AnyPool`
 //! 在运行时选择 PostgreSQL、MySQL/MariaDB 或 SQLite driver。`SqlxClient` 是可 clone 的实例入口，
 //! `SqlxUtils` 是只初始化一次的全局入口；调用方需要直接依赖匹配的 SQLx 版本以使用 `.bind(...)`、
-//! `FromRow`、`QueryBuilder` 或原生事务。crate 不创建 Tokio runtime、不调用 `block_on`，且默认不
-//! 启用 SQLx/TLS；`fetch_all` 使用默认 1_024 行上限并逐行消费。
+//! `FromRow`、`QueryBuilder` 或原生事务。查询入口接受 SQLx 0.9 的 `SqlSafeStr`：静态字面量可直接
+//! 传入，经过审计的动态 SQL 必须显式包装 `AssertSqlSafe`，参数值应优先使用 `.bind(...)`。crate
+//! 不创建 Tokio runtime、不调用 `block_on`，且默认不启用 SQLx/TLS；`fetch_all` 使用默认 1_024
+//! 行上限并逐行消费。
 //!
 //! ```toml
 //! [dependencies]
 //! axutils = { version = "0.1", default-features = false, features = ["sqlx", "tokio"] }
-//! sqlx = { version = "0.8.6", default-features = false, features = ["any", "postgres", "mysql", "sqlite", "runtime-tokio"] }
+//! sqlx = { version = "0.9.0", default-features = false, features = ["any", "postgres", "mysql", "sqlite-bundled", "runtime-tokio"] }
 //! tokio = { version = "1.53.1", features = ["macros", "rt-multi-thread"] }
 //! ```
 //! 详见 [`SQLx 使用文档`](https://github.com/crx-96/axutils-rust/blob/main/docs/examples/sqlx.md)。
@@ -146,7 +148,11 @@
 //! 进行 3 次网络尝试（包括首次请求）。若同时启用 `tokio`，还会提供异步执行入口；调用方
 //! 必须自行提供 Tokio runtime。再显式启用 `serde` 后，`HttpClient`/`HttpUtils` 提供 URL、可选
 //! query 或 JSON body、可选单次配置的三参数快捷方法，默认返回 JSON，并以 `*_bytes` 返回原始
-//! 字节。请求去重、完成缓存、重试策略和大小限制均通过 `HttpConfig` 显式配置。
+//! 字节。同步后端是 Rustls `ureq 3.4.0` 的 `ring` + 静态 `webpki-roots`；异步后端是
+//! `reqwest 0.13.4` 的 `rustls` + AWS-LC/platform verifier，未预安装进程级 provider 时使用
+//! AWS-LC，并从目标平台系统信任库验证根证书。生产路径不启用 native-tls/OpenSSL，也不跳过
+//! 证书或 hostname 校验；私有 CA 不会自动受信任。请求去重、完成缓存、重试策略和大小限制均
+//! 通过 `HttpConfig` 显式配置。
 //! 详细 API、feature 矩阵和安全边界见 [`HTTP 使用文档`](https://github.com/crx-96/axutils-rust/blob/main/docs/examples/http.md)。
 //!
 //! ```toml

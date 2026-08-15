@@ -115,6 +115,21 @@
 
 ### Changed
 
+- SQLx 依赖升级到 `0.9.0` 并改用 `sqlite-bundled` feature；这是一次 breaking 迁移。`SqlxClient`/
+  `SqlxUtils` 的 query/query_as/query_scalar 入口现在遵循 SQLx 0.9 的 `SqlSafeStr` 约束：静态
+  SQL 字面量可直接传入，经过审计的动态 SQL 必须由调用方显式包装 `sqlx::AssertSqlSafe`，用户数据
+  应优先使用 `.bind(...)`；SQLx Any 查询类型的 `AnyArguments<'q>` 也已迁移为无生命周期参数的
+  `AnyArguments`。直接使用原生 SQLx 类型的下游应同步升级到 SQLx 0.9.x，并将 SQLite feature
+  从 `sqlite` 调整为 `sqlite-bundled`。
+- HTTP 异步依赖升级到 `reqwest 0.13.4` 并改用 `rustls` feature：未预安装进程级 Rustls
+  `CryptoProvider` 时使用 AWS-LC provider，并通过 `rustls-platform-verifier` 使用目标平台系统
+  信任库；同步 `ureq 3.4.0` 继续使用 Rustls、`ring` 和静态 `webpki-roots`。这改变了 HTTP 的
+  provider/root 与跨平台证书前提，但仍禁止 native-tls/OpenSSL，不提供跳过证书或 hostname 校验
+  的入口；调用方需要在目标平台验证系统 CA。ureq 3.4 的 TLS `InvalidData` 错误现在归类为
+  `HttpTransportErrorKind::Tls`，避免证书/hostname 拒绝被误报为普通连接失败。
+- `rand` 可选依赖从 `0.9` 升级到 `0.10.2`；`RandomUtils` 的公开入口和语义保持不变，Redis
+  租约锁内部改用 rand 0.10 的 `SysRng`，仍只使用操作系统 CSPRNG 生成锁 token，不启用公共
+  `RandomUtils` feature。
 - 当前最低支持 Rust 版本从 1.88 提升为 1.95；使用 Rust 1.88—1.94 的下游项目需要先升级工具链。edition、依赖版本和 feature 边界未因本次 MSRV 调整改变。
 - `HttpError` 和 `HttpTransportErrorKind` 现在标记为 `#[non_exhaustive]`；这是对下游穷尽匹配
   的兼容性约束，调用方匹配 HTTP 错误时必须保留 wildcard，以允许后续增加脱敏错误分类。

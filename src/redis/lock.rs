@@ -29,11 +29,14 @@ pub(crate) fn lock_ttl_duration(ttl: Duration) -> Result<Duration, RedisError> {
 }
 
 pub(crate) fn token() -> Result<[u8; TOKEN_BYTES], RedisError> {
-    use rand::{rngs::OsRng, TryRngCore};
+    use rand::rngs::SysRng;
 
+    token_with_rng(&mut SysRng)
+}
+
+fn token_with_rng<R: rand::TryRng>(rng: &mut R) -> Result<[u8; TOKEN_BYTES], RedisError> {
     let mut token = [0_u8; TOKEN_BYTES];
-    OsRng
-        .try_fill_bytes(&mut token)
+    rng.try_fill_bytes(&mut token)
         .map_err(|_| RedisError::Transport(super::error::RedisTransportErrorKind::Other))?;
     Ok(token)
 }
@@ -353,7 +356,8 @@ mod tests {
 
     use super::{
         acquire_command, finish_release, finish_renew, lock_ttl_duration, lock_ttl_millis,
-        release_command, renew_command, script_result, token, RELEASE_SCRIPT, RENEW_SCRIPT,
+        release_command, renew_command, script_result, token, token_with_rng, RELEASE_SCRIPT,
+        RENEW_SCRIPT,
     };
     use crate::redis::{RedisClient, RedisConfig, RedisError};
 
@@ -416,6 +420,44 @@ mod tests {
         assert_eq!(first.len(), 32);
         assert_eq!(second.len(), 32);
         assert_ne!(first, second);
+    }
+
+    #[derive(Debug)]
+    struct FailingRng;
+
+    impl std::error::Error for FailingRng {}
+
+    impl std::fmt::Display for FailingRng {
+        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            formatter.write_str("test RNG failure")
+        }
+    }
+
+    impl rand::TryRng for FailingRng {
+        type Error = Self;
+
+        fn try_next_u32(&mut self) -> Result<u32, Self::Error> {
+            Err(Self)
+        }
+
+        fn try_next_u64(&mut self) -> Result<u64, Self::Error> {
+            Err(Self)
+        }
+
+        fn try_fill_bytes(&mut self, _destination: &mut [u8]) -> Result<(), Self::Error> {
+            Err(Self)
+        }
+    }
+
+    #[test]
+    fn token_rng_failure_maps_to_transport_error_without_fallback() {
+        let mut rng = FailingRng;
+        assert_eq!(
+            token_with_rng(&mut rng),
+            Err(RedisError::Transport(
+                crate::redis::RedisTransportErrorKind::Other
+            ))
+        );
     }
 
     #[test]

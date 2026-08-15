@@ -34,6 +34,20 @@ async fn compile_async_api() {
     let _ = loader.load_async::<axutils::ConfigValue>("config.json").await;
 }
 
+#[cfg(feature = "serde-yaml")]
+fn main() {
+    let value = axutils::ConfigUtils::parse_value("a: 1\n", axutils::ConfigFormat::Yaml)
+        .expect("yaml should parse under serde+serde-saphyr");
+    let _ = value;
+}
+
+#[cfg(feature = "serde-tokio-yaml")]
+fn main() {
+    let value = axutils::ConfigUtils::parse_value("a: 1\n", axutils::ConfigFormat::Yaml)
+        .expect("yaml should parse under serde+serde-saphyr+tokio");
+    let _ = value;
+}
+
 #[cfg(feature = "serde-tokio")]
 fn main() {
     let _ = compile_async_api;
@@ -96,6 +110,12 @@ fn main() {
     let _ = axutils::ConfigUtils::loader;
 }
 
+#[cfg(feature = "negative-yaml-only-no-serde")]
+fn main() {
+    // `serde-saphyr` alone (without `serde`) must not export any config API either.
+    let _ = axutils::ConfigFormat::Yaml;
+}
+
 #[cfg(feature = "negative-config-async-no-tokio")]
 fn main() {
     let _ = axutils::ConfigUtils::load_value_async;
@@ -136,6 +156,8 @@ fn main() {
     feature = "serde-only",
     feature = "serde-toml",
     feature = "serde-tokio",
+    feature = "serde-yaml",
+    feature = "serde-tokio-yaml",
     feature = "all",
     feature = "serde-tokio-all",
     feature = "tokio-only",
@@ -143,6 +165,7 @@ fn main() {
     feature = "negative-config-module-no-serde",
     feature = "negative-config-utils-no-serde",
     feature = "negative-toml-only-no-serde",
+    feature = "negative-yaml-only-no-serde",
     feature = "negative-config-async-no-tokio",
     feature = "negative-yaml-under-serde-only",
     feature = "negative-toml-under-serde-only",

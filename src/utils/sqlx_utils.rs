@@ -84,6 +84,9 @@ impl SqlxUtils {
 
     /// 创建固定为 SQLx `Any` 后端的查询对象，不检查全局初始化状态。
     ///
+    /// SQLx 0.9 默认只接受静态 SQL 字面量；动态 SQL 必须由调用方审计后用
+    /// `sqlx::AssertSqlSafe` 显式标记，这个标记不会替调用方做转义或注入检查。
+    ///
     /// # Examples
     ///
     /// ```
@@ -93,24 +96,27 @@ impl SqlxUtils {
     /// # }
     /// ```
     pub fn query<'q>(
-        sql: &'q str,
-    ) -> sqlx::query::Query<'q, sqlx::Any, sqlx::any::AnyArguments<'q>> {
+        sql: impl sqlx::SqlSafeStr,
+    ) -> sqlx::query::Query<'q, sqlx::Any, sqlx::any::AnyArguments> {
         sqlx::query::<sqlx::Any>(sql)
     }
 
     /// 创建固定为 SQLx `Any` 后端、映射到 `T` 的查询对象，不访问全局 client。
+    ///
+    /// SQLx 0.9 默认只接受静态 SQL 字面量；动态 SQL 必须由调用方审计后用
+    /// `sqlx::AssertSqlSafe` 显式标记，这个标记不会替调用方做转义或注入检查。
     ///
     /// # Examples
     ///
     /// ```
     /// # #[cfg(all(feature = "sqlx", feature = "tokio"))]
     /// # {
-    /// let _method = axutils::SqlxUtils::query_as::<(i64,)>;
+    /// let _query = axutils::SqlxUtils::query_as::<(i64,)>("SELECT 1");
     /// # }
     /// ```
     pub fn query_as<'q, T>(
-        sql: &'q str,
-    ) -> sqlx::query::QueryAs<'q, sqlx::Any, T, sqlx::any::AnyArguments<'q>>
+        sql: impl sqlx::SqlSafeStr,
+    ) -> sqlx::query::QueryAs<'q, sqlx::Any, T, sqlx::any::AnyArguments>
     where
         T: for<'r> sqlx::FromRow<'r, SqlxRow>,
     {
@@ -119,17 +125,20 @@ impl SqlxUtils {
 
     /// 创建固定为 SQLx `Any` 后端、读取第一列为 `T` 的查询对象，不访问全局 client。
     ///
+    /// SQLx 0.9 默认只接受静态 SQL 字面量；动态 SQL 必须由调用方审计后用
+    /// `sqlx::AssertSqlSafe` 显式标记，这个标记不会替调用方做转义或注入检查。
+    ///
     /// # Examples
     ///
     /// ```
     /// # #[cfg(all(feature = "sqlx", feature = "tokio"))]
     /// # {
-    /// let _method = axutils::SqlxUtils::query_scalar::<i64>;
+    /// let _query = axutils::SqlxUtils::query_scalar::<i64>("SELECT 1");
     /// # }
     /// ```
     pub fn query_scalar<'q, T>(
-        sql: &'q str,
-    ) -> sqlx::query::QueryScalar<'q, sqlx::Any, T, sqlx::any::AnyArguments<'q>>
+        sql: impl sqlx::SqlSafeStr,
+    ) -> sqlx::query::QueryScalar<'q, sqlx::Any, T, sqlx::any::AnyArguments>
     where
         (T,): for<'r> sqlx::FromRow<'r, SqlxRow>,
     {
@@ -148,7 +157,7 @@ impl SqlxUtils {
     /// # }
     /// ```
     pub async fn execute_async<'q>(
-        query: sqlx::query::Query<'q, sqlx::Any, sqlx::any::AnyArguments<'q>>,
+        query: sqlx::query::Query<'q, sqlx::Any, sqlx::any::AnyArguments>,
     ) -> Result<SqlxQueryResult, SqlxError> {
         client()?.execute_async(query).await
     }
@@ -165,7 +174,7 @@ impl SqlxUtils {
     /// # }
     /// ```
     pub async fn fetch_one_async<'q>(
-        query: sqlx::query::Query<'q, sqlx::Any, sqlx::any::AnyArguments<'q>>,
+        query: sqlx::query::Query<'q, sqlx::Any, sqlx::any::AnyArguments>,
     ) -> Result<SqlxRow, SqlxError> {
         client()?.fetch_one_async(query).await
     }
@@ -184,7 +193,7 @@ impl SqlxUtils {
     /// # }
     /// ```
     pub async fn fetch_one_as_async<'q, T>(
-        query: sqlx::query::QueryAs<'q, sqlx::Any, T, sqlx::any::AnyArguments<'q>>,
+        query: sqlx::query::QueryAs<'q, sqlx::Any, T, sqlx::any::AnyArguments>,
     ) -> Result<T, SqlxError>
     where
         T: Send + Unpin + for<'r> sqlx::FromRow<'r, SqlxRow>,
@@ -206,7 +215,7 @@ impl SqlxUtils {
     /// # }
     /// ```
     pub async fn fetch_optional_async<'q>(
-        query: sqlx::query::Query<'q, sqlx::Any, sqlx::any::AnyArguments<'q>>,
+        query: sqlx::query::Query<'q, sqlx::Any, sqlx::any::AnyArguments>,
     ) -> Result<Option<SqlxRow>, SqlxError> {
         client()?.fetch_optional_async(query).await
     }
@@ -225,7 +234,7 @@ impl SqlxUtils {
     /// # }
     /// ```
     pub async fn fetch_optional_as_async<'q, T>(
-        query: sqlx::query::QueryAs<'q, sqlx::Any, T, sqlx::any::AnyArguments<'q>>,
+        query: sqlx::query::QueryAs<'q, sqlx::Any, T, sqlx::any::AnyArguments>,
     ) -> Result<Option<T>, SqlxError>
     where
         T: Send + Unpin + for<'r> sqlx::FromRow<'r, SqlxRow>,
@@ -245,7 +254,7 @@ impl SqlxUtils {
     /// # }
     /// ```
     pub async fn fetch_all_async<'q>(
-        query: sqlx::query::Query<'q, sqlx::Any, sqlx::any::AnyArguments<'q>>,
+        query: sqlx::query::Query<'q, sqlx::Any, sqlx::any::AnyArguments>,
     ) -> Result<Vec<SqlxRow>, SqlxError> {
         client()?.fetch_all_async(query).await
     }
@@ -264,7 +273,7 @@ impl SqlxUtils {
     /// # }
     /// ```
     pub async fn fetch_all_as_async<'q, T>(
-        query: sqlx::query::QueryAs<'q, sqlx::Any, T, sqlx::any::AnyArguments<'q>>,
+        query: sqlx::query::QueryAs<'q, sqlx::Any, T, sqlx::any::AnyArguments>,
     ) -> Result<Vec<T>, SqlxError>
     where
         T: Send + Unpin + for<'r> sqlx::FromRow<'r, SqlxRow>,
@@ -286,7 +295,7 @@ impl SqlxUtils {
     /// # }
     /// ```
     pub async fn fetch_scalar_async<'q, T>(
-        query: sqlx::query::QueryScalar<'q, sqlx::Any, T, sqlx::any::AnyArguments<'q>>,
+        query: sqlx::query::QueryScalar<'q, sqlx::Any, T, sqlx::any::AnyArguments>,
     ) -> Result<T, SqlxError>
     where
         T: Send + Unpin,

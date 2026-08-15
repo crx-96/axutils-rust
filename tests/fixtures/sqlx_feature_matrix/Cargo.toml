@@ -22,7 +22,8 @@ negative-tokio-module = ["axutils/tokio"]
 negative-tokio-root = ["axutils/tokio"]
 negative-tokio-utils = ["axutils/tokio"]
 negative-tokio-async = ["axutils/tokio"]
+negative-dynamic-sql = ["axutils/sqlx", "axutils/tokio"]
 
 [dependencies]
 axutils = { path = "../../..", default-features = false }
-sqlx = { version = "0.8.6", default-features = false, features = ["any", "postgres", "mysql", "sqlite", "runtime-tokio"], optional = true }
+sqlx = { version = "0.9.0", default-features = false, features = ["any", "postgres", "mysql", "sqlite-bundled", "runtime-tokio"], optional = true }

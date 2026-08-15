@@ -420,6 +420,33 @@ mod tests {
                 Some("{{ secret }}".to_owned()),
             );
         }
+
+        #[test]
+        fn preserves_boolean_and_optional_context_values() {
+            #[derive(Serialize)]
+            struct Context {
+                enabled: bool,
+                optional: Option<&'static str>,
+            }
+
+            let context = Context {
+                enabled: true,
+                optional: None,
+            };
+            assert_eq!(
+                FormatUtils::template("{{ enabled }}", &context, None, TemplateEngine::MiniJinja),
+                Some("True".to_owned()),
+            );
+            assert_eq!(
+                FormatUtils::template(
+                    "{% if optional %}present{% else %}absent{% endif %}",
+                    &context,
+                    None,
+                    TemplateEngine::MiniJinja,
+                ),
+                Some("absent".to_owned()),
+            );
+        }
     }
 
     #[cfg(all(feature = "serde", feature = "strfmt", feature = "minijinja"))]

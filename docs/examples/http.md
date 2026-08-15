@@ -37,11 +37,15 @@ serde = { version = "1", features = ["derive"] }
 tokio = { version = "1.53.1", features = ["macros", "rt-multi-thread"] }
 ```
 
-客户端使用 Rustls；同步后端为 `ureq`，异步后端为 `reqwest`。当前 `http` feature 为保持
-`http + tokio` 的组合式异步 API 契约，会同时编译两个可选后端；只调用同步 API 的项目也会承担
-`reqwest` 及其传递依赖的编译成本。两者都关闭系统代理、自动重定向、自动压缩和后端隐式重试。
-库只保证客户端侧约束，不承诺 SSRF 防护；调用方仍须自行限制目标主机、出口网络、DNS 重绑定
-风险以及业务认证信息。
+客户端使用 Rustls；同步后端为 `ureq 3.4.0`，使用 `ring` 与静态 `webpki-roots`，异步后端为
+`reqwest 0.13.4` 的 `rustls` feature。后者在没有预先安装进程级 Rustls `CryptoProvider`
+时使用该 feature 请求的 AWS-LC provider，并通过 `rustls-platform-verifier` 使用目标平台的系统
+信任库；如果应用已经安装了进程级 provider，Rustls 会按其进程级语义优先使用它。HTTP 生产路径
+不启用 `native-tls`/OpenSSL，不提供跳过证书或 hostname 校验的配置，也不自动信任私有 CA。
+当前 `http` feature 为保持 `http + tokio` 的组合式异步 API 契约，会同时编译两个可选后端；只调用
+同步 API 的项目也会承担 `reqwest` 及其传递依赖的编译成本。两者都关闭系统代理、自动重定向、
+自动压缩和后端隐式重试。库只保证客户端侧约束，不承诺 SSRF 防护；调用方仍须自行限制目标主机、
+出口网络、DNS 重绑定风险以及业务认证信息。
 
 ## 公共导出路径
 

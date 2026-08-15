@@ -893,6 +893,10 @@ fn map_ureq_error(error: &ureq::Error) -> HttpTransportErrorKind {
         ureq::Error::Timeout(_) => HttpTransportErrorKind::Timeout,
         ureq::Error::Tls(_) | ureq::Error::Rustls(_) => HttpTransportErrorKind::Tls,
         ureq::Error::Protocol(_) => HttpTransportErrorKind::Protocol,
+        // ureq 3.4 wraps Rustls certificate/hostname failures as InvalidData I/O errors.
+        ureq::Error::Io(error) if error.kind() == std::io::ErrorKind::InvalidData => {
+            HttpTransportErrorKind::Tls
+        }
         ureq::Error::Io(_)
         | ureq::Error::HostNotFound
         | ureq::Error::ConnectionFailed

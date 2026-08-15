@@ -335,38 +335,40 @@ fn captures_sqlx_events_and_exact_row_counts_without_sensitive_context() {
                 Err(SqlxError::PoolAcquireTimeout)
             ));
             held.rollback().await.expect("release held connection");
-            sqlx.execute_async(sqlx.query(&format!(
+            // The identifier is a fixed test sentinel, not user input; SQLx 0.9 requires this
+            // audit marker for intentionally constructed dynamic SQL.
+            sqlx.execute_async(sqlx.query(sqlx::AssertSqlSafe(format!(
                 "CREATE TABLE {SQL_TEXT_SENTINEL} (value TEXT NOT NULL)"
-            )))
+            ))))
             .await
             .expect("create table");
             sqlx.execute_async(
-                sqlx.query(&format!(
+                sqlx.query(sqlx::AssertSqlSafe(format!(
                     "INSERT INTO {SQL_TEXT_SENTINEL} (value) VALUES (?)"
-                ))
+                )))
                 .bind(SQL_SENTINEL),
             )
             .await
             .expect("insert value");
             sqlx.execute_async(
-                sqlx.query(&format!(
+                sqlx.query(sqlx::AssertSqlSafe(format!(
                     "INSERT INTO {SQL_TEXT_SENTINEL} (value) VALUES (?)"
-                ))
+                )))
                 .bind(SQL_SENTINEL),
             )
             .await
             .expect("insert second value");
             assert!(matches!(
-                sqlx.fetch_all_async(
-                    sqlx.query(&format!("SELECT value FROM {SQL_TEXT_SENTINEL}")),
-                )
+                sqlx.fetch_all_async(sqlx.query(sqlx::AssertSqlSafe(format!(
+                    "SELECT value FROM {SQL_TEXT_SENTINEL}"
+                ))),)
                     .await,
                 Err(SqlxError::RowLimitExceeded { limit: 1 })
             ));
             assert!(matches!(
-                sqlx.fetch_one_async(sqlx.query(&format!(
+                sqlx.fetch_one_async(sqlx.query(sqlx::AssertSqlSafe(format!(
                     "SELECT value FROM {SQL_TEXT_SENTINEL} WHERE 1 = 0"
-                )))
+                ))))
                 .await,
                 Err(SqlxError::RowNotFound)
             ));

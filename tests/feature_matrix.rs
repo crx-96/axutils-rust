@@ -204,6 +204,8 @@ fn verifies_format_template_feature_api_matrix() {
             assert_expected_diagnostic(&output, diagnostic_token, feature);
         }
     }
+
+    assert_format_dependency_boundaries();
 }
 
 #[test]
@@ -281,12 +283,15 @@ fn verifies_config_feature_api_matrix_and_dependency_boundaries() {
         ("serde-only", true, ""),
         ("serde-toml", true, ""),
         ("serde-tokio", true, ""),
+        ("serde-yaml", true, ""),
+        ("serde-tokio-yaml", true, ""),
         ("all", true, ""),
         ("serde-tokio-all", true, ""),
         ("negative-config-module-no-serde", false, "configloader"),
         ("negative-config-utils-no-serde", false, "configutils"),
         ("negative-tokio-config-no-serde", false, "configutils"),
         ("negative-toml-only-no-serde", false, "configutils"),
+        ("negative-yaml-only-no-serde", false, "configformat"),
         ("negative-config-async-no-tokio", false, "load_value_async"),
         ("negative-yaml-under-serde-only", false, "configformat"),
         ("negative-toml-under-serde-only", false, "configformat"),
@@ -538,6 +543,46 @@ fn verifies_redis_feature_api_matrix_and_dependency_boundaries() {
 }
 
 #[test]
+#[ignore = "慢速 rand/Redis feature/依赖契约矩阵；使用 cargo test --no-default-features --test feature_matrix -- --ignored 执行"]
+fn verifies_rand_feature_api_matrix_and_dependency_boundaries() {
+    let fixture_manifest = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("fixtures")
+        .join("rand_feature_matrix")
+        .join("Cargo.toml");
+    let target_dir = unique_target("axutils-rand-feature-matrix");
+
+    for (feature, expected_success, diagnostic_token) in [
+        ("none", true, ""),
+        ("rand", true, ""),
+        ("rand-redis", true, ""),
+        ("redis", true, ""),
+        ("redis-tokio", true, ""),
+        ("negative-no-rand-root", false, "randomutils"),
+        ("negative-no-rand-module", false, "randomutils"),
+        ("negative-no-rand-utils", false, "randomutils"),
+        ("negative-redis-random-utils", false, "randomutils"),
+    ] {
+        let output = run_fixture(&fixture_manifest, &target_dir.0, feature);
+        if expected_success {
+            assert!(
+                output.status.success(),
+                "rand fixture feature `{feature}` should compile successfully: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        } else {
+            assert!(
+                !output.status.success(),
+                "rand fixture feature `{feature}` should fail to compile"
+            );
+            assert_expected_diagnostic(&output, diagnostic_token, feature);
+        }
+    }
+
+    assert_rand_dependency_boundaries();
+}
+
+#[test]
 #[ignore = "慢速 feature/依赖契约矩阵；使用 cargo test --no-default-features --test feature_matrix -- --ignored 执行"]
 fn verifies_sqlx_feature_api_matrix_and_dependency_boundaries() {
     let fixture_manifest = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -563,6 +608,7 @@ fn verifies_sqlx_feature_api_matrix_and_dependency_boundaries() {
         ("negative-tokio-root", false, "sqlxclient"),
         ("negative-tokio-utils", false, "sqlxutils"),
         ("negative-tokio-async", false, "sqlxutils"),
+        ("negative-dynamic-sql", false, "sqlsafestr"),
     ] {
         let output = run_fixture(&fixture_manifest, &target_dir.0, feature);
         if expected_success {
@@ -766,6 +812,13 @@ fn assert_config_dependency_boundaries() {
     assert!(!has_package(&saphyr_only_tree, "toml"));
     assert!(!has_package(&saphyr_only_tree, "rust-ini"));
 
+    let serde_saphyr_tree = cargo_tree("serde,serde-saphyr");
+    assert!(has_package(&serde_saphyr_tree, "serde"));
+    assert!(has_package(&serde_saphyr_tree, "serde_json"));
+    assert!(has_package(&serde_saphyr_tree, "serde-saphyr"));
+    assert!(!has_package(&serde_saphyr_tree, "toml"));
+    assert!(!has_package(&serde_saphyr_tree, "rust-ini"));
+
     let ini_only_tree = cargo_tree("rust-ini");
     assert!(has_package(&ini_only_tree, "rust-ini"));
     assert!(!has_package(&ini_only_tree, "toml"));
@@ -792,9 +845,29 @@ fn assert_config_dependency_boundaries() {
     assert!(!has_package(&serde_tokio_tree, "rust-ini"));
     assert!(!has_package(&serde_tokio_tree, "lettre"));
 
+    let serde_tokio_saphyr_tree = cargo_tree("serde,serde-saphyr,tokio");
+    assert!(has_package(&serde_tokio_saphyr_tree, "serde-saphyr"));
+    assert!(has_package(&serde_tokio_saphyr_tree, "tokio"));
+    assert!(!has_package(&serde_tokio_saphyr_tree, "toml"));
+    assert!(!has_package(&serde_tokio_saphyr_tree, "rust-ini"));
+
     let tokio_feature_tree = cargo_tree_with_edges("tokio", "normal,build,features");
     assert!(tokio_feature_tree.contains("tokio feature \"fs\""));
     assert!(tokio_feature_tree.contains("tokio feature \"io-util\""));
+}
+
+fn assert_format_dependency_boundaries() {
+    let minijinja_tree = cargo_tree("serde,minijinja");
+    assert!(has_package(&minijinja_tree, "serde"));
+    assert!(has_package(&minijinja_tree, "serde_json"));
+    assert!(has_package(&minijinja_tree, "minijinja"));
+    assert!(!has_package(&minijinja_tree, "strfmt"));
+
+    let strfmt_tree = cargo_tree("serde,strfmt");
+    assert!(has_package(&strfmt_tree, "serde"));
+    assert!(has_package(&strfmt_tree, "serde_json"));
+    assert!(has_package(&strfmt_tree, "strfmt"));
+    assert!(!has_package(&strfmt_tree, "minijinja"));
 }
 
 fn run_fixture(manifest: &Path, target_dir: &Path, feature: &str) -> Output {
@@ -1167,16 +1240,22 @@ fn assert_http_dependency_boundaries() {
     let http_tree = cargo_tree("http");
     assert!(has_package(&http_tree, "ureq"));
     assert!(has_package(&http_tree, "reqwest"));
+    assert!(has_package_version_prefix(&http_tree, "reqwest", "0.13"));
     assert!(has_package(&http_tree, "url"));
     assert!(!has_package(&http_tree, "lettre"));
-    assert_forbidden_tls_packages(&http_tree);
+    assert_http_tls_packages(&http_tree);
 
     let http_tokio_tree = cargo_tree("http,tokio");
     assert!(has_package(&http_tokio_tree, "ureq"));
     assert!(has_package(&http_tokio_tree, "reqwest"));
+    assert!(has_package_version_prefix(
+        &http_tokio_tree,
+        "reqwest",
+        "0.13"
+    ));
     assert!(has_package(&http_tokio_tree, "tokio"));
     assert!(!has_package(&http_tokio_tree, "lettre"));
-    assert_forbidden_tls_packages(&http_tokio_tree);
+    assert_http_tls_packages(&http_tokio_tree);
 
     let http_serde_tree = cargo_tree("http,serde");
     assert!(has_package(&http_serde_tree, "ureq"));
@@ -1184,11 +1263,26 @@ fn assert_http_dependency_boundaries() {
     assert!(has_package(&http_serde_tree, "serde"));
     assert!(has_package(&http_serde_tree, "serde_json"));
     assert!(has_package(&http_serde_tree, "serde_urlencoded"));
+    assert_http_tls_packages(&http_serde_tree);
+
+    let http_lettre_tree = cargo_tree("http,lettre");
+    assert!(has_package(&http_lettre_tree, "reqwest"));
+    assert!(has_package(&http_lettre_tree, "lettre"));
+    assert_http_tls_packages(&http_lettre_tree);
+
+    let http_lettre_tokio_tree = cargo_tree("http,lettre,tokio");
+    assert!(has_package(&http_lettre_tokio_tree, "reqwest"));
+    assert!(has_package(&http_lettre_tokio_tree, "lettre"));
+    assert!(has_package(&http_lettre_tokio_tree, "tokio"));
+    assert_http_tls_packages(&http_lettre_tokio_tree);
 
     let http_feature_tree = cargo_tree_with_edges("http", "normal,build,features");
     assert!(http_feature_tree.contains("ureq feature \"rustls\""));
-    assert!(http_feature_tree.contains("reqwest feature \"rustls-tls-webpki-roots\""));
+    assert!(http_feature_tree.contains("reqwest feature \"rustls\""));
+    assert!(http_feature_tree.contains("reqwest feature \"__rustls-aws-lc-rs\""));
+    assert!(http_feature_tree.contains("rustls-platform-verifier"));
     assert!(!http_feature_tree.contains("ureq feature \"gzip\""));
+    assert!(!http_feature_tree.contains("reqwest feature \"rustls-tls-webpki-roots\""));
     assert!(!http_feature_tree.contains("reqwest feature \"native-tls\""));
 }
 
@@ -1321,6 +1415,24 @@ fn assert_redis_dependency_boundaries() {
     }
 }
 
+fn assert_rand_dependency_boundaries() {
+    let no_feature_tree = cargo_tree("");
+    assert!(!has_package(&no_feature_tree, "rand"));
+
+    for features in ["rand", "redis", "redis,tokio"] {
+        let tree = cargo_tree(features);
+        assert!(
+            has_package(&tree, "rand"),
+            "feature combination `{features}` should include rand"
+        );
+        let inverted = cargo_tree_inverted_with_edges(features, "rand", "all");
+        assert!(
+            has_package_version_prefix(&inverted, "rand", "0.10"),
+            "rand 0.10.x should be reachable for `{features}`: {inverted}"
+        );
+    }
+}
+
 fn assert_sqlx_dependency_boundaries() {
     let no_feature_tree = cargo_tree("");
     for package in [
@@ -1358,6 +1470,9 @@ fn assert_sqlx_dependency_boundaries() {
     ] {
         assert!(has_package(&sqlx_tree, package));
     }
+    assert!(has_package_version_prefix(&sqlx_tree, "sqlx", "0.9"));
+    assert!(has_package_version_prefix(&sqlx_tree, "sqlx-core", "0.9"));
+    assert!(has_package_version_prefix(&sqlx_tree, "sqlx-sqlite", "0.9"));
     assert!(!has_package(&sqlx_tree, "tokio"));
     assert!(!has_package(&sqlx_tree, "tokio-stream"));
     assert!(!has_package(&sqlx_tree, "sqlx-macros"));
@@ -1370,8 +1485,22 @@ fn assert_sqlx_dependency_boundaries() {
             "SQLx facade unexpectedly enables feature `{feature}`"
         );
     }
+    assert!(sqlx_feature_tree.contains("sqlx feature \"sqlite-bundled\""));
+    assert!(sqlx_feature_tree.contains("sqlx-sqlite feature \"bundled\""));
+    assert!(sqlx_feature_tree.contains("libsqlite3-sys feature \"bundled\""));
+    for feature in [
+        "sqlite",
+        "sqlite-deserialize",
+        "sqlite-load-extension",
+        "sqlite-unlock-notify",
+    ] {
+        assert!(
+            !sqlx_feature_tree.contains(&format!("sqlx feature \"{feature}\"")),
+            "SQLx facade unexpectedly enables feature `{feature}`"
+        );
+    }
     assert!(sqlx_feature_tree.contains("sqlx-core feature \"migrate\""));
-    assert!(sqlx_feature_tree.contains("sqlx-core feature \"json\""));
+    assert!(!sqlx_feature_tree.contains("sqlx-core feature \"json\""));
 
     let sqlx_tokio_tree = cargo_tree("sqlx,tokio");
     for package in [
@@ -1526,9 +1655,41 @@ fn cargo_feature_tree_inverted(features: &str, package: &str) -> String {
     String::from_utf8(output.stdout).expect("cargo tree output should be UTF-8")
 }
 
+fn cargo_tree_inverted_with_edges(features: &str, package: &str, edges: &str) -> String {
+    let (manifest_target, manifest) = dependency_tree_manifest(features);
+    let output = Command::new("cargo")
+        .arg("tree")
+        .arg("--manifest-path")
+        .arg(&manifest)
+        .arg("--no-default-features")
+        .arg("--features")
+        .arg("selected")
+        .arg("--offline")
+        .arg("--edges")
+        .arg(edges)
+        .arg("--invert")
+        .arg(package)
+        .env("CARGO_TERM_COLOR", "never")
+        .output()
+        .unwrap_or_else(|_| panic!("failed to run inverted cargo tree for `{package}`"));
+    assert!(
+        output.status.success(),
+        "inverted cargo tree failed for feature `{features}` and package `{package}`\nstdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    drop(manifest_target);
+    String::from_utf8(output.stdout).expect("cargo tree output should be UTF-8")
+}
+
 fn has_package(tree: &str, package: &str) -> bool {
     tree.lines()
         .any(|line| line.contains(&format!("{package} v")))
+}
+
+fn has_package_version_prefix(tree: &str, package: &str, version: &str) -> bool {
+    tree.lines()
+        .any(|line| line.contains(&format!("{package} v{version}.")))
 }
 
 fn assert_forbidden_tls_packages(tree: &str) {
@@ -1547,4 +1708,16 @@ fn assert_forbidden_tls_packages(tree: &str) {
             "forbidden TLS package `{package}` is present"
         );
     }
+}
+
+fn assert_http_tls_packages(tree: &str) {
+    for package in ["native-tls", "openssl", "openssl-sys"] {
+        assert!(
+            !has_package(tree, package),
+            "HTTP TLS tree unexpectedly contains `{package}`"
+        );
+    }
+    assert!(has_package(tree, "aws-lc-rs"));
+    assert!(has_package(tree, "aws-lc-sys"));
+    assert!(has_package(tree, "rustls-platform-verifier"));
 }

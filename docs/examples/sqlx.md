@@ -1,26 +1,27 @@
 # SQLx 使用文档
 
 本文档对应 `sqlx + tokio` feature 组合，覆盖 `SqlxConfig`、`SqlxClient`、`SqlxUtils` 及其
-原生 SQLx 类型别名。实现基于 SQLx `0.8.6` 的 `AnyPool`，在连接时按 URL 选择 PostgreSQL、
+原生 SQLx 类型别名。实现基于 SQLx `0.9.0` 的 `AnyPool`，在连接时按 URL 选择 PostgreSQL、
 MySQL/MariaDB 或 SQLite driver。
 
 ## 安装和 feature 前提
 
-`sqlx` 和 `tokio` 都必须显式启用。调用方还应直接依赖匹配的 SQLx 0.8.x 版本，因为本 crate
+`sqlx` 和 `tokio` 都必须显式启用。调用方还应直接依赖匹配的 SQLx 0.9.x 版本，因为本 crate
 的 query 构造函数返回 SQLx 原生 `Query`/`QueryAs`/`QueryScalar`，事务也返回原生
-`Transaction`：
+`Transaction`。SQLx 0.9 只把静态字符串直接视为 `SqlSafeStr`；动态 SQL 必须由调用方审计后
+包装 `sqlx::AssertSqlSafe`，用户数据应优先绑定参数：
 
 ```toml
 [dependencies]
 axutils = { version = "0.1", default-features = false, features = ["sqlx", "tokio"] }
-sqlx = { version = "0.8.6", default-features = false, features = ["any", "postgres", "mysql", "sqlite", "runtime-tokio"] }
+sqlx = { version = "0.9.0", default-features = false, features = ["any", "postgres", "mysql", "sqlite-bundled", "runtime-tokio"] }
 tokio = { version = "1.53.1", features = ["macros", "rt-multi-thread"] }
 ```
 
 只启用 `sqlx` 会编译可选依赖，但不会导出 `axutils::sqlx`、根类型或 `SqlxUtils`；只启用
 `tokio` 也不会引入 SQLx。首版不启用 SQLx facade 的 `macros`、`migrate`、`json` 或任何 TLS
-feature。SQLx 0.8.6 的驱动依赖会在内部依赖树中带出 `sqlx-core` 的 `json`/`migrate` 支持，
-这是上游实现依赖，不代表本 crate 提供 JSON、宏或 migration API。
+feature。SQLx 0.9.0 的驱动依赖会在内部依赖树中带出 `sqlx-core` 的 `migrate` 支持（不再带出旧版
+的 `json` core feature），这是上游实现依赖，不代表本 crate 提供 JSON、宏或 migration API。
 
 所有连接、执行、读取、事务、初始化和关闭操作都要求调用方已经在 Tokio runtime 中运行。
 crate 不创建 runtime、不调用 `block_on`，也不把 runtime 的所有权藏在 client 中。
@@ -252,7 +253,7 @@ async fn count_items(client: &axutils::SqlxClient) -> Result<i64, axutils::SqlxE
 `Transaction<'static, sqlx::Any>`。调用方必须显式 `commit` 或 `rollback`；事务 drop 只作为
 回滚兜底。
 
-SQLx 0.8.6 没有为 `Transaction` 直接实现 `Executor`。事务内应使用 `&mut *tx`，并直接依赖
+SQLx 0.9.0 没有为 `Transaction` 直接实现 `Executor`。事务内应使用 `&mut *tx`，并直接依赖
 匹配的 SQLx 版本以导入 SQLx 所需 trait：
 
 ```rust,no_run

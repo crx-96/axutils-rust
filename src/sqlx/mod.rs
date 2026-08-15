@@ -7,7 +7,7 @@
 //!
 //! [`SqlxClient`] 是可 clone 的实例级连接池入口；[`crate::SqlxUtils`] 只提供一次初始化的
 //! 全局转发。查询对象、行、结果和事务保留 SQLx 原生类型语义，调用方需要直接依赖匹配的
-//! SQLx 0.8.x 版本以使用 `.bind(...)`、`FromRow`、`QueryBuilder` 和事务的 `&mut *tx`。
+//! SQLx 0.9.x 版本以使用 `.bind(...)`、`FromRow`、`QueryBuilder` 和事务的 `&mut *tx`。
 
 mod client;
 mod config;

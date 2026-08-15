@@ -1,0 +1,19 @@
+[package]
+name = "axutils-rand-feature-matrix"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[features]
+none = []
+rand = ["axutils/rand"]
+rand-redis = ["rand", "redis"]
+redis = ["axutils/redis"]
+redis-tokio = ["axutils/redis", "axutils/tokio"]
+negative-no-rand-root = []
+negative-no-rand-module = []
+negative-no-rand-utils = []
+negative-redis-random-utils = ["axutils/redis"]
+
+[dependencies]
+axutils = { path = "../../..", default-features = false }

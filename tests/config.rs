@@ -359,6 +359,22 @@ async fn reads_yaml_fixture_asynchronously() {
     );
 }
 
+#[cfg(all(feature = "serde", feature = "tokio", feature = "serde-saphyr"))]
+#[tokio::test]
+async fn reads_typed_yaml_fixture_asynchronously() {
+    #[derive(Debug, Deserialize)]
+    struct Config {
+        server: Server,
+    }
+
+    let config: Config = ConfigUtils::load_async(fixture("valid.yaml"))
+        .await
+        .expect("async typed yaml fixture should load");
+    assert_eq!(config.server.host, "localhost");
+    assert_eq!(config.server.port, 8080);
+    assert!(config.server.tls);
+}
+
 #[cfg(all(feature = "serde", feature = "tokio", feature = "toml"))]
 #[tokio::test]
 async fn reads_toml_fixture_asynchronously() {

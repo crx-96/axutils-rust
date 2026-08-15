@@ -74,6 +74,8 @@ cargo test --no-default-features --lib
 
 # 需要检查某个可选模块时，只编译并运行对应 feature 的测试目标，例如：
 cargo test --no-default-features --features http --test http
+cargo test --no-default-features --features http --test http_tls -- --test-threads=1
+cargo test --no-default-features --features http,tokio --test http_tls -- --test-threads=1
 cargo test --no-default-features --features redis --test redis
 cargo test --no-default-features --features redis,tokio --doc
 cargo tree --no-default-features --features redis -e normal,build
@@ -157,6 +159,8 @@ cargo check --no-default-features --features logging,lettre
 cargo check --no-default-features --features logging,lettre,tokio
 cargo check --no-default-features --features logging,serde
 cargo check --no-default-features --features logging,serde,tokio
+cargo test --no-default-features --features http --test http_tls -- --test-threads=1
+cargo test --no-default-features --features http,tokio --test http_tls -- --test-threads=1
 cargo test --no-default-features --features logging --test log_global --test log_conflict -- --test-threads=1
 cargo test --no-default-features --features tracing,http --test log_observability -- --test-threads=1
 cargo test --no-default-features --features tracing,http,tokio --test log_observability -- --test-threads=1
@@ -210,13 +214,23 @@ crate，与 `PathUtils` 同类）；`base64`/`md5`/`aes` 各自解锁对应算�
 邮件能力还必须验证 `tokio` 单 feature 不导出邮件 API、`lettre` 单 feature 不导出异步 API，
 以及生产依赖树只包含 Rustls、`ring` 和 `webpki-roots` 方案，不包含 native-tls/OpenSSL。
 
+HTTP 能力同步使用 `ureq 3.4.0` 的 Rustls、`ring` 和静态 `webpki-roots`；异步使用
+`reqwest 0.13.4` 的 `rustls` feature。后者会在没有进程级 Rustls `CryptoProvider` 时请求
+AWS-LC provider，并通过 `rustls-platform-verifier` 使用目标平台系统根证书；HTTP 依赖树允许
+AWS-LC/platform-verifier 及目标平台根发现依赖，但始终禁止 native-tls/OpenSSL。生产 API 不提供
+跳过证书/hostname 校验或注入私有 CA 的入口；TLS fixture 只能使用 tests/fixtures/http_tls/ 中
+的测试证书，不能修改开发机系统信任库。
+
 SQLx 能力必须同时启用 `sqlx` 与 `tokio`；`sqlx` 单 feature 只编译关闭默认 feature 的 SQLx
 依赖，不导出 `axutils::sqlx`/根类型/`SqlxUtils`，`tokio` 单 feature 也不引入 SQLx。SQLx
-固定使用 `0.8.6` 下限、`Any` + PostgreSQL/MySQL/SQLite 三个 driver 和 `runtime-tokio` 弱依赖
-映射；不启用 SQLx facade 的宏、迁移、JSON 或 TLS feature。SQLx 0.8.6 的驱动清单会在内部
-依赖树中带出 `sqlx-core` 的 `json`/`migrate` 支持依赖，这是上游 manifest 的实现细节，不等于
-本 crate 开放这些 SQLx API。集成测试只使用 SQLite `sqlite::memory:` 且将最大连接数固定为 1；
-事务测试必须通过原生 SQLx 的 `&mut *tx` 语义，真实 PostgreSQL/MySQL 服务测试不属于本任务。
+固定使用 `0.9.0` 下限、`Any` + PostgreSQL/MySQL/SQLite 三个 driver 和 `runtime-tokio` 弱依赖
+映射；SQLite 使用 `sqlite-bundled`，不启用 SQLx facade 的宏、迁移、JSON 或 TLS feature。SQLx 0.9.0 的驱动清单会在内部
+依赖树中带出 `sqlx-core` 的 `migrate` 支持依赖（不再带出旧版的 `json` core feature），这是上游
+manifest 的实现细节，不等于
+本 crate 开放这些 SQLx API。查询构造只接受 SQLx 0.9 的 `SqlSafeStr`：静态字面量可直接传入，
+动态 SQL 必须由调用方审计后包装 `AssertSqlSafe`，用户数据应使用 `.bind(...)`。集成测试只使用
+SQLite `sqlite::memory:` 且将最大连接数固定为 1；事务测试必须通过原生 SQLx 的 `&mut *tx` 语义，
+真实 PostgreSQL/MySQL 服务测试不属于本任务。
 
 邮件真实测试使用 `tests/email_live.rs`，函数固定 `#[ignore]`，且还需要一次性设置
 `AXUTILS_EMAIL_LIVE_TEST=1`。测试从本地 `config/email-test.toml` 读取配置；该目录整体被
@@ -358,12 +372,12 @@ axutils = { version = "0.1", features = ["rand"] }
 axutils = { version = "0.1", features = ["regex"] }
 ```
 
-SQLx 异步 Any 客户端必须同时启用 `sqlx` 和 `tokio`，并由应用直接依赖 SQLx 0.8.x 与 Tokio：
+SQLx 异步 Any 客户端必须同时启用 `sqlx` 和 `tokio`，并由应用直接依赖 SQLx 0.9.x 与 Tokio：
 
 ```toml
 [dependencies]
 axutils = { version = "0.1", default-features = false, features = ["sqlx", "tokio"] }
-sqlx = { version = "0.8.6", default-features = false, features = ["any", "postgres", "mysql", "sqlite", "runtime-tokio"] }
+sqlx = { version = "0.9.0", default-features = false, features = ["any", "postgres", "mysql", "sqlite-bundled", "runtime-tokio"] }
 tokio = { version = "1.53.1", features = ["macros", "rt-multi-thread"] }
 ```
 
@@ -399,7 +413,7 @@ feature 后，最终 binary 只能保留一个 global allocator；现有 `--all-
 `lettre`”打开 Tokio Rustls 适配，因此单独启用 `tokio` 不会拉入 `lettre`。同一个 `tokio`
 feature 也为 `serde + tokio` 配置异步入口提供 `fs`/`io-util`；生产依赖不使用 `tokio` 的
 `full`、`macros` 或 `rt-multi-thread`，测试和 ignored 真实测试所需 runtime feature 只放在
-dev-dependency。`lettre` 最低版本为经核验的 `0.11.22`，使用 Cargo 默认 caret
+dev-dependency。`lettre` 最低版本为经核验的 `0.11.23`，使用 Cargo 默认 caret
 约束，允许后续兼容版本；使用的 feature 包括 `builder`、`smtp-transport`、`pool`、`rustls`、
 `ring` 和 `webpki-roots`，不启用 native-tls、OpenSSL 或
 机会式 STARTTLS。

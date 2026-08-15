@@ -79,41 +79,48 @@ impl SqlxClient {
     /// 创建固定为 SQLx `Any` 后端的参数化查询对象。
     ///
     /// 该方法只调用 SQLx 原生构造函数，不访问数据库。调用方继续使用 SQLx 的 `.bind(...)`、
-    /// `.persistent(...)` 等链式 API；未受信任的 SQL 片段不能通过拼接传入。
+    /// `.persistent(...)` 等链式 API。SQLx 0.9 默认只接受静态 SQL 字面量；动态 SQL 必须由调用方
+    /// 审计后用 `sqlx::AssertSqlSafe` 显式标记，这个标记不会替调用方做转义或注入检查。
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```rust,no_run
     /// # #[cfg(all(feature = "sqlx", feature = "tokio"))]
-    /// # fn main() {
-    /// use axutils::SqlxClient;
-    /// let _ = SqlxClient::query;
+    /// # async fn example() -> Result<(), axutils::SqlxError> {
+    /// use axutils::{SqlxClient, SqlxConfig};
+    /// let client = SqlxClient::connect(SqlxConfig::new("sqlite::memory:")?).await?;
+    /// let _query = client.query("SELECT 1");
+    /// # Ok(())
     /// # }
     /// ```
     pub fn query<'q>(
         &self,
-        sql: &'q str,
-    ) -> sqlx::query::Query<'q, sqlx::Any, sqlx::any::AnyArguments<'q>> {
+        sql: impl sqlx::SqlSafeStr,
+    ) -> sqlx::query::Query<'q, sqlx::Any, sqlx::any::AnyArguments> {
         sqlx::query::<sqlx::Any>(sql)
     }
 
     /// 创建固定为 SQLx `Any` 后端、映射到 `T` 的查询对象。
     ///
     /// 该方法不执行 SQL；`T` 的 `FromRow`、类型兼容性和参数绑定仍由 SQLx 负责。
+    /// SQLx 0.9 默认只接受静态 SQL 字面量；动态 SQL 必须由调用方审计后用
+    /// `sqlx::AssertSqlSafe` 显式标记，这个标记不会替调用方做转义或注入检查。
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```rust,no_run
     /// # #[cfg(all(feature = "sqlx", feature = "tokio"))]
-    /// # {
-    /// use axutils::SqlxClient;
-    /// let _method = SqlxClient::query_as::<(i64, String)>;
+    /// # async fn example() -> Result<(), axutils::SqlxError> {
+    /// use axutils::{SqlxClient, SqlxConfig};
+    /// let client = SqlxClient::connect(SqlxConfig::new("sqlite::memory:")?).await?;
+    /// let _query = client.query_as::<(i64,)>("SELECT 1");
+    /// # Ok(())
     /// # }
     /// ```
     pub fn query_as<'q, T>(
         &self,
-        sql: &'q str,
-    ) -> sqlx::query::QueryAs<'q, sqlx::Any, T, sqlx::any::AnyArguments<'q>>
+        sql: impl sqlx::SqlSafeStr,
+    ) -> sqlx::query::QueryAs<'q, sqlx::Any, T, sqlx::any::AnyArguments>
     where
         T: for<'r> sqlx::FromRow<'r, SqlxRow>,
     {
@@ -123,20 +130,24 @@ impl SqlxClient {
     /// 创建固定为 SQLx `Any` 后端、读取第一列为 `T` 的查询对象。
     ///
     /// 该方法不执行 SQL；标量的 `Decode`/`Type` 兼容性仍由 SQLx 负责。
+    /// SQLx 0.9 默认只接受静态 SQL 字面量；动态 SQL 必须由调用方审计后用
+    /// `sqlx::AssertSqlSafe` 显式标记，这个标记不会替调用方做转义或注入检查。
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```rust,no_run
     /// # #[cfg(all(feature = "sqlx", feature = "tokio"))]
-    /// # {
-    /// use axutils::SqlxClient;
-    /// let _method = SqlxClient::query_scalar::<i64>;
+    /// # async fn example() -> Result<(), axutils::SqlxError> {
+    /// use axutils::{SqlxClient, SqlxConfig};
+    /// let client = SqlxClient::connect(SqlxConfig::new("sqlite::memory:")?).await?;
+    /// let _query = client.query_scalar::<i64>("SELECT 1");
+    /// # Ok(())
     /// # }
     /// ```
     pub fn query_scalar<'q, T>(
         &self,
-        sql: &'q str,
-    ) -> sqlx::query::QueryScalar<'q, sqlx::Any, T, sqlx::any::AnyArguments<'q>>
+        sql: impl sqlx::SqlSafeStr,
+    ) -> sqlx::query::QueryScalar<'q, sqlx::Any, T, sqlx::any::AnyArguments>
     where
         (T,): for<'r> sqlx::FromRow<'r, SqlxRow>,
     {
@@ -159,7 +170,7 @@ impl SqlxClient {
     /// ```
     pub async fn execute_async<'q>(
         &self,
-        query: sqlx::query::Query<'q, sqlx::Any, sqlx::any::AnyArguments<'q>>,
+        query: sqlx::query::Query<'q, sqlx::Any, sqlx::any::AnyArguments>,
     ) -> Result<sqlx::any::AnyQueryResult, SqlxError> {
         #[cfg(feature = "tracing")]
         let started = std::time::Instant::now();
@@ -190,7 +201,7 @@ impl SqlxClient {
     /// ```
     pub async fn fetch_one_async<'q>(
         &self,
-        query: sqlx::query::Query<'q, sqlx::Any, sqlx::any::AnyArguments<'q>>,
+        query: sqlx::query::Query<'q, sqlx::Any, sqlx::any::AnyArguments>,
     ) -> Result<SqlxRow, SqlxError> {
         #[cfg(feature = "tracing")]
         let started = std::time::Instant::now();
@@ -230,7 +241,7 @@ impl SqlxClient {
     /// ```
     pub async fn fetch_one_as_async<'q, T>(
         &self,
-        query: sqlx::query::QueryAs<'q, sqlx::Any, T, sqlx::any::AnyArguments<'q>>,
+        query: sqlx::query::QueryAs<'q, sqlx::Any, T, sqlx::any::AnyArguments>,
     ) -> Result<T, SqlxError>
     where
         T: Send + Unpin + for<'r> sqlx::FromRow<'r, SqlxRow>,
@@ -271,7 +282,7 @@ impl SqlxClient {
     /// ```
     pub async fn fetch_optional_async<'q>(
         &self,
-        query: sqlx::query::Query<'q, sqlx::Any, sqlx::any::AnyArguments<'q>>,
+        query: sqlx::query::Query<'q, sqlx::Any, sqlx::any::AnyArguments>,
     ) -> Result<Option<SqlxRow>, SqlxError> {
         #[cfg(feature = "tracing")]
         let started = std::time::Instant::now();
@@ -311,7 +322,7 @@ impl SqlxClient {
     /// ```
     pub async fn fetch_optional_as_async<'q, T>(
         &self,
-        query: sqlx::query::QueryAs<'q, sqlx::Any, T, sqlx::any::AnyArguments<'q>>,
+        query: sqlx::query::QueryAs<'q, sqlx::Any, T, sqlx::any::AnyArguments>,
     ) -> Result<Option<T>, SqlxError>
     where
         T: Send + Unpin + for<'r> sqlx::FromRow<'r, SqlxRow>,
@@ -355,7 +366,7 @@ impl SqlxClient {
     /// ```
     pub async fn fetch_all_async<'q>(
         &self,
-        query: sqlx::query::Query<'q, sqlx::Any, sqlx::any::AnyArguments<'q>>,
+        query: sqlx::query::Query<'q, sqlx::Any, sqlx::any::AnyArguments>,
     ) -> Result<Vec<SqlxRow>, SqlxError> {
         #[cfg(feature = "tracing")]
         let started = std::time::Instant::now();
@@ -418,7 +429,7 @@ impl SqlxClient {
     /// ```
     pub async fn fetch_all_as_async<'q, T>(
         &self,
-        query: sqlx::query::QueryAs<'q, sqlx::Any, T, sqlx::any::AnyArguments<'q>>,
+        query: sqlx::query::QueryAs<'q, sqlx::Any, T, sqlx::any::AnyArguments>,
     ) -> Result<Vec<T>, SqlxError>
     where
         T: Send + Unpin + for<'r> sqlx::FromRow<'r, SqlxRow>,
@@ -482,7 +493,7 @@ impl SqlxClient {
     /// ```
     pub async fn fetch_scalar_async<'q, T>(
         &self,
-        query: sqlx::query::QueryScalar<'q, sqlx::Any, T, sqlx::any::AnyArguments<'q>>,
+        query: sqlx::query::QueryScalar<'q, sqlx::Any, T, sqlx::any::AnyArguments>,
     ) -> Result<T, SqlxError>
     where
         T: Send + Unpin,
@@ -512,7 +523,7 @@ impl SqlxClient {
 
     /// 开启原生 SQLx Any 事务。
     ///
-    /// 调用方必须显式 `commit` 或 `rollback`；drop 只作为回滚兜底。SQLx 0.8.6 没有为
+    /// 调用方必须显式 `commit` 或 `rollback`；drop 只作为回滚兜底。SQLx 0.9.0 没有为
     /// `Transaction` 直接实现 `Executor`，事务内执行应使用 `&mut *tx`。该返回值暴露 SQLx
     /// 原生事务和原生错误语义，因此调用方需要直接依赖匹配的 SQLx 版本并导入所需 trait。
     ///

@@ -8,6 +8,8 @@ publish = false
 serde-only = ["axutils/serde"]
 serde-toml = ["axutils/serde", "axutils/toml"]
 serde-tokio = ["axutils/serde", "axutils/tokio"]
+serde-yaml = ["axutils/serde", "axutils/serde-saphyr"]
+serde-tokio-yaml = ["axutils/serde", "axutils/tokio", "axutils/serde-saphyr"]
 all = ["axutils/serde", "axutils/toml", "axutils/serde-saphyr", "axutils/rust-ini"]
 serde-tokio-all = [
     "axutils/serde",
@@ -21,6 +23,7 @@ negative-tokio-config-no-serde = ["axutils/tokio"]
 negative-config-module-no-serde = []
 negative-config-utils-no-serde = []
 negative-toml-only-no-serde = ["axutils/toml"]
+negative-yaml-only-no-serde = ["axutils/serde-saphyr"]
 negative-config-async-no-tokio = ["axutils/serde"]
 negative-yaml-under-serde-only = ["axutils/serde"]
 negative-toml-under-serde-only = ["axutils/serde"]
