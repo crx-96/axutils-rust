@@ -1,0 +1,19 @@
+[package]
+name = "axutils-fs-feature-matrix"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[features]
+serde-only = ["axutils/serde"]
+tokio-only = ["axutils/tokio"]
+serde-tokio = ["axutils/serde", "axutils/tokio"]
+negative-no-tokio-async = ["axutils/serde"]
+negative-no-domain-fs-utils = []
+negative-no-domain-fs-operation = []
+negative-no-root-fs-utils-module = []
+negative-no-utils-fs-error = []
+negative-no-nested-fs-error = []
+
+[dependencies]
+axutils = { path = "../../..", default-features = false }

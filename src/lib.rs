@@ -1,7 +1,10 @@
 //! `axutils` 是一个按 feature 组织的 Rust 常用工具库。
 //!
 //! 默认不启用第三方依赖，因此 `PathUtils`、`TimeUtils` 和 `FormatUtils` 的持续时间格式化
-//! 能力可以直接使用。
+//! 能力以及同步文件系统操作 `FsUtils` 可以直接使用。
+//! `FsUtils` 直接操作调用方提供的本地路径，支持文件/目录查询、创建、受限读取、写入、浅层
+//! 列举、复制、rename 移动和删除；异步 `_async` 方法还需要 `tokio` feature 与调用方提供的
+//! Tokio runtime。它不提供安全根、canonicalize 沙箱、原子写或抗 TOCTOU 保证。
 //! 如果要为依赖该 library 的最终 Rust binary 选择进程级全局内存分配器，可显式启用
 //! `mimalloc` 或 `rpmalloc` feature；两个 feature 互斥，且应用或递归依赖不能再声明另一个
 //! `#[global_allocator]`。这两个 feature 不增加公共 Rust API，也不提供运行时切换；完整的
@@ -63,7 +66,7 @@
 //! 的无类型路径以及 YAML/INI 的有类型路径使用配置的嵌套深度上限；JSON 无类型路径关闭
 //! serde_json 较小的默认递归限制，严格使用 loader 的 1..=256 预算；JSON/TOML 有类型路径
 //! 使用各自后端的递归保护；错误不回显配置文件内容。
-//! 同时启用 `tokio` feature 后还可使用六个异步文件入口；调用方必须自行提供 Tokio runtime，
+//! 同时启用 `tokio` feature 后还可使用六个异步配置文件入口；调用方必须自行提供 Tokio runtime，
 //! crate 不创建 runtime 或调用 `block_on`，解析阶段仍在当前异步任务中执行。
 //!
 //! ```toml
@@ -188,6 +191,7 @@ mod allocator;
 mod tracing;
 
 pub mod convert;
+pub mod fs;
 mod time;
 pub mod utils;
 
@@ -209,7 +213,9 @@ pub use utils::random_utils;
 #[cfg(feature = "rand")]
 pub use utils::{LetterCase, RandomRangeError, RandomUtils};
 
+pub use fs::FsError;
 pub use utils::path_utils;
+pub use utils::FsUtils;
 pub use utils::PathUtils;
 
 pub use convert::ConvertUtils;

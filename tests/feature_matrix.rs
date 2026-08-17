@@ -1,4 +1,5 @@
 use std::{
+    collections::BTreeSet,
     env, fs,
     path::{Path, PathBuf},
     process::{Command, Output},
@@ -6,6 +7,42 @@ use std::{
 };
 
 struct TemporaryTarget(PathBuf);
+
+struct FsMatrixTarget(Option<PathBuf>);
+
+impl FsMatrixTarget {
+    fn path(&self) -> &Path {
+        self.0.as_deref().expect("Fs matrix target is active")
+    }
+
+    fn cleanup(mut self) {
+        let path = self.0.take().expect("Fs matrix target is active");
+        match fs::remove_dir_all(&path) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => panic!(
+                "Fs feature matrix cleanup failed for {}: {error}",
+                path.display()
+            ),
+        }
+    }
+}
+
+impl Drop for FsMatrixTarget {
+    fn drop(&mut self) {
+        let Some(path) = self.0.take() else {
+            return;
+        };
+        if let Err(error) = fs::remove_dir_all(&path) {
+            if error.kind() != std::io::ErrorKind::NotFound {
+                eprintln!(
+                    "Fs feature matrix cleanup failed for {}: {error}",
+                    path.display()
+                );
+            }
+        }
+    }
+}
 
 #[derive(Clone, Copy)]
 enum FixtureAction {
@@ -62,6 +99,82 @@ fn verifies_feature_api_matrix_and_dependency_boundaries() {
     }
 
     assert_dependency_boundaries();
+}
+
+#[test]
+#[ignore = "慢速 FsUtils feature/依赖契约矩阵；使用 cargo test --no-default-features --test feature_matrix -- --ignored 执行"]
+fn verifies_fs_feature_api_matrix_and_dependency_boundaries() {
+    let fixture_manifest = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("fixtures")
+        .join("fs_feature_matrix")
+        .join("Cargo.toml");
+    let target_dir = strict_fs_target("axutils-fs-feature-matrix");
+
+    for (feature, expected_success, diagnostic_token) in [
+        ("", true, ""),
+        ("serde-only", true, ""),
+        ("tokio-only", true, ""),
+        ("serde-tokio", true, ""),
+        ("negative-no-domain-fs-utils", false, "FsUtils"),
+        ("negative-no-domain-fs-operation", false, "read_bytes"),
+        ("negative-no-root-fs-utils-module", false, "fs_utils"),
+        ("negative-no-utils-fs-error", false, "FsError"),
+        ("negative-no-nested-fs-error", false, "FsError"),
+    ] {
+        let output = run_fs_fixture(&fixture_manifest, target_dir.path(), feature);
+        if expected_success {
+            assert!(
+                output.status.success(),
+                "FsUtils fixture feature `{feature}` should compile successfully. stdout: {}\nstderr: {}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+        } else {
+            assert!(
+                !output.status.success(),
+                "FsUtils fixture feature `{feature}` should fail to compile"
+            );
+            assert_expected_diagnostic(&output, diagnostic_token, feature);
+        }
+    }
+
+    let no_tokio = run_fs_fixture(
+        &fixture_manifest,
+        target_dir.path(),
+        "negative-no-tokio-async",
+    );
+    assert!(
+        !no_tokio.status.success(),
+        "FsUtils async methods should not compile without tokio"
+    );
+    assert_expected_diagnostics(
+        &no_tokio,
+        &[
+            "try_exists_async",
+            "is_file_async",
+            "is_dir_async",
+            "metadata_async",
+            "symlink_metadata_async",
+            "create_file_async",
+            "create_dir_async",
+            "create_dir_all_async",
+            "list_dir_async",
+            "remove_file_async",
+            "remove_dir_async",
+            "remove_dir_all_async",
+            "move_path_async",
+            "copy_file_async",
+            "read_bytes_async",
+            "read_to_string_async",
+            "write_async",
+            "append_async",
+        ],
+        "negative-no-tokio-async",
+    );
+
+    assert_fs_dependency_boundaries();
+    target_dir.cleanup();
 }
 
 #[test]
@@ -913,6 +1026,58 @@ fn run_fixture_action(
         .unwrap_or_else(|_| panic!("failed to run cargo for fixture feature `{feature}`"))
 }
 
+fn run_fs_fixture(manifest: &Path, target_dir: &Path, feature: &str) -> Output {
+    let (fixture, temporary_manifest) = copy_fs_fixture_to_temporary_directory(manifest);
+    let mut command = Command::new("cargo");
+    command
+        .arg("check")
+        .arg("--manifest-path")
+        .arg(&temporary_manifest)
+        .arg("--target-dir")
+        .arg(target_dir)
+        .arg("--no-default-features")
+        .arg("--offline")
+        .arg("--message-format=json")
+        .env("CARGO_TERM_COLOR", "never");
+    if !feature.is_empty() {
+        command.arg("--features").arg(feature);
+    }
+    let output = command
+        .output()
+        .unwrap_or_else(|_| panic!("failed to run FsUtils fixture feature `{feature}`"));
+    fixture.cleanup();
+    output
+}
+
+fn copy_fs_fixture_to_temporary_directory(manifest: &Path) -> (FsMatrixTarget, PathBuf) {
+    let source = manifest
+        .parent()
+        .unwrap_or_else(|| panic!("fixture manifest has no parent: {}", manifest.display()));
+    let destination = strict_fs_target("axutils-fs-feature-fixture");
+    copy_fixture_directory(source, destination.path());
+
+    let copied_manifest = destination.path().join("Cargo.toml");
+    let manifest_text = fs::read_to_string(&copied_manifest).unwrap_or_else(|_| {
+        panic!(
+            "failed to read copied FsUtils fixture: {}",
+            copied_manifest.display()
+        )
+    });
+    let repository = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .to_string_lossy()
+        .replace('\\', "/");
+    let manifest_text =
+        manifest_text.replace("path = \"../../..\"", &format!("path = \"{repository}\""));
+    fs::write(&copied_manifest, manifest_text).unwrap_or_else(|_| {
+        panic!(
+            "failed to write temporary FsUtils fixture: {}",
+            copied_manifest.display()
+        )
+    });
+
+    (destination, copied_manifest)
+}
+
 fn copy_fixture_to_temporary_directory(manifest: &Path) -> (TemporaryTarget, PathBuf) {
     let source = manifest
         .parent()
@@ -983,6 +1148,18 @@ fn unique_target(prefix: &str) -> TemporaryTarget {
         }
     }
     panic!("failed to acquire an exclusive temporary target directory for `{prefix}`");
+}
+
+fn strict_fs_target(prefix: &str) -> FsMatrixTarget {
+    static FS_TARGET_COUNTER: AtomicUsize = AtomicUsize::new(0);
+    for _ in 0..100 {
+        let counter = FS_TARGET_COUNTER.fetch_add(1, Ordering::Relaxed);
+        let path = env::temp_dir().join(format!("{prefix}-{}-{counter}", std::process::id()));
+        if fs::create_dir(&path).is_ok() {
+            return FsMatrixTarget(Some(path));
+        }
+    }
+    panic!("failed to acquire an exclusive FsUtils feature matrix target");
 }
 
 fn assert_expected_diagnostic(output: &Output, token: &str, feature: &str) {
@@ -1074,6 +1251,183 @@ fn assert_dependency_boundaries() {
     assert!(has_package(&combined_tree, "ring"));
     assert!(has_package(&combined_tree, "webpki-roots"));
     assert_forbidden_tls_packages(&combined_tree);
+}
+
+fn assert_fs_dependency_boundaries() {
+    let no_feature_tree = cargo_tree_strict("");
+    assert!(!has_package(&no_feature_tree, "tokio"));
+    assert!(!has_package(&no_feature_tree, "serde"));
+    assert!(!has_package(&no_feature_tree, "serde_json"));
+    assert_fs_no_unrelated_packages(&no_feature_tree, &[], "no-feature");
+
+    let tokio_tree = cargo_tree_strict("tokio");
+    assert!(has_package(&tokio_tree, "tokio"));
+    assert!(!has_package(&tokio_tree, "serde"));
+    assert!(!has_package(&tokio_tree, "serde_json"));
+    assert_fs_no_unrelated_packages(&tokio_tree, &["tokio"], "tokio-only");
+
+    let serde_tree = cargo_tree_strict("serde");
+    assert!(has_package(&serde_tree, "serde"));
+    assert!(has_package(&serde_tree, "serde_json"));
+    assert!(has_package(&serde_tree, "serde_urlencoded"));
+    assert!(!has_package(&serde_tree, "tokio"));
+    assert_fs_no_unrelated_packages(
+        &serde_tree,
+        &[
+            "serde",
+            "serde_json",
+            "serde_urlencoded",
+            "itoa",
+            "ryu",
+            "zmij",
+        ],
+        "serde-only",
+    );
+
+    let serde_tokio_tree = cargo_tree_strict("serde,tokio");
+    for package in ["serde", "serde_json", "serde_urlencoded", "tokio"] {
+        assert!(
+            has_package(&serde_tokio_tree, package),
+            "FsUtils serde-tokio tree is missing `{package}`"
+        );
+    }
+    assert_fs_no_unrelated_packages(
+        &serde_tokio_tree,
+        &[
+            "serde",
+            "serde_json",
+            "serde_urlencoded",
+            "itoa",
+            "ryu",
+            "zmij",
+            "tokio",
+        ],
+        "serde-tokio",
+    );
+
+    let tokio_feature_tree = cargo_tree_with_edges_strict("tokio", "normal,build,features");
+    let actual_tokio_features = tokio_feature_tree
+        .lines()
+        .filter_map(|line| {
+            let marker = "tokio feature \"";
+            let start = line.find(marker)? + marker.len();
+            let end = line[start..].find('\"')? + start;
+            Some(line[start..end].to_owned())
+        })
+        .collect::<BTreeSet<_>>();
+    let expected_tokio_features = ["bytes", "fs", "io-util", "rt", "sync", "time"]
+        .into_iter()
+        .map(str::to_owned)
+        .collect::<BTreeSet<_>>();
+    assert_eq!(
+        actual_tokio_features, expected_tokio_features,
+        "FsUtils Tokio production feature set changed"
+    );
+}
+
+fn assert_fs_no_unrelated_packages(tree: &str, allowed: &[&str], feature_set: &str) {
+    for package in [
+        "itoa",
+        "ryu",
+        "zmij",
+        "uuid",
+        "jsonwebtoken",
+        "rand",
+        "regex",
+        "phonenumber",
+        "serde",
+        "serde_json",
+        "serde_urlencoded",
+        "strfmt",
+        "minijinja",
+        "chrono",
+        "time",
+        "jiff",
+        "lettre",
+        "ureq",
+        "reqwest",
+        "url",
+        "redis",
+        "sqlx",
+        "futures-util",
+        "r2d2",
+        "rmp-serde",
+        "tokio",
+        "toml",
+        "serde-saphyr",
+        "rust-ini",
+        "base64",
+        "md-5",
+        "aes",
+        "aes-gcm",
+        "cbc",
+        "zeroize",
+        "encoding_rs",
+        "mimalloc",
+        "rpmalloc",
+        "tracing",
+        "tracing-subscriber",
+        "tracing-appender",
+    ] {
+        if allowed.contains(&package) {
+            continue;
+        }
+        assert!(
+            !has_package(tree, package),
+            "FsUtils {feature_set} tree unexpectedly contains unrelated package `{package}`"
+        );
+    }
+}
+
+fn cargo_tree_strict(features: &str) -> String {
+    cargo_tree_with_edges_strict(features, "normal,build")
+}
+
+fn cargo_tree_with_edges_strict(features: &str, edges: &str) -> String {
+    let (manifest_target, manifest) = dependency_tree_manifest_strict(features);
+    let output = Command::new("cargo")
+        .arg("tree")
+        .arg("--manifest-path")
+        .arg(&manifest)
+        .arg("--no-default-features")
+        .arg("--features")
+        .arg("selected")
+        .arg("--offline")
+        .arg("--edges")
+        .arg(edges)
+        .env("CARGO_TERM_COLOR", "never")
+        .output()
+        .unwrap_or_else(|_| panic!("failed to run strict cargo tree for feature `{features}`"));
+    assert!(
+        output.status.success(),
+        "strict cargo tree failed for feature `{features}`\nstdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    manifest_target.cleanup();
+    String::from_utf8(output.stdout).expect("cargo tree output should be UTF-8")
+}
+
+fn dependency_tree_manifest_strict(features: &str) -> (FsMatrixTarget, PathBuf) {
+    let target = strict_fs_target("axutils-fs-dependency-tree");
+    let repository = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .to_string_lossy()
+        .replace('\\', "/");
+    let forwarded_features = features
+        .split(',')
+        .filter(|feature| !feature.is_empty())
+        .map(|feature| format!("\"axutils/{feature}\""))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let manifest = target.path().join("Cargo.toml");
+    let manifest_text = format!(
+        "[package]\nname = \"axutils-fs-dependency-tree\"\nversion = \"0.0.0\"\nedition = \"2021\"\npublish = false\n\n[features]\nselected = [{forwarded_features}]\n\n[dependencies]\naxutils = {{ path = \"{repository}\", default-features = false }}\n"
+    );
+    fs::write(&manifest, manifest_text).expect("failed to write strict dependency tree manifest");
+    let source = target.path().join("src");
+    fs::create_dir_all(&source).expect("failed to create strict dependency tree source");
+    fs::write(source.join("lib.rs"), "").expect("failed to write strict dependency tree source");
+    (target, manifest)
 }
 
 fn assert_tracing_dependency_boundaries() {

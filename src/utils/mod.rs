@@ -15,6 +15,8 @@
 //! Redis 客户端需要 `redis` feature；同步 API 使用惰性连接池和单键租约锁，异步 API 还
 //! 需要同时启用 `tokio`，并由调用方提供 runtime。全局 `RedisUtils` 只是连接入口，不维护
 //! 进程内锁表；锁 guard 自己拥有客户端 clone。
+//! 本地文件系统 I/O 由默认可用的 [`crate::FsUtils`] 提供；同步方法会阻塞当前线程，异步
+//! 方法需要同时启用 `tokio` 并由调用方提供 runtime。
 //! SQLx 客户端需要同时启用 `sqlx` 与 `tokio` feature；`SqlxClient` 使用 SQLx Any pool，
 //! `SqlxUtils` 只成功初始化一次，且由调用方提供 Tokio runtime。
 //! `ConvertUtils` 始终提供无状态工具类型；整数、浮点数和 UUID 转换分别需要 `itoa`、
@@ -57,6 +59,7 @@ pub mod log_utils;
 
 pub mod convert_utils;
 pub mod crypto_utils;
+pub mod fs_utils;
 
 pub use convert_utils::ConvertUtils;
 
@@ -94,3 +97,4 @@ pub use sqlx_utils::SqlxUtils;
 pub use log_utils::{LogConfig, LogError, LogFileConfig, LogLevel, LogRotation, LogUtils};
 
 pub use crypto_utils::CryptoUtils;
+pub use fs_utils::FsUtils;

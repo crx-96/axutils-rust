@@ -6,7 +6,7 @@
 `serde-saphyr 1.0.1`，其 `edition = "2024"` 和 let-chains 语法要求 Rust 1.88；邮件能力使用的
 `lettre 0.11.23` 只要求 Rust 1.85。因此，使用新版本 `axutils` 的 Rust 1.88—1.94 项目需要先升级工具链。
 
-默认 feature 为空。默认可用的是 `PathUtils`、`TimeUtils`、`FormatUtils::seconds_to_human`，以及时间
+默认 feature 为空。默认可用的是 `PathUtils`、`FsUtils`、`TimeUtils`、`FormatUtils::seconds_to_human`，以及时间
 格式化共用的根类型；`CryptoUtils` 的十六进制编解码和 `TextEncoding::Utf8` 文本编解码同样默认可用。
 `RegUtils` 需要 `regex`，`RandomUtils` 需要 `rand`，模板、日期后端、邮件、配置读取和 `CryptoUtils`
 的 Base64/MD5/AES 能力都需要显式 feature。公共导出路径和完整边界见各模块使用文档。
@@ -69,7 +69,7 @@ axutils = { version = "0.1", default-features = false, features = ["logging"] }
 axutils = "0.1"
 ```
 
-这会提供 `PathUtils`、`TimeUtils` 和 `FormatUtils::seconds_to_human`。需要正则校验时启用
+这会提供 `PathUtils`、`FsUtils`、`TimeUtils` 和 `FormatUtils::seconds_to_human`。需要正则校验时启用
 `regex`：
 
 ```toml
@@ -146,7 +146,20 @@ tokio = { version = "1.53.1", features = ["macros", "rt-multi-thread"] }
 ```
 
 `axutils` 的 Tokio 依赖按其他 feature 组合提供异步文件 I/O、邮件、HTTP 和 Redis 能力；库
-不会创建 runtime 或调用 `block_on`，只启用 `tokio` 不会单独导出这些领域 API。
+不会创建 runtime 或调用 `block_on`。单独启用 `tokio` 时，默认可用的 `FsUtils` 会增加 `_async`
+入口；邮件、HTTP、Redis 等其他领域仍需各自 feature。
+
+文件系统能力由默认可用的 `FsUtils` 提供：同步入口支持查询、创建、受限读取、写入、追加、浅层
+列举、普通文件复制、rename 移动和删除；带 `_async` 后缀的入口需要同时启用 `tokio`，并由应用
+提供 Tokio runtime。`FsUtils` 不提供安全根、抗 TOCTOU、原子写或递归删除回滚；完整方法、错误分类、
+符号链接和资源边界见 [FsUtils 使用文档](docs/examples/fs.md)。只需要文件工具的异步入口时，可显式
+启用现有 `tokio` feature：
+
+```toml
+[dependencies]
+axutils = { version = "0.1", default-features = false, features = ["tokio"] }
+tokio = { version = "1.53.1", features = ["macros", "rt-multi-thread"] }
+```
 
 同步 Redis 只需要 `redis` feature；异步 Redis 需要 `redis,tokio`，应用仍需直接依赖 Tokio：
 
@@ -295,6 +308,23 @@ let _ = (config, JwtUtils::is_initialized());
 ```
 
 使用说明、key PEM/DER 格式、标准 claims 规则、完整导出路径和安全边界见 [JWT 使用文档](https://github.com/crx-96/axutils-rust/blob/main/docs/examples/jwt.md)。
+
+## 使用 `FsUtils`
+
+`FsUtils` 提供默认可用的同步文件系统操作；例如，`create_file` 使用不覆盖语义，`write` 会截断并
+创建文件，`read_bytes`/`read_to_string` 可设置显式大小上限：
+
+```rust,no_run
+use axutils::FsUtils;
+
+FsUtils::write("example.txt", b"hello")?;
+let contents = FsUtils::read_to_string("example.txt", 1024)?;
+assert_eq!(contents, "hello");
+# Ok::<(), axutils::FsError>(())
+```
+
+异步方法统一带 `_async` 后缀，仅在 `tokio` feature 下提供，并要求调用方自己创建和保持 Tokio
+runtime。完整方法清单、错误变体、限制和符号链接语义见 [FsUtils 使用文档](docs/examples/fs.md)。
 
 ## 使用 `PathUtils`
 

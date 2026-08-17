@@ -16,6 +16,11 @@
   过滤器配置错误分别返回 `InvalidConfig { field: "output" }` 与
   `InvalidConfig { field: "filter" }`，文件日志不负责历史 retention。
 - 建立按 feature 组织的 Rust 工具库；默认 feature 为空，不会自动引入第三方依赖。
+- 新增默认可用的 `FsUtils` 与 `FsError` 文件系统能力：提供查询、创建、浅层列举、受限读取、
+  写入/追加、普通文件复制、直接 `rename` 移动和删除；同时启用 `tokio` 后提供带 `_async` 后缀的
+  异步入口。检测到实际内容或直接子项超过上限时返回稳定错误，`create_file` 不覆盖已有目标，`copy_file`
+  拒绝目录、符号链接和其他非普通文件；异步入口要求调用方提供 Tokio runtime，库不创建 runtime、
+  不调用 `block_on`，也不承诺安全根、抗 TOCTOU、原子写或递归删除回滚。详见 `docs/examples/fs.md`。
 - 新增 `PathUtils`，提供绝对路径判断、当前工作目录和可执行文件路径获取，以及不访问文件系统的多路径词法拼接。
 - 新增 `TimeUtils`，提供当前 Unix 时间戳获取能力；通过独立的 `chrono`、`time` 或 `jiff` feature
   提供日期、日期时间和固定 UTC 偏移格式化能力。

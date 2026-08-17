@@ -24,9 +24,14 @@ feature 背景和发布操作命令。两者出现冲突时，先按标准文档
 │   ├── module-map.md  # 工具类和公共模块定位，不随包发布
 │   ├── plans/         # 设计与实施计划，不随包发布
 │   └── status/        # 长任务状态记录，不随包发布
+├── tests/
+│   ├── fs.rs          # FsUtils 同步/异步行为与公共路径回归
+│   ├── feature_matrix.rs # feature/API/依赖边界矩阵（含 ignored 慢速测试）
+│   └── fixtures/fs_feature_matrix/ # FsUtils 正负编译 fixture，不随包发布
 └── src/
     ├── config/         # 配置文件读取后端（需要 serde 及对应格式 feature）
     ├── crypto/         # 十六进制/TextEncoding 默认可用；Base64/MD5/AES 需要对应 feature
+    ├── fs/             # FsError 与文件系统领域操作实现（同步默认可用，异步需要 tokio）
     ├── allocator.rs    # mimalloc/rpmalloc 的私有全局分配器选择（互斥 feature）
     ├── email/         # SMTP 配置、消息、错误与多实例客户端（需要 lettre feature）
     ├── lib.rs          # crate 入口和公共导出
@@ -35,6 +40,7 @@ feature 背景和发布操作命令。两者出现冲突时，先按标准文档
     ├── tracing/        # 各领域脱敏 tracing 事件的私有辅助实现（需要 tracing）
     └── utils/
         ├── mod.rs        # 通用工具模块和公共导出
+        ├── fs_utils.rs   # FsUtils 同步/异步文件系统 facade
         ├── log_utils.rs  # LogUtils 同步全局 subscriber 初始化（需要 logging）
         ├── path_utils.rs  # PathUtils 实现与单元测试
         ├── random_utils.rs # RandomUtils 实现与单元测试（需要 rand feature）
@@ -71,6 +77,11 @@ src/
 ```powershell
 # 日常修改后的快速反馈：仅运行默认能力的库单元测试。
 cargo test --no-default-features --lib
+
+# FsUtils 的同步/异步直接回归；异步测试使用 tokio feature，测试 runtime 由 dev-dependency 提供。
+cargo test --no-default-features --test fs -- --test-threads=1
+cargo test --no-default-features --features tokio --test fs -- --test-threads=1
+cargo test --no-default-features --features tokio --doc
 
 # 需要检查某个可选模块时，只编译并运行对应 feature 的测试目标，例如：
 cargo test --no-default-features --features http --test http
@@ -177,6 +188,7 @@ cargo test --no-default-features --features logging --doc
 cargo tree --no-default-features --features tracing -e normal,build,features
 cargo tree --no-default-features --features logging -e normal,build,features
 cargo package --list
+cargo package --allow-dirty --list
 git diff --check
 ```
 
