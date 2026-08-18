@@ -4,6 +4,13 @@
 //! 能力。同步入口默认可用并执行阻塞 I/O；带 `_async` 后缀的入口只在启用 `tokio` feature
 //! 时提供，使用调用方已有的 Tokio runtime，不创建 runtime、不调用 `block_on`。
 //!
+//! `FsChunkProcessor`、`FsTransferOptions`、`FsTransferStats` 和 `FsTransferError` 默认可用；
+//! `FsAsyncChunkProcessor` 需要 `tokio`。`FsTempConfig`、`FsTempError` 和 `FsUtilsContext`
+//! 需要至少一个独立的 `tempfile`/`tempfile-async` feature；同步 wrapper
+//! `FsTempFile`/`FsTempDir` 只在 `tempfile` 下提供，异步 wrapper
+//! `FsAsyncTempFile`/`FsAsyncTempDir` 只在 `tempfile-async` 下提供。上述领域类型同时从
+//! `axutils::fs` 和 crate 根导出；`FsUtils` 仍只从 crate 根和 `utils` 兼容路径导出。
+//!
 //! 本模块直接作用于调用方提供的路径，不提供安全根、canonicalize 沙箱、权限修改或抗 TOCTOU
 //! 保证。`remove_dir_all` 是不可回滚的破坏性操作；受限读取和目录列举只限制已经读取/观察到的
 //! 数据，不保证 FIFO、设备文件或其他特殊文件不会阻塞。
@@ -22,5 +29,21 @@
 
 mod error;
 pub(crate) mod ops;
+#[cfg(any(feature = "tempfile", feature = "tempfile-async"))]
+pub(crate) mod temp;
+pub(crate) mod transfer;
 
 pub use error::FsError;
+pub use transfer::{FsChunkProcessor, FsTransferError, FsTransferOptions, FsTransferStats};
+
+#[cfg(feature = "tokio")]
+pub use transfer::FsAsyncChunkProcessor;
+
+#[cfg(any(feature = "tempfile", feature = "tempfile-async"))]
+pub use temp::{FsTempConfig, FsTempError, FsUtilsContext};
+
+#[cfg(feature = "tempfile")]
+pub use temp::{FsTempDir, FsTempFile};
+
+#[cfg(feature = "tempfile-async")]
+pub use temp::{FsAsyncTempDir, FsAsyncTempFile};

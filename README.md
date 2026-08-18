@@ -16,6 +16,12 @@
 `FloatFormat` 显式选择，完整 API、feature 矩阵和 UUID 直接依赖声明见
 [ConvertUtils 使用文档](docs/examples/convert.md)。
 
+`FsUtils::copy_file_with` 提供默认可用的串行文件块处理器流水线，并返回输入/输出字节数和
+块数；启用 `tokio` 后追加异步处理器入口。临时文件和目录 wrapper 由独立的
+`tempfile`/`tempfile-async` feature 提供，使用 `FsUtilsContext` 保存显式配置，不修改进程级
+临时目录；异步入口由调用方提供 Tokio runtime。完整 API、错误分类、取消语义和 feature
+边界见 [FsUtils 使用文档](docs/examples/fs.md)。
+
 `mimalloc` 和 `rpmalloc` feature 用于为依赖该 library 的最终 Rust binary 选择进程级全局内存
 分配器；两者不能同时启用，也不会提供运行时切换 API。应用或递归依赖已有
 `#[global_allocator]` 时，启用前必须先确认不会发生重复注册。

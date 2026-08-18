@@ -3,8 +3,10 @@
 //! 默认不启用第三方依赖，因此 `PathUtils`、`TimeUtils` 和 `FormatUtils` 的持续时间格式化
 //! 能力以及同步文件系统操作 `FsUtils` 可以直接使用。
 //! `FsUtils` 直接操作调用方提供的本地路径，支持文件/目录查询、创建、受限读取、写入、浅层
-//! 列举、复制、rename 移动和删除；异步 `_async` 方法还需要 `tokio` feature 与调用方提供的
-//! Tokio runtime。它不提供安全根、canonicalize 沙箱、原子写或抗 TOCTOU 保证。
+//! 列举、复制、rename 移动和删除；`copy_file_with` 还提供串行的同步/异步块处理器流水线。
+//! 异步 `_async` 方法还需要 `tokio` feature 与调用方提供的 Tokio runtime。同步/异步临时
+//! 文件能力分别由独立的 `tempfile`/`tempfile-async` feature 提供，不会因 `tokio` 单独启用
+//! 而出现；它不提供安全根、canonicalize 沙箱、原子写或抗 TOCTOU 保证。
 //! 如果要为依赖该 library 的最终 Rust binary 选择进程级全局内存分配器，可显式启用
 //! `mimalloc` 或 `rpmalloc` feature；两个 feature 互斥，且应用或递归依赖不能再声明另一个
 //! `#[global_allocator]`。这两个 feature 不增加公共 Rust API，也不提供运行时切换；完整的
@@ -213,7 +215,16 @@ pub use utils::random_utils;
 #[cfg(feature = "rand")]
 pub use utils::{LetterCase, RandomRangeError, RandomUtils};
 
+#[cfg(feature = "tokio")]
+pub use fs::FsAsyncChunkProcessor;
 pub use fs::FsError;
+#[cfg(feature = "tempfile-async")]
+pub use fs::{FsAsyncTempDir, FsAsyncTempFile};
+pub use fs::{FsChunkProcessor, FsTransferError, FsTransferOptions, FsTransferStats};
+#[cfg(any(feature = "tempfile", feature = "tempfile-async"))]
+pub use fs::{FsTempConfig, FsTempError, FsUtilsContext};
+#[cfg(feature = "tempfile")]
+pub use fs::{FsTempDir, FsTempFile};
 pub use utils::path_utils;
 pub use utils::FsUtils;
 pub use utils::PathUtils;

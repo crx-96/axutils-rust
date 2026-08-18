@@ -5,7 +5,15 @@ use std::{
     sync::atomic::{AtomicUsize, Ordering},
 };
 
-use axutils::{FsError, FsUtils};
+use axutils::{
+    FsChunkProcessor, FsError, FsTransferError, FsTransferOptions, FsTransferStats, FsUtils,
+};
+
+#[cfg(feature = "tokio")]
+use axutils::FsAsyncChunkProcessor;
+
+#[cfg(any(feature = "tempfile", feature = "tempfile-async"))]
+use axutils::FsTempConfig;
 
 static TEMP_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
@@ -74,6 +82,98 @@ fn assert_io_kind(error: FsError, operation: &str, kind: io::ErrorKind) {
 
 fn max_valid_bytes() -> usize {
     usize::try_from(u64::MAX - 1).map_or(usize::MAX - 1, |value| value.min(usize::MAX - 1))
+}
+
+struct IdentityProcessor;
+
+impl FsChunkProcessor for IdentityProcessor {
+    type Error = std::convert::Infallible;
+
+    fn process(&mut self, chunk: Vec<u8>) -> Result<Vec<u8>, Self::Error> {
+        Ok(chunk)
+    }
+}
+
+struct UppercaseProcessor;
+
+impl FsChunkProcessor for UppercaseProcessor {
+    type Error = std::convert::Infallible;
+
+    fn process(&mut self, mut chunk: Vec<u8>) -> Result<Vec<u8>, Self::Error> {
+        chunk.make_ascii_uppercase();
+        Ok(chunk)
+    }
+}
+
+struct DuplicateProcessor;
+
+impl FsChunkProcessor for DuplicateProcessor {
+    type Error = std::convert::Infallible;
+
+    fn process(&mut self, chunk: Vec<u8>) -> Result<Vec<u8>, Self::Error> {
+        let mut output = Vec::with_capacity(chunk.len() * 2);
+        output.extend_from_slice(&chunk);
+        output.extend_from_slice(&chunk);
+        Ok(output)
+    }
+}
+
+#[cfg(feature = "tokio")]
+struct AsyncIdentityProcessor;
+
+#[cfg(feature = "tokio")]
+impl FsAsyncChunkProcessor for AsyncIdentityProcessor {
+    type Error = std::convert::Infallible;
+    type Future<'a>
+        = std::future::Ready<Result<Vec<u8>, Self::Error>>
+    where
+        Self: 'a;
+
+    fn process<'a>(&'a mut self, chunk: Vec<u8>) -> Self::Future<'a> {
+        std::future::ready(Ok(chunk))
+    }
+}
+
+#[cfg(feature = "tokio")]
+struct AsyncDuplicateProcessor;
+
+#[cfg(feature = "tokio")]
+impl FsAsyncChunkProcessor for AsyncDuplicateProcessor {
+    type Error = std::convert::Infallible;
+    type Future<'a>
+        = std::future::Ready<Result<Vec<u8>, Self::Error>>
+    where
+        Self: 'a;
+
+    fn process<'a>(&'a mut self, chunk: Vec<u8>) -> Self::Future<'a> {
+        let mut output = Vec::with_capacity(chunk.len() * 2);
+        output.extend_from_slice(&chunk);
+        output.extend_from_slice(&chunk);
+        std::future::ready(Ok(output))
+    }
+}
+
+#[cfg(feature = "tokio")]
+struct AsyncCancelAfterFirst {
+    processed: usize,
+}
+
+#[cfg(feature = "tokio")]
+impl FsAsyncChunkProcessor for AsyncCancelAfterFirst {
+    type Error = std::convert::Infallible;
+    type Future<'a>
+        = std::pin::Pin<Box<dyn std::future::Future<Output = Result<Vec<u8>, Self::Error>> + 'a>>
+    where
+        Self: 'a;
+
+    fn process<'a>(&'a mut self, chunk: Vec<u8>) -> Self::Future<'a> {
+        self.processed += 1;
+        if self.processed == 1 {
+            Box::pin(std::future::ready(Ok(chunk)))
+        } else {
+            Box::pin(std::future::pending())
+        }
+    }
 }
 
 #[test]
@@ -971,4 +1071,524 @@ async fn async_limit_and_utf8_semantics_match_sync() {
         Err(FsError::NotUtf8 { .. })
     ));
     temp.cleanup();
+}
+
+#[test]
+fn sync_stream_transfer_processes_serial_chunks_and_reports_stats() {
+    let temp = TempDir::new();
+    let source = temp.path().join("source.bin");
+    let destination = temp.path().join("destination.bin");
+    let input = (0..2050)
+        .map(|index| b'a' + u8::try_from(index % 26).expect("modulo fits in u8"))
+        .collect::<Vec<_>>();
+    FsUtils::write(&source, &input).expect("write transfer source");
+    FsUtils::write(&destination, b"stale destination").expect("write transfer destination");
+
+    let stats = FsUtils::copy_file_with(
+        &source,
+        &destination,
+        FsTransferOptions {
+            chunk_size: 1024,
+            max_output_bytes: None,
+        },
+        UppercaseProcessor,
+    )
+    .expect("stream transfer should succeed");
+
+    let expected = input
+        .iter()
+        .map(|byte| byte.to_ascii_uppercase())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        stats,
+        FsTransferStats {
+            input_bytes: 2050,
+            output_bytes: 2050,
+            chunks: 3,
+        }
+    );
+    assert_eq!(FsUtils::read_bytes(&destination, 2050), Ok(expected));
+    temp.cleanup();
+}
+
+#[test]
+fn sync_stream_transfer_checks_options_and_output_limit_before_writing() {
+    let temp = TempDir::new();
+    let source = temp.path().join("source.bin");
+    let destination = temp.path().join("destination.bin");
+    FsUtils::write(&source, [b'x'; 1024]).expect("write transfer source");
+    FsUtils::write(&destination, b"stale destination").expect("write transfer destination");
+
+    assert!(matches!(
+        FsUtils::copy_file_with(
+            temp.path().join("missing"),
+            &destination,
+            FsTransferOptions {
+                chunk_size: 1,
+                max_output_bytes: None,
+            },
+            IdentityProcessor,
+        ),
+        Err(FsTransferError::InvalidOptions {
+            field: "chunk_size"
+        })
+    ));
+    assert!(matches!(
+        FsUtils::copy_file_with(
+            &source,
+            &source,
+            FsTransferOptions::default(),
+            IdentityProcessor,
+        ),
+        Err(FsTransferError::SameFile { .. })
+    ));
+
+    let source_directory = temp.path().join("source-directory");
+    FsUtils::create_dir(&source_directory).expect("create stream source directory");
+    assert!(matches!(
+        FsUtils::copy_file_with(
+            &source_directory,
+            &destination,
+            FsTransferOptions::default(),
+            IdentityProcessor,
+        ),
+        Err(FsTransferError::SourceIo {
+            error: FsError::UnsupportedEntry {
+                operation: "copy_file_with",
+                path,
+            }
+        }) if path == source_directory
+    ));
+
+    let destination_directory = temp.path().join("destination-directory");
+    FsUtils::create_dir(&destination_directory).expect("create stream destination directory");
+    assert!(matches!(
+        FsUtils::copy_file_with(
+            &source,
+            &destination_directory,
+            FsTransferOptions::default(),
+            IdentityProcessor,
+        ),
+        Err(FsTransferError::DestinationIo {
+            error: FsError::UnsupportedEntry {
+                operation: "copy_file_with",
+                path,
+            }
+        }) if path == destination_directory
+    ));
+
+    let result = FsUtils::copy_file_with(
+        &source,
+        &destination,
+        FsTransferOptions {
+            chunk_size: 1024,
+            max_output_bytes: Some(1024),
+        },
+        DuplicateProcessor,
+    );
+    assert!(matches!(
+        result,
+        Err(FsTransferError::OutputLimitExceeded {
+            limit: 1024,
+            observed: 2048
+        })
+    ));
+    assert_eq!(
+        FsUtils::read_bytes(&destination, 0),
+        Ok(Vec::new()),
+        "the rejected chunk must not be written"
+    );
+    temp.cleanup();
+}
+
+#[cfg(feature = "tokio")]
+#[tokio::test]
+async fn async_stream_transfer_owns_arguments_and_uses_caller_runtime() {
+    let temp = TempDir::new();
+    let source = temp.path().join("source.bin");
+    let destination = temp.path().join("destination.bin");
+    FsUtils::write(&source, b"async transfer").expect("write transfer source");
+    let expected_destination = destination.clone();
+    let future = FsUtils::copy_file_with_async(
+        &source,
+        &destination,
+        FsTransferOptions::default(),
+        AsyncIdentityProcessor,
+    );
+    drop(source);
+    drop(destination);
+
+    let stats = tokio::spawn(future)
+        .await
+        .expect("transfer task should join")
+        .expect("async stream transfer should succeed");
+    assert_eq!(stats.input_bytes, 14);
+    assert_eq!(stats.output_bytes, 14);
+    assert_eq!(stats.chunks, 1);
+    assert_eq!(
+        FsUtils::read_bytes_async(&expected_destination, 14).await,
+        Ok(b"async transfer".to_vec())
+    );
+    temp.cleanup();
+}
+
+#[cfg(feature = "tokio")]
+#[tokio::test]
+async fn async_stream_transfer_processes_multiple_chunks_and_preserves_prefix_on_limit() {
+    let temp = TempDir::new();
+    let source = temp.path().join("source.bin");
+    let destination = temp.path().join("destination.bin");
+    let input = (0..2050)
+        .map(|index| b'a' + u8::try_from(index % 26).expect("modulo fits in u8"))
+        .collect::<Vec<_>>();
+    FsUtils::write(&source, &input).expect("write transfer source");
+    FsUtils::write(&destination, b"stale destination").expect("write transfer destination");
+
+    let stats = FsUtils::copy_file_with_async(
+        &source,
+        &destination,
+        FsTransferOptions {
+            chunk_size: 1024,
+            max_output_bytes: None,
+        },
+        AsyncDuplicateProcessor,
+    )
+    .await
+    .expect("multi-chunk async transfer should succeed");
+    let expected = input
+        .chunks(1024)
+        .flat_map(|chunk| chunk.iter().copied().chain(chunk.iter().copied()))
+        .collect::<Vec<_>>();
+    assert_eq!(stats.input_bytes, 2050);
+    assert_eq!(stats.output_bytes, 4100);
+    assert_eq!(stats.chunks, 3);
+    assert_eq!(FsUtils::read_bytes(&destination, 4100), Ok(expected));
+
+    FsUtils::write(&destination, b"stale destination").expect("reset destination");
+    let result = FsUtils::copy_file_with_async(
+        &source,
+        &destination,
+        FsTransferOptions {
+            chunk_size: 1024,
+            max_output_bytes: Some(2050),
+        },
+        AsyncDuplicateProcessor,
+    )
+    .await;
+    assert!(matches!(
+        result,
+        Err(FsTransferError::OutputLimitExceeded {
+            limit: 2050,
+            observed: 4096
+        })
+    ));
+    assert_eq!(
+        FsUtils::metadata(&destination)
+            .expect("read partial destination metadata")
+            .len(),
+        2048
+    );
+    temp.cleanup();
+}
+
+#[cfg(feature = "tokio")]
+#[tokio::test]
+async fn async_stream_transfer_rejects_non_regular_source_and_destination() {
+    let temp = TempDir::new();
+    let source = temp.path().join("source.bin");
+    let destination = temp.path().join("destination.bin");
+    FsUtils::write(&source, b"source").expect("write stream source");
+
+    let source_directory = temp.path().join("source-directory");
+    FsUtils::create_dir(&source_directory).expect("create async stream source directory");
+    assert!(matches!(
+        FsUtils::copy_file_with_async(
+            &source_directory,
+            &destination,
+            FsTransferOptions::default(),
+            AsyncIdentityProcessor,
+        )
+        .await,
+        Err(FsTransferError::SourceIo {
+            error: FsError::UnsupportedEntry {
+                operation: "copy_file_with",
+                path,
+            }
+        }) if path == source_directory
+    ));
+
+    let destination_directory = temp.path().join("destination-directory");
+    FsUtils::create_dir(&destination_directory).expect("create async stream destination directory");
+    assert!(matches!(
+        FsUtils::copy_file_with_async(
+            &source,
+            &destination_directory,
+            FsTransferOptions::default(),
+            AsyncIdentityProcessor,
+        )
+        .await,
+        Err(FsTransferError::DestinationIo {
+            error: FsError::UnsupportedEntry {
+                operation: "copy_file_with",
+                path,
+            }
+        }) if path == destination_directory
+    ));
+
+    temp.cleanup();
+}
+
+#[cfg(feature = "tokio")]
+#[tokio::test]
+async fn async_stream_transfer_cancellation_keeps_written_prefix() {
+    let temp = TempDir::new();
+    let source = temp.path().join("source.bin");
+    let destination = temp.path().join("destination.bin");
+    FsUtils::write(&source, [b'x'; 2050]).expect("write cancellation source");
+
+    let result = tokio::time::timeout(
+        std::time::Duration::from_millis(20),
+        FsUtils::copy_file_with_async(
+            &source,
+            &destination,
+            FsTransferOptions {
+                chunk_size: 1024,
+                max_output_bytes: None,
+            },
+            AsyncCancelAfterFirst { processed: 0 },
+        ),
+    )
+    .await;
+    assert!(
+        result.is_err(),
+        "the second processor future should remain pending"
+    );
+    assert_eq!(
+        FsUtils::metadata(&destination)
+            .expect("partial destination should remain after cancellation")
+            .len(),
+        1024
+    );
+    temp.cleanup();
+}
+
+#[cfg(feature = "tokio")]
+#[test]
+fn async_stream_transfer_checks_validation_before_runtime() {
+    use std::{future::Future, pin::pin, task::Context};
+
+    fn poll_once<F: Future>(future: F) -> std::task::Poll<F::Output> {
+        let mut future = pin!(future);
+        let mut context = Context::from_waker(std::task::Waker::noop());
+        future.as_mut().poll(&mut context)
+    }
+
+    assert!(matches!(
+        poll_once(FsUtils::copy_file_with_async(
+            "missing",
+            "destination",
+            FsTransferOptions {
+                chunk_size: 1,
+                max_output_bytes: None,
+            },
+            AsyncIdentityProcessor,
+        )),
+        std::task::Poll::Ready(Err(FsTransferError::InvalidOptions {
+            field: "chunk_size"
+        }))
+    ));
+    assert!(matches!(
+        poll_once(FsUtils::copy_file_with_async(
+            "same",
+            "same",
+            FsTransferOptions::default(),
+            AsyncIdentityProcessor,
+        )),
+        std::task::Poll::Ready(Err(FsTransferError::SameFile { .. }))
+    ));
+    assert!(matches!(
+        poll_once(FsUtils::copy_file_with_async(
+            "missing",
+            "destination",
+            FsTransferOptions::default(),
+            AsyncIdentityProcessor,
+        )),
+        std::task::Poll::Ready(Err(FsTransferError::RuntimeRequired))
+    ));
+}
+
+#[cfg(feature = "tempfile")]
+#[test]
+fn sync_temp_context_owns_configuration_and_close_reports_cleanup() {
+    let temp = TempDir::new();
+    let config = FsTempConfig::default()
+        .with_directory(temp.path())
+        .with_prefix("axutils-")
+        .with_suffix(".fixture");
+    let context = FsUtils::with_temp_config(config.clone());
+    assert_eq!(context.config(), &config);
+
+    let mut file = context
+        .create_temp_file()
+        .expect("create configured temp file");
+    assert!(file.path().starts_with(temp.path()));
+    assert!(file.path().file_name().is_some_and(|name| {
+        let name = name.to_string_lossy();
+        name.starts_with("axutils-") && name.ends_with(".fixture")
+    }));
+    file.as_file_mut()
+        .write_all(b"temporary contents")
+        .expect("write temporary file");
+    let file_path = file.path().to_path_buf();
+    file.close().expect("close should remove temporary file");
+    assert!(!file_path.exists());
+
+    let first = context
+        .create_temp_file()
+        .expect("create first independent temp file");
+    let second = context
+        .create_temp_file()
+        .expect("create second independent temp file");
+    let first_path = first.path().to_path_buf();
+    let second_path = second.path().to_path_buf();
+    assert_ne!(first_path, second_path);
+    drop(first);
+    drop(second);
+    assert!(!first_path.exists());
+    assert!(!second_path.exists());
+
+    let directory = context
+        .create_temp_dir()
+        .expect("create configured temp dir");
+    let directory_path = directory.path().to_path_buf();
+    directory
+        .close()
+        .expect("close should remove temporary dir");
+    assert!(!directory_path.exists());
+
+    let missing_parent = temp.path().join("does-not-exist");
+    let result = FsUtils::with_temp_config(FsTempConfig::default().with_directory(&missing_parent))
+        .create_temp_file();
+    assert!(matches!(
+        result,
+        Err(axutils::FsTempError::Create {
+            kind: io::ErrorKind::NotFound,
+            ..
+        })
+    ));
+    assert!(!missing_parent.exists());
+
+    let invalid = FsUtils::with_temp_config(FsTempConfig::default().with_prefix("bad/name"))
+        .create_temp_file();
+    assert!(matches!(
+        invalid,
+        Err(axutils::FsTempError::InvalidConfig { field: "prefix" })
+    ));
+    temp.cleanup();
+}
+
+#[cfg(feature = "tempfile-async")]
+#[tokio::test]
+async fn async_temp_context_supports_drop_async_and_close() {
+    let temp = TempDir::new();
+    let context = FsUtils::with_temp_config(
+        FsTempConfig::default()
+            .with_directory(temp.path())
+            .with_prefix("axutils-async-"),
+    );
+
+    let file = context
+        .create_temp_file_async()
+        .await
+        .expect("create configured async temp file");
+    let file_path = file.path().to_path_buf();
+    let copied_path = temp.path().join("copied-temp-file.bin");
+    FsUtils::write_async(file.path(), b"temporary contents")
+        .await
+        .expect("write async temporary file");
+    FsUtils::copy_file_async(file.path(), &copied_path)
+        .await
+        .expect("copy async temporary file");
+    assert_eq!(
+        FsUtils::read_bytes_async(&copied_path, 18).await,
+        Ok(b"temporary contents".to_vec())
+    );
+    file.drop_async().await;
+    assert!(!file_path.exists());
+    assert!(copied_path.is_file());
+
+    let directory = context
+        .create_temp_dir_async()
+        .await
+        .expect("create configured async temp dir");
+    let directory_path = directory.path().to_path_buf();
+    FsUtils::write_async(directory.path().join("payload.bin"), b"payload")
+        .await
+        .expect("write async temporary directory payload");
+    directory
+        .close()
+        .expect("sync close should remove async temp dir");
+    assert!(!directory_path.exists());
+
+    let static_file = FsUtils::create_temp_file_async()
+        .await
+        .expect("create default async temp file");
+    let static_file_path = static_file.path().to_path_buf();
+    static_file.drop_async().await;
+    assert!(!static_file_path.exists());
+    temp.cleanup();
+}
+
+#[cfg(feature = "tempfile-async")]
+#[tokio::test]
+async fn async_temp_drop_cancellation_uses_backend_drop_fallback() {
+    use std::{future::Future, pin::Pin, task::Context};
+
+    let temp = TempDir::new();
+    let file = FsUtils::create_temp_file_async()
+        .await
+        .expect("create cancellable async temp file");
+    let file_path = file.path().to_path_buf();
+    let mut future = Pin::from(Box::new(file.drop_async()));
+    let mut context = Context::from_waker(std::task::Waker::noop());
+    let _ = future.as_mut().poll(&mut context);
+    drop(future);
+    assert!(
+        !file_path.exists(),
+        "cancelled file cleanup should use Drop fallback"
+    );
+
+    let directory = FsUtils::create_temp_dir_async()
+        .await
+        .expect("create cancellable async temp dir");
+    let directory_path = directory.path().to_path_buf();
+    FsUtils::write_async(directory.path().join("payload.bin"), b"payload")
+        .await
+        .expect("write cancellable directory payload");
+    let mut future = Pin::from(Box::new(directory.drop_async()));
+    let mut context = Context::from_waker(std::task::Waker::noop());
+    let _ = future.as_mut().poll(&mut context);
+    drop(future);
+    assert!(
+        !directory_path.exists(),
+        "cancelled directory cleanup should use Drop fallback"
+    );
+    temp.cleanup();
+}
+
+#[cfg(feature = "tempfile-async")]
+#[test]
+fn async_temp_creation_requires_runtime_before_filesystem_access() {
+    use std::{future::Future, pin::pin, task::Context};
+
+    fn poll_once<F: Future>(future: F) -> std::task::Poll<F::Output> {
+        let mut future = pin!(future);
+        let mut context = Context::from_waker(std::task::Waker::noop());
+        future.as_mut().poll(&mut context)
+    }
+
+    assert!(matches!(
+        poll_once(FsUtils::create_temp_file_async()),
+        std::task::Poll::Ready(Err(axutils::FsTempError::RuntimeRequired))
+    ));
 }

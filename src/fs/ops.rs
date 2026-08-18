@@ -70,7 +70,7 @@ fn read_budget(max_bytes: usize) -> Result<u64, FsError> {
 }
 
 #[cfg(feature = "tokio")]
-fn ensure_runtime() -> Result<(), FsError> {
+pub(crate) fn ensure_runtime() -> Result<(), FsError> {
     tokio::runtime::Handle::try_current()
         .map(|_| ())
         .map_err(|_| FsError::RuntimeRequired)

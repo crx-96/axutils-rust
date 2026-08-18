@@ -21,6 +21,15 @@
   异步入口。检测到实际内容或直接子项超过上限时返回稳定错误，`create_file` 不覆盖已有目标，`copy_file`
   拒绝目录、符号链接和其他非普通文件；异步入口要求调用方提供 Tokio runtime，库不创建 runtime、
   不调用 `block_on`，也不承诺安全根、抗 TOCTOU、原子写或递归删除回滚。详见 `docs/examples/fs.md`。
+- 扩展文件系统能力：新增默认可用的 `FsUtils::copy_file_with` 串行流式块处理 API、可选累计
+  输出上限、checked 输入/输出/块统计和保留原始处理器错误的 `FsTransferError`；`tokio` feature
+  追加异步 GAT 处理器入口，异步 future 由调用方 runtime 驱动，取消可能留下部分目标。新增独立
+  `tempfile` 与 `tempfile-async` features，提供显式 `FsTempConfig`/`FsUtilsContext`、
+  `FsTempFile`/`FsTempDir`、`FsAsyncTempFile`/`FsAsyncTempDir` 拥有型 wrapper、
+  `FsTempError`、同步 `close` 与异步 `drop_async`；不修改进程级临时目录，不因单独启用
+  `tokio` 导出临时 API，也不提供未经后端保证的 `cleanup_async`/persist 抽象。异步
+  `drop_async` 正常路径使用后端异步清理，取消或隐式 Drop 仍按后端同步 Drop 后备语义处理，
+  清理错误不从该入口返回。
 - 新增 `PathUtils`，提供绝对路径判断、当前工作目录和可执行文件路径获取，以及不访问文件系统的多路径词法拼接。
 - 新增 `TimeUtils`，提供当前 Unix 时间戳获取能力；通过独立的 `chrono`、`time` 或 `jiff` feature
   提供日期、日期时间和固定 UTC 偏移格式化能力。

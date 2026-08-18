@@ -116,8 +116,29 @@ fn verifies_fs_feature_api_matrix_and_dependency_boundaries() {
         ("serde-only", true, ""),
         ("tokio-only", true, ""),
         ("serde-tokio", true, ""),
+        ("tempfile-only", true, ""),
+        ("tokio-tempfile", true, ""),
+        ("tempfile-async", true, ""),
+        ("tempfile-both", true, ""),
+        ("all", true, ""),
+        ("negative-tokio-no-tempfile", false, "create_temp_file"),
+        ("negative-no-tempfile-sync", false, "create_temp_file"),
+        (
+            "negative-no-tempfile-async",
+            false,
+            "create_temp_file_async",
+        ),
+        (
+            "negative-tempfile-only-async",
+            false,
+            "create_temp_file_async",
+        ),
+        ("negative-tempfile-async-sync", false, "create_temp_file"),
         ("negative-no-domain-fs-utils", false, "FsUtils"),
         ("negative-no-domain-fs-operation", false, "read_bytes"),
+        ("negative-no-domain-fs-transfer", false, "copy_file_with"),
+        ("negative-no-utils-fs-transfer", false, "FsTransferOptions"),
+        ("negative-no-utils-fs-temp", false, "FsTempConfig"),
         ("negative-no-root-fs-utils-module", false, "fs_utils"),
         ("negative-no-utils-fs-error", false, "FsError"),
         ("negative-no-nested-fs-error", false, "FsError"),
@@ -165,6 +186,7 @@ fn verifies_fs_feature_api_matrix_and_dependency_boundaries() {
             "remove_dir_all_async",
             "move_path_async",
             "copy_file_async",
+            "copy_file_with_async",
             "read_bytes_async",
             "read_to_string_async",
             "write_async",
@@ -1266,6 +1288,37 @@ fn assert_fs_dependency_boundaries() {
     assert!(!has_package(&tokio_tree, "serde_json"));
     assert_fs_no_unrelated_packages(&tokio_tree, &["tokio"], "tokio-only");
 
+    let tempfile_tree = cargo_tree_strict("tempfile");
+    assert!(has_package(&tempfile_tree, "tempfile"));
+    assert!(!has_package(&tempfile_tree, "async-tempfile"));
+    assert!(!has_package(&tempfile_tree, "tokio"));
+    assert_fs_no_unrelated_packages(&tempfile_tree, &["tempfile"], "tempfile-only");
+    let tempfile_features = cargo_tree_with_edges_strict("tempfile", "normal,build,features");
+    assert!(!tempfile_features.contains("tempfile feature \"getrandom\""));
+
+    let tokio_tempfile_tree = cargo_tree_strict("tokio,tempfile");
+    assert!(has_package(&tokio_tempfile_tree, "tokio"));
+    assert!(has_package(&tokio_tempfile_tree, "tempfile"));
+    assert!(!has_package(&tokio_tempfile_tree, "async-tempfile"));
+    assert_fs_no_unrelated_packages(
+        &tokio_tempfile_tree,
+        &["tokio", "tempfile"],
+        "tokio-tempfile",
+    );
+
+    let async_tempfile_tree = cargo_tree_strict("tempfile-async");
+    assert!(has_package(&async_tempfile_tree, "async-tempfile"));
+    assert!(has_package(&async_tempfile_tree, "tokio"));
+    assert!(!has_package(&async_tempfile_tree, "tempfile"));
+    assert_fs_no_unrelated_packages(
+        &async_tempfile_tree,
+        &["async-tempfile", "tokio"],
+        "tempfile-async",
+    );
+    let async_tempfile_features =
+        cargo_tree_with_edges_strict("tempfile-async", "normal,build,features");
+    assert!(!async_tempfile_features.contains("async-tempfile feature \"uuid\""));
+
     let serde_tree = cargo_tree_strict("serde");
     assert!(has_package(&serde_tree, "serde"));
     assert!(has_package(&serde_tree, "serde_json"));
@@ -1368,6 +1421,8 @@ fn assert_fs_no_unrelated_packages(tree: &str, allowed: &[&str], feature_set: &s
         "tracing",
         "tracing-subscriber",
         "tracing-appender",
+        "tempfile",
+        "async-tempfile",
     ] {
         if allowed.contains(&package) {
             continue;
@@ -2038,7 +2093,8 @@ fn cargo_tree_inverted_with_edges(features: &str, package: &str, edges: &str) ->
 
 fn has_package(tree: &str, package: &str) -> bool {
     tree.lines()
-        .any(|line| line.contains(&format!("{package} v")))
+        .flat_map(str::split_whitespace)
+        .any(|token| token == package)
 }
 
 fn has_package_version_prefix(tree: &str, package: &str, version: &str) -> bool {

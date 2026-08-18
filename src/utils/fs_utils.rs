@@ -4,7 +4,20 @@
 use std::future::Future;
 use std::path::{Path, PathBuf};
 
+use crate::fs::{FsChunkProcessor, FsTransferError, FsTransferOptions, FsTransferStats};
 use crate::{fs::ops, fs::FsError};
+
+#[cfg(feature = "tokio")]
+use crate::fs::FsAsyncChunkProcessor;
+
+#[cfg(any(feature = "tempfile", feature = "tempfile-async"))]
+use crate::fs::FsTempConfig;
+
+#[cfg(feature = "tempfile")]
+use crate::fs::{FsTempDir, FsTempError, FsTempFile};
+
+#[cfg(feature = "tempfile-async")]
+use crate::fs::{FsAsyncTempDir, FsAsyncTempFile};
 
 /// 本地文件系统操作的无状态静态入口。
 ///
@@ -257,6 +270,116 @@ impl FsUtils {
         destination: Q,
     ) -> Result<u64, FsError> {
         ops::copy_file(source.as_ref(), destination.as_ref())
+    }
+
+    /// 按块读取普通源文件，经处理器转换后流式写入目标文件。
+    ///
+    /// `chunk_size` 必须在 1 KiB 到 16 MiB 之间；默认值为 64 KiB。处理器按串行顺序收到
+    /// 拥有所有权的 `Vec<u8>`，返回的 `Vec<u8>` 会在通过可选累计输出上限检查后写入目标。
+    /// 源和已存在的目标最终路径项必须是普通文件；目标会被截断，目标父目录不会自动创建。
+    /// 预检只使用词法路径比较和 `symlink_metadata`，不提供 canonicalize、硬链接别名检测、
+    /// 原子替换或抗 TOCTOU 保证；错误或取消可能留下部分目标内容。
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use axutils::{FsChunkProcessor, FsTransferOptions, FsUtils};
+    ///
+    /// struct Identity;
+    /// impl FsChunkProcessor for Identity {
+    ///     type Error = std::convert::Infallible;
+    ///
+    ///     fn process(&mut self, chunk: Vec<u8>) -> Result<Vec<u8>, Self::Error> {
+    ///         Ok(chunk)
+    ///     }
+    /// }
+    ///
+    /// let _stats = FsUtils::copy_file_with(
+    ///     "source.bin",
+    ///     "destination.bin",
+    ///     FsTransferOptions::default(),
+    ///     Identity,
+    /// )?;
+    /// # Ok::<(), axutils::FsTransferError<std::convert::Infallible>>(())
+    /// ```
+    pub fn copy_file_with<P, Q, C>(
+        source: P,
+        destination: Q,
+        options: FsTransferOptions,
+        processor: C,
+    ) -> Result<FsTransferStats, FsTransferError<C::Error>>
+    where
+        P: AsRef<Path>,
+        Q: AsRef<Path>,
+        C: FsChunkProcessor,
+    {
+        crate::fs::transfer::copy_file_with(
+            source.as_ref().to_path_buf(),
+            destination.as_ref().to_path_buf(),
+            options,
+            processor,
+        )
+    }
+
+    #[cfg(any(feature = "tempfile", feature = "tempfile-async"))]
+    /// 使用显式配置创建一个持有临时目录策略的 `FsUtilsContext`。
+    ///
+    /// 构造 context 不访问文件系统，也不改变进程级临时目录；指定父目录在实际创建时必须
+    /// 已经存在。`FsUtils` 本身仍是兼容既有调用方的 unit struct。
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # #[cfg(any(feature = "tempfile", feature = "tempfile-async"))]
+    /// {
+    ///     use axutils::{FsTempConfig, FsUtils};
+    ///
+    ///     let context = FsUtils::with_temp_config(
+    ///         FsTempConfig::new().with_prefix("axutils-").with_suffix(".tmp"),
+    ///     );
+    ///     assert_eq!(context.config().prefix.as_deref(), Some("axutils-"));
+    /// }
+    /// ```
+    pub fn with_temp_config(config: FsTempConfig) -> crate::fs::FsUtilsContext {
+        crate::fs::temp::context(config)
+    }
+
+    #[cfg(feature = "tempfile")]
+    /// 使用默认配置创建一个同步拥有型命名临时文件。
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[cfg(feature = "tempfile")]
+    /// fn example() -> Result<(), axutils::FsTempError> {
+    ///     let file = axutils::FsUtils::create_temp_file()?;
+    ///     let path = file.path().to_path_buf();
+    ///     file.close()?;
+    ///     assert!(!path.exists());
+    ///     Ok(())
+    /// }
+    /// ```
+    pub fn create_temp_file() -> Result<FsTempFile, FsTempError> {
+        crate::fs::temp::create_temp_file(&FsTempConfig::default())
+    }
+
+    #[cfg(feature = "tempfile")]
+    /// 使用默认配置创建一个同步拥有型命名临时目录。
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[cfg(feature = "tempfile")]
+    /// fn example() -> Result<(), axutils::FsTempError> {
+    ///     let directory = axutils::FsUtils::create_temp_dir()?;
+    ///     let path = directory.path().to_path_buf();
+    ///     directory.close()?;
+    ///     assert!(!path.exists());
+    ///     Ok(())
+    /// }
+    /// ```
+    pub fn create_temp_dir() -> Result<FsTempDir, FsTempError> {
+        crate::fs::temp::create_temp_dir(&FsTempConfig::default())
     }
 
     /// 在 `max_bytes` 上限内流式读取二进制内容。
@@ -639,6 +762,98 @@ impl FsUtils {
         let source = source.as_ref().to_path_buf();
         let destination = destination.as_ref().to_path_buf();
         async move { ops::copy_file_async(source, destination).await }
+    }
+
+    /// 在调用方 Tokio runtime 中按块异步读取、处理并写入普通文件。
+    ///
+    /// 处理器调用保持串行，不会为每个块创建任务，也不会在库内创建 runtime 或调用
+    /// `block_on`。路径、配置和处理器会被 future 持有；future 被取消时目标可能只包含部分
+    /// 结果。无 runtime 时首次 poll 返回 [`FsTransferError::RuntimeRequired`]。
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[cfg(feature = "tokio")]
+    /// async fn example() -> Result<(), axutils::FsTransferError<std::convert::Infallible>> {
+    ///     use axutils::{FsAsyncChunkProcessor, FsTransferOptions, FsUtils};
+    ///
+    ///     struct Identity;
+    ///     impl FsAsyncChunkProcessor for Identity {
+    ///         type Error = std::convert::Infallible;
+    ///         type Future<'a> = std::future::Ready<Result<Vec<u8>, Self::Error>> where Self: 'a;
+    ///
+    ///         fn process<'a>(&'a mut self, chunk: Vec<u8>) -> Self::Future<'a> {
+    ///             std::future::ready(Ok(chunk))
+    ///         }
+    ///     }
+    ///
+    ///     let _stats = FsUtils::copy_file_with_async(
+    ///         "source.bin",
+    ///         "destination.bin",
+    ///         FsTransferOptions::default(),
+    ///         Identity,
+    ///     ).await?;
+    ///     Ok(())
+    /// }
+    /// ```
+    #[cfg(feature = "tokio")]
+    pub fn copy_file_with_async<P, Q, C>(
+        source: P,
+        destination: Q,
+        options: FsTransferOptions,
+        processor: C,
+    ) -> impl Future<Output = Result<FsTransferStats, FsTransferError<C::Error>>> + 'static
+    where
+        P: AsRef<Path>,
+        Q: AsRef<Path>,
+        C: FsAsyncChunkProcessor + 'static,
+        C::Error: 'static,
+    {
+        let source = source.as_ref().to_path_buf();
+        let destination = destination.as_ref().to_path_buf();
+        async move {
+            crate::fs::transfer::copy_file_with_async(source, destination, options, processor).await
+        }
+    }
+
+    #[cfg(feature = "tempfile-async")]
+    /// 使用默认配置创建一个异步拥有型命名临时文件。
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[cfg(feature = "tempfile-async")]
+    /// async fn example() -> Result<(), axutils::FsTempError> {
+    ///     let file = axutils::FsUtils::create_temp_file_async().await?;
+    ///     let path = file.path().to_path_buf();
+    ///     file.drop_async().await;
+    ///     assert!(!path.exists());
+    ///     Ok(())
+    /// }
+    /// ```
+    pub fn create_temp_file_async(
+    ) -> impl Future<Output = Result<FsAsyncTempFile, crate::fs::FsTempError>> + 'static {
+        crate::fs::temp::create_temp_file_async(FsTempConfig::default())
+    }
+
+    #[cfg(feature = "tempfile-async")]
+    /// 使用默认配置创建一个异步拥有型命名临时目录。
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[cfg(feature = "tempfile-async")]
+    /// async fn example() -> Result<(), axutils::FsTempError> {
+    ///     let directory = axutils::FsUtils::create_temp_dir_async().await?;
+    ///     let path = directory.path().to_path_buf();
+    ///     directory.drop_async().await;
+    ///     assert!(!path.exists());
+    ///     Ok(())
+    /// }
+    /// ```
+    pub fn create_temp_dir_async(
+    ) -> impl Future<Output = Result<FsAsyncTempDir, crate::fs::FsTempError>> + 'static {
+        crate::fs::temp::create_temp_dir_async(FsTempConfig::default())
     }
 
     /// 在 Tokio runtime 中异步受限读取二进制内容。
