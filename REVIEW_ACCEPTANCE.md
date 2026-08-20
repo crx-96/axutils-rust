@@ -88,6 +88,10 @@
 - `regex` 提供 `RegUtils`，国际手机号校验还需要独立的 `libphonenumber`；
 - 模板能力需要 `serde` 与 `strfmt` 或 `minijinja` 的显式组合；
 - 日期后端 `chrono`、`time`、`jiff` 相互独立，同时启用多个后端时使用带后缀 API；
+- 调度器 API 严格要求 `chrono + chrono_tz + tokio + croner`；16 种组合中只有完整组合导出
+  `scheduler` 模块、领域类型和 `SchedulerUtils`。`croner` 是直接依赖的同名 provider feature，
+  单独启用只会带入其内部 `chrono` 默认 feature（含 `clock`）、`derive_builder` 和 `strum`，不等于
+  启用本 crate 的 `chrono` feature，也不得导出半套调度 API；
 - 配置异步入口需要 `serde + tokio`；邮件异步入口需要 `lettre + tokio`；HTTP、Redis 的异步
   入口也分别受 `tokio` 组合守卫；
 - `aes + base64` 才提供 AES 的 Base64 便捷入口；
@@ -160,7 +164,12 @@
 
 ### 5.3 feature 和可选依赖
 
-- 第三方依赖必须 `optional = true`，优先使用与依赖名一致的 feature，并通过 `dep:<name>` 显式映射；
+- 第三方依赖必须 `optional = true`。对新增或调整的、只由一个第三方 crate 提供的能力，公开 feature 默认必须与直接可选依赖 crate 同名，并通过 `dep:<name>` 显式映射；例如直接依赖 `tower-http` 时使用 `tower-http` feature，而不是为 Axum 的每个包装能力创建 `axum-cors`、`axum-timeout` 一类本项目别名；
+- 依赖 feature 的转发必须在 manifest 中使用 Cargo 的 `package-name/feature-name` 语法，并在文档中列出实际启用的上游子 feature。Cargo feature 属于当前 package 的命名空间，下游启用的是本 crate 的提供方同名 feature，而不是直接操作传递依赖的 feature；例如 `tower-http = ["dep:tower-http", "tower-http/cors", "tower-http/timeout"]`，下游使用 `features = ["tower-http"]`；
+- 同一个第三方 crate 提供的多个 middleware 可以归入该提供方同名 feature；只有确有必要让用户独立选择上游能力时，才增加与提供方和上游 feature 明确对应的映射，并记录命名与依赖边界。不得为了表达 Axum 包装层而发明 `axum-*` feature；多个第三方 crate 必须共同组成一个能力时，才可使用语义聚合 feature，并在文档和依赖树中列出全部提供方；
+- 上述同名 provider 规则同样适用于调度器：直接提供 cron 解析/计算的 `croner` 依赖使用
+  `croner = ["dep:croner"]`，不得另建 `scheduler` 别名；`Scheduler` 仍通过源码中的
+  `chrono + chrono_tz + tokio + croner` 精确组合守卫表达跨 provider API 前置条件；
 - 依赖版本使用 Cargo 默认 caret 兼容约束，不在 `version` 中使用 `=` 精确锁定补丁版本；
 - 默认 feature 保持为空；不依赖第三方 crate 的方法直接可用，不增加 feature 守卫或可选依赖；
 - 单项 feature 默认保持独立，不自动启用其他项目 feature；只有公共 API 基础设施必需的内部
@@ -178,8 +187,10 @@
 
 - `OnceLock` 或其他进程级单例必须说明一次初始化、重复初始化、不可替换、生命周期、并发和
   测试隔离语义；不能向调用方暴露误导性的 reset/replace 假象；
-- library crate 不创建 Tokio runtime，不在异步入口内部 `block_on`；runtime 由调用方提供，
-  生产依赖和测试依赖分别声明所需的 Tokio feature；
+- library crate 的普通异步 API 不隐式创建 Tokio runtime，不在异步入口内部 `block_on`；runtime
+  默认由调用方提供，生产依赖和测试依赖分别声明所需的 Tokio feature。若后续提供专门、显式 opt-in
+  的 runtime 构建或运行 API，则允许该 API 创建并拥有一个 runtime，但必须记录 runtime 的创建、
+  `block_on`、关闭、嵌套调用错误和任务生命周期语义；其他普通异步 API 仍不得偷偷创建第二个 runtime。
 - 构造配置、客户端或纯解析对象默认不访问网络；文件、网络、SMTP、Redis、进程级分配器等
   外部副作用必须在 API doc、测试和验收报告中明确；
 - 真实外部服务测试固定为 ignored，并且需要明确的环境变量、被忽略的本地配置和用户授权；
@@ -368,6 +379,13 @@ git diff --check
 再按变更涉及的能力补充 `lettre`、`tokio`、`serde`、模板、日期、配置、crypto、JWT、HTTP、
 Redis、转换和编码等组合的 `cargo check/test/doc` 与 `cargo tree`。完整命令和当前能力的
 具体组合以 `develop.md`、`Cargo.toml` 和 `tests/feature_matrix.rs` 为准。
+
+调度器变更还必须运行 `develop.md` 中的 scheduler 集成测试、doctest、clippy 和依赖树命令，
+并通过 ignored feature matrix 验证 `chrono`、`chrono_tz`、`tokio`、`croner` 的全部 16 种组合：
+只有完整组合成功导出调度器 API，其余 15 种组合必须以稳定诊断证明 API 不存在。依赖树还必须确认
+生产 Tokio feature 精确包含 `fs`、`io-util`、`net`、`rt`、`rt-multi-thread`、`signal`、`sync`、
+`time`（及其平台传递 feature），不由本 crate 的 `tokio` feature 启用 `macros`，并记录 Croner
+带入的 `chrono/clock`、`derive_builder` 和 `strum`。
 
 ## 9. 安全、配置和外部操作验收
 

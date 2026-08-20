@@ -22,6 +22,10 @@
 //! `ConvertUtils` 始终提供无状态工具类型；整数、浮点数和 UUID 转换分别需要 `itoa`、
 //! `ryu`/`zmij` 和 `uuid` feature。借用型格式化入口使用调用方 buffer，追加型入口直接写入
 //! 已有字符串，拥有型入口才创建独立 `String`。
+//! `TokioUtils` 需要 `tokio`，只在显式 build/run 时创建 runtime；`AxumUtils` 需要
+//! `axum + tokio`，保存进程内唯一默认单次服务。
+//! `SchedulerUtils` 需要同时启用 `chrono + chrono_tz + tokio + croner`，注册时由调用方
+//! 提供启用了 time driver 的 runtime；它只成功初始化一次，关闭后也不可 reset/replace。
 //! 库内结构化事件需要显式启用 `tracing` feature；`logging` feature 额外提供 `LogUtils`。
 //! `LogUtils` 使用同步、无 ANSI 的 formatter，初始化成功后不可 reset/replace；文件轮转不
 //! 负责历史文件 retention，日志写入可能阻塞产生日志的线程。
@@ -56,6 +60,23 @@ pub mod sqlx_utils;
 
 #[cfg(feature = "logging")]
 pub mod log_utils;
+
+/// 进程内唯一默认 AxumServer 的 OnceLock facade。
+#[cfg(all(feature = "axum", feature = "tokio"))]
+pub mod axum_utils;
+
+/// 无状态 Tokio runtime、任务、channel 与信号 facade。
+#[cfg(feature = "tokio")]
+pub mod tokio_utils;
+
+/// 一次初始化的进程级 Tokio 调度器 facade。
+#[cfg(all(
+    feature = "chrono",
+    feature = "chrono_tz",
+    feature = "tokio",
+    feature = "croner"
+))]
+pub mod scheduler_utils;
 
 pub mod convert_utils;
 pub mod crypto_utils;
@@ -95,6 +116,20 @@ pub use sqlx_utils::SqlxUtils;
 
 #[cfg(feature = "logging")]
 pub use log_utils::{LogConfig, LogError, LogFileConfig, LogLevel, LogRotation, LogUtils};
+
+#[cfg(all(feature = "axum", feature = "tokio"))]
+pub use axum_utils::AxumUtils;
+
+#[cfg(feature = "tokio")]
+pub use tokio_utils::TokioUtils;
+
+#[cfg(all(
+    feature = "chrono",
+    feature = "chrono_tz",
+    feature = "tokio",
+    feature = "croner"
+))]
+pub use scheduler_utils::SchedulerUtils;
 
 pub use crypto_utils::CryptoUtils;
 pub use fs_utils::FsUtils;

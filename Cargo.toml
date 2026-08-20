@@ -10,7 +10,7 @@ readme = "README.md"
 repository = "https://github.com/crx-96/axutils-rust"
 keywords = ["utilities", "http", "database", "cryptography", "configuration"]
 categories = [
-    "development-tools",
+    "web-programming::http-server",
     "web-programming::http-client",
     "database",
     "cryptography",
@@ -41,6 +41,8 @@ serde = ["dep:serde", "dep:serde_json", "dep:serde_urlencoded"]
 strfmt = ["dep:strfmt"]
 minijinja = ["dep:minijinja"]
 chrono = ["dep:chrono"]
+chrono_tz = ["dep:chrono_tz"]
+croner = ["dep:croner"]
 time = ["dep:time"]
 jiff = ["dep:jiff"]
 lettre = ["dep:lettre"]
@@ -57,12 +59,36 @@ redis = [
 sqlx = ["dep:sqlx", "dep:futures-util"]
 tokio = [
     "dep:tokio",
+    "tokio/fs",
+    "tokio/io-util",
+    "tokio/net",
+    "tokio/rt",
+    "tokio/rt-multi-thread",
+    "tokio/signal",
+    "tokio/sync",
+    "tokio/time",
+    "axum?/http1",
+    "axum?/tokio",
     "lettre?/tokio1-rustls",
     "redis?/cluster-async",
     "redis?/connection-manager",
     "redis?/tokio-comp",
     "sqlx?/runtime-tokio",
 ]
+axum = ["dep:axum", "dep:tower", "tower?/util", "tower_governor?/axum"]
+tokio-util = ["dep:tokio-util", "tokio-util/rt", "dep:futures-timer"]
+tower = ["dep:tower", "tower/util", "tower/limit", "tower/load-shed"]
+tower-http = [
+    "dep:tower-http",
+    "tower-http/catch-panic",
+    "tower-http/cors",
+    "tower-http/limit",
+    "tower-http/request-id",
+    "tower-http/timeout",
+    "tower-http/trace",
+    "axum?/matched-path",
+]
+tower_governor = ["dep:tower_governor", "dep:futures-timer"]
 tempfile = ["dep:tempfile"]
 tempfile-async = ["dep:async-tempfile", "tokio"]
 toml = ["dep:toml"]
@@ -93,6 +119,8 @@ serde_urlencoded = { version = "0.7.1", optional = true }
 strfmt = { version = "0.2", optional = true }
 minijinja = { version = "2.24.0", default-features = false, features = ["serde"], optional = true }
 chrono = { version = "0.4.45", default-features = false, optional = true }
+chrono_tz = { package = "chrono-tz", version = "0.10.4", default-features = false, optional = true }
+croner = { version = "3.0.1", default-features = false, optional = true }
 time = { version = "0.3.36", default-features = false, optional = true }
 jiff = { version = "0.2.35", default-features = false, optional = true }
 lettre = { version = "0.11.23", default-features = false, optional = true, features = [
@@ -111,7 +139,13 @@ futures-util = { version = "0.3.34", default-features = false, features = ["allo
 r2d2 = { version = "0.8.10", optional = true }
 rmp-serde = { version = "1.3.1", optional = true }
 url = { version = "2.5.8", default-features = false, features = ["std"], optional = true }
-tokio = { version = "1.53.1", default-features = false, features = ["fs", "io-util", "rt", "sync", "time"], optional = true }
+tokio = { version = "1.53.1", default-features = false, optional = true }
+axum = { version = "0.8.9", default-features = false, optional = true }
+tokio-util = { version = "0.7.19", default-features = false, optional = true }
+futures-timer = { version = "3.0.3", default-features = false, optional = true }
+tower = { version = "0.5.3", default-features = false, optional = true }
+tower-http = { version = "0.7.0", default-features = false, optional = true }
+tower_governor = { version = "0.8.0", default-features = false, optional = true }
 tempfile = { version = "3.27", default-features = false, optional = true }
 async-tempfile = { version = "0.8", default-features = false, optional = true }
 toml = { version = "1.1.4", default-features = false, features = ["parse", "serde", "std"], optional = true }
@@ -131,7 +165,7 @@ tracing-subscriber = { version = "0.3.23", default-features = false, features = 
 tracing-appender = { version = "0.2.5", default-features = false, optional = true }
 
 [dev-dependencies]
-tokio = { version = "1.53.1", default-features = false, features = ["macros", "rt-multi-thread"] }
+tokio = { version = "1.53.1", default-features = false, features = ["macros", "rt-multi-thread", "time", "test-util"] }
 redis-test = "1.0.4"
 rustls = { version = "0.23.43", default-features = false, features = ["ring", "std", "tls12"] }
 tracing = { version = "0.1.44", default-features = false, features = ["std"] }

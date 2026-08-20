@@ -175,6 +175,12 @@
 //!
 //! # 异步 HTTP 改为 features = ["http", "tokio"]。
 
+//! `tokio` feature 提供显式 runtime、任务、channel 与跨平台 shutdown 工具；普通异步入口使用
+//! 调用方 runtime，只有 `TokioUtils::build_runtime`/`run` 创建 runtime。`tokio + tokio-util`
+//! 提供协作式 `TokioTaskGroup`。`axum + tokio` 提供 HTTP/1 Router/state、单次服务状态机与
+//! graceful drain；middleware 由 `tower`、`tower-http`、`tower_governor` provider feature 控制。
+//! 详见 Tokio 与 Axum 使用文档。
+//!
 //! `tracing` feature 只让库内安全的 I/O 和生命周期边界发出结构化事件，不自动安装
 //! subscriber。`logging` feature 额外提供 `LogUtils`：显式安装一次无 ANSI 的同步 formatter，
 //! 支持标准输出、文件和双输出，以及 Never/分钟/小时/天轮转。调用方需要自行负责日志文件
@@ -196,6 +202,20 @@ pub mod convert;
 pub mod fs;
 mod time;
 pub mod utils;
+
+#[cfg(feature = "tokio")]
+pub mod tokio;
+
+#[cfg(all(feature = "axum", feature = "tokio"))]
+pub mod axum;
+
+#[cfg(all(
+    feature = "chrono",
+    feature = "chrono_tz",
+    feature = "tokio",
+    feature = "croner"
+))]
+pub mod scheduler;
 
 #[cfg(feature = "redis")]
 pub mod redis;
@@ -311,6 +331,38 @@ pub use utils::SqlxUtils;
 
 #[cfg(feature = "logging")]
 pub use utils::{LogConfig, LogError, LogFileConfig, LogLevel, LogRotation, LogUtils};
+
+#[cfg(all(feature = "axum", feature = "tokio"))]
+pub use axum::{
+    AxumApp, AxumConfig, AxumError, AxumServeOutcome, AxumServer, AxumServerBuilder,
+    AxumShutdownHandle, AxumShutdownReason,
+};
+#[cfg(all(feature = "axum", feature = "tokio", feature = "tower-http"))]
+pub use axum::{AxumCorsConfig, AxumCorsOrigin, AxumTimeoutStatus};
+#[cfg(all(feature = "axum", feature = "tokio"))]
+pub use utils::AxumUtils;
+
+#[cfg(all(feature = "tokio", feature = "tokio-util"))]
+pub use tokio::TokioTaskGroup;
+#[cfg(feature = "tokio")]
+pub use tokio::{TokioConfig, TokioError, TokioRuntimeFlavor, TokioShutdownReason};
+#[cfg(feature = "tokio")]
+pub use utils::TokioUtils;
+
+#[cfg(all(
+    feature = "chrono",
+    feature = "chrono_tz",
+    feature = "tokio",
+    feature = "croner"
+))]
+pub use scheduler::{Scheduler, SchedulerConfig, SchedulerError, TaskId, TaskSchedule};
+#[cfg(all(
+    feature = "chrono",
+    feature = "chrono_tz",
+    feature = "tokio",
+    feature = "croner"
+))]
+pub use utils::SchedulerUtils;
 
 pub mod crypto;
 

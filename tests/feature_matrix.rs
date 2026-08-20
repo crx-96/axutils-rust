@@ -58,6 +58,177 @@ impl Drop for TemporaryTarget {
 }
 
 #[test]
+#[ignore = "慢速 scheduler feature/API 与依赖契约矩阵"]
+fn verifies_scheduler_feature_api_matrix_and_dependency_boundaries() {
+    let fixture_manifest = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/scheduler_feature_matrix/Cargo.toml");
+    let target_dir = unique_target("axutils-scheduler-feature-matrix");
+
+    for feature in [
+        "none",
+        "chrono",
+        "chrono-tz",
+        "tokio",
+        "croner",
+        "chrono-chrono-tz",
+        "chrono-tokio",
+        "chrono-croner",
+        "chrono-tz-tokio",
+        "chrono-tz-croner",
+        "tokio-croner",
+        "chrono-chrono-tz-tokio",
+        "chrono-chrono-tz-croner",
+        "chrono-tokio-croner",
+        "chrono-tz-tokio-croner",
+    ] {
+        let output = run_fixture(&fixture_manifest, &target_dir.0, feature);
+        assert!(
+            !output.status.success(),
+            "incomplete scheduler fixture `{feature}` unexpectedly compiled"
+        );
+        assert_expected_diagnostic(&output, "Scheduler", feature);
+    }
+
+    let output = run_fixture(&fixture_manifest, &target_dir.0, "all");
+    assert!(
+        output.status.success(),
+        "complete scheduler fixture failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let output = run_fixture(
+        &fixture_manifest,
+        &target_dir.0,
+        "negative-root-module-alias",
+    );
+    assert!(
+        !output.status.success(),
+        "scheduler_utils root alias exists"
+    );
+    assert_expected_diagnostic(&output, "scheduler_utils", "negative-root-module-alias");
+
+    assert_scheduler_dependency_boundaries();
+}
+
+#[test]
+#[ignore = "慢速 Axum/Tokio feature/API 契约矩阵"]
+fn verifies_axum_tokio_feature_api_matrix() {
+    let fixture_manifest = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/axum_tokio_feature_matrix/Cargo.toml");
+    let target_dir = unique_target("axutils-axum-tokio-feature-matrix");
+    for (feature, expected, token) in [
+        ("none", true, ""),
+        ("tokio-only", true, ""),
+        ("axum-only", true, ""),
+        ("core", true, ""),
+        ("task-group", true, ""),
+        ("tower", true, ""),
+        ("tower-http", true, ""),
+        ("governor", true, ""),
+        ("providers-only", true, ""),
+        ("provider-tower-only", true, ""),
+        ("provider-tower-http-only", true, ""),
+        ("provider-governor-only", true, ""),
+        ("provider-tokio-util-only", true, ""),
+        ("tracing-positive", true, ""),
+        ("negative-no-tokio-axum-server", false, "axumserver"),
+        ("negative-no-axum-server", false, "axumserver"),
+        ("negative-no-task-group", false, "tokiotaskgroup"),
+        ("negative-no-tower-method", false, "with_concurrency_limit"),
+        ("negative-no-tower-http-method", false, "with_body_limit"),
+        ("negative-no-tracing-method", false, "with_http_trace"),
+        ("negative-no-governor-method", false, "with_governor_peer"),
+        ("negative-no-tokio-root", false, "tokioconfig"),
+        ("negative-no-tokio-module", false, "tokio"),
+        ("negative-no-tokio-utils", false, "tokioutils"),
+        ("negative-no-tokio-utils-module", false, "tokio_utils"),
+        ("negative-no-tokio-axum-module", false, "axum"),
+        ("negative-no-tokio-axum-utils", false, "axumutils"),
+        ("negative-no-tokio-axum-utils-module", false, "axum_utils"),
+    ] {
+        let output = run_fixture(&fixture_manifest, &target_dir.0, feature);
+        assert_eq!(
+            output.status.success(),
+            expected,
+            "fixture {feature} unexpected status: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        if !expected {
+            assert_expected_diagnostic(&output, token, feature);
+        }
+    }
+
+    let none = cargo_tree_strict("");
+    for package in [
+        "axum",
+        "tokio",
+        "tokio-util",
+        "futures-timer",
+        "tower-http",
+        "tower_governor",
+    ] {
+        assert!(
+            !has_package(&none, package),
+            "default tree contains {package}"
+        );
+    }
+    let tokio = cargo_tree_strict("tokio");
+    assert!(has_package(&tokio, "tokio"));
+    for package in ["axum", "tower-http", "tower_governor", "futures-timer"] {
+        assert!(
+            !has_package(&tokio, package),
+            "tokio-only tree contains {package}"
+        );
+    }
+    let providers = cargo_tree_strict("tower,tower-http,tower_governor,tokio-util");
+    for package in [
+        "tower",
+        "tower-http",
+        "tower_governor",
+        "tokio-util",
+        "futures-timer",
+    ] {
+        assert!(
+            has_package(&providers, package),
+            "provider tree misses {package}"
+        );
+    }
+    assert!(
+        !has_package(&providers, "axum"),
+        "providers-only must not pull Axum"
+    );
+
+    let core = cargo_tree_with_edges_strict("axum,tokio", "normal,build,features");
+    for package in ["axum", "tokio", "tower"] {
+        assert!(has_package(&core, package));
+    }
+    assert!(!has_package(&core, "tower-http"));
+    assert!(!has_package(&core, "tower_governor"));
+    assert!(!core.contains(r#"axutils feature "tower""#));
+
+    let governor =
+        cargo_tree_with_edges_strict("axum,tokio,tower_governor", "normal,build,features");
+    for expanded in [
+        r#"axum feature "default""#,
+        r#"axum feature "form""#,
+        r#"axum feature "json""#,
+        r#"axum feature "query""#,
+        r#"tokio feature "macros""#,
+    ] {
+        assert!(
+            governor.contains(expanded),
+            "governor/axum expansion missing {expanded}"
+        );
+    }
+    for forbidden in ["native-tls", "openssl", "openssl-sys"] {
+        assert!(
+            !has_package(&governor, forbidden),
+            "governor tree contains {forbidden}"
+        );
+    }
+}
+
+#[test]
 #[ignore = "慢速 feature/依赖契约矩阵；使用 cargo test --no-default-features --test feature_matrix -- --ignored 执行"]
 fn verifies_feature_api_matrix_and_dependency_boundaries() {
     let fixture_manifest = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -986,7 +1157,7 @@ fn assert_config_dependency_boundaries() {
     assert!(!has_package(&serde_tokio_saphyr_tree, "toml"));
     assert!(!has_package(&serde_tokio_saphyr_tree, "rust-ini"));
 
-    let tokio_feature_tree = cargo_tree_with_edges("tokio", "normal,build,features");
+    let tokio_feature_tree = cargo_feature_tree_inverted("tokio", "tokio");
     assert!(tokio_feature_tree.contains("tokio feature \"fs\""));
     assert!(tokio_feature_tree.contains("tokio feature \"io-util\""));
 }
@@ -1358,7 +1529,7 @@ fn assert_fs_dependency_boundaries() {
         "serde-tokio",
     );
 
-    let tokio_feature_tree = cargo_tree_with_edges_strict("tokio", "normal,build,features");
+    let tokio_feature_tree = cargo_feature_tree_inverted("tokio", "tokio");
     let actual_tokio_features = tokio_feature_tree
         .lines()
         .filter_map(|line| {
@@ -1368,10 +1539,26 @@ fn assert_fs_dependency_boundaries() {
             Some(line[start..end].to_owned())
         })
         .collect::<BTreeSet<_>>();
-    let expected_tokio_features = ["bytes", "fs", "io-util", "rt", "sync", "time"]
-        .into_iter()
-        .map(str::to_owned)
-        .collect::<BTreeSet<_>>();
+    let mut expected_tokio_features = [
+        "bytes",
+        "fs",
+        "io-util",
+        "libc",
+        "mio",
+        "net",
+        "rt",
+        "rt-multi-thread",
+        "signal",
+        "signal-hook-registry",
+        "socket2",
+        "sync",
+        "time",
+    ]
+    .into_iter()
+    .map(str::to_owned)
+    .collect::<BTreeSet<_>>();
+    #[cfg(windows)]
+    expected_tokio_features.insert("windows-sys".to_owned());
     assert_eq!(
         actual_tokio_features, expected_tokio_features,
         "FsUtils Tokio production feature set changed"
@@ -1430,6 +1617,101 @@ fn assert_fs_no_unrelated_packages(tree: &str, allowed: &[&str], feature_set: &s
         assert!(
             !has_package(tree, package),
             "FsUtils {feature_set} tree unexpectedly contains unrelated package `{package}`"
+        );
+    }
+}
+
+fn assert_scheduler_dependency_boundaries() {
+    let none = cargo_tree_strict("");
+    for package in ["chrono", "chrono-tz", "croner", "tokio"] {
+        assert!(
+            !has_package(&none, package),
+            "default tree unexpectedly contains scheduler dependency `{package}`"
+        );
+    }
+
+    let croner_only = cargo_tree_with_edges_strict("croner", "normal,build,features");
+    for package in ["chrono", "croner", "derive_builder", "strum"] {
+        assert!(
+            has_package(&croner_only, package),
+            "croner-only tree is missing `{package}`"
+        );
+    }
+    for package in ["chrono-tz", "tokio"] {
+        assert!(
+            !has_package(&croner_only, package),
+            "croner-only tree unexpectedly contains `{package}`"
+        );
+    }
+    assert!(
+        !croner_only.contains(r#"axutils feature "chrono""#),
+        "croner must not enable axutils's public chrono feature"
+    );
+    assert!(
+        croner_only.contains(r#"chrono feature "clock""#),
+        "Croner must retain its reviewed chrono/clock dependency"
+    );
+
+    let full =
+        cargo_tree_with_edges_strict("chrono,chrono_tz,tokio,croner", "normal,build,features");
+    for package in [
+        "chrono",
+        "chrono-tz",
+        "croner",
+        "derive_builder",
+        "strum",
+        "tokio",
+    ] {
+        assert!(
+            has_package(&full, package),
+            "complete scheduler tree is missing `{package}`"
+        );
+    }
+    for package in [
+        "tokio-cron-scheduler",
+        "native-tls",
+        "openssl",
+        "openssl-sys",
+        "sqlx",
+        "postgres",
+        "nats",
+        "async-nats",
+    ] {
+        assert!(
+            !has_package(&full, package),
+            "complete scheduler tree unexpectedly contains `{package}`"
+        );
+    }
+
+    let tokio_feature_tree = cargo_feature_tree_inverted("chrono,chrono_tz,tokio,croner", "tokio");
+    let actual_tokio_features = tokio_feature_tree
+        .lines()
+        .filter_map(|line| {
+            let marker = "tokio feature \"";
+            let start = line.find(marker)? + marker.len();
+            let end = line[start..].find('"')? + start;
+            Some(line[start..end].to_owned())
+        })
+        .collect::<BTreeSet<_>>();
+    for feature in [
+        "fs",
+        "io-util",
+        "net",
+        "rt",
+        "rt-multi-thread",
+        "signal",
+        "sync",
+        "time",
+    ] {
+        assert!(
+            actual_tokio_features.contains(feature),
+            "scheduler production tree is missing Tokio feature `{feature}`"
+        );
+    }
+    for feature in ["macros", "test-util"] {
+        assert!(
+            !actual_tokio_features.contains(feature),
+            "scheduler production tree contains dev-only Tokio feature `{feature}`"
         );
     }
 }

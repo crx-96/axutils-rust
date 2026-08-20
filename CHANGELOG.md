@@ -7,6 +7,22 @@
 
 ### Added
 
+- 新增仅在 `chrono + chrono_tz + tokio + croner` 完整组合下导出的 `Scheduler`、
+  `SchedulerConfig`、`TaskSchedule`、`TaskId`、`SchedulerError` 与一次初始化的
+  `SchedulerUtils`；支持有界的一次、固定间隔和显式 IANA 时区六段 cron 任务，同一任务 callback
+  串行执行，取消和关闭为非阻塞取消请求。调度器使用调用方启用了 time driver 的 Tokio runtime，
+  不创建 runtime、不调用 `block_on`、不接管 signal，也不负责持久化、业务重试或 callback 超时；
+  `croner` 保持直接依赖的同名 provider feature，单独启用不会导出调度器 API。
+- 新增 `tokio` feature 下的 `TokioConfig`、`TokioUtils`、稳定错误/关闭原因和显式 runtime
+  build/run；新增 `tokio + tokio-util` 的线性化关闭 `TokioTaskGroup`。普通异步入口继续使用
+  调用方 runtime，runtime/channel/thread/task-group grace 均有有限配置边界。
+- 新增 `axum + tokio` 的 `AxumApp`、`AxumServer`、`AxumUtils` 与共享单次运行/关闭状态机；
+  支持延迟全局/匹配 route layer、loopback/listener/地址入口和协作式 graceful drain。新增同名
+  `tower`、`tower-http`、`tower_governor` provider feature，提供 fail-fast 503、内部 request ID、
+  脱敏 trace、CORS、timeout、body limit、panic 捕获及 peer/显式 unchecked forwarded IP 限流，
+  governor limiter 由 server clone 共享并在 serve 生命周期内定期清理 stale key；
+  不承诺 TLS、HTTP/2、强制 drain deadline 或 trusted-proxy CIDR 验证。
+
 - 新增 `tracing` feature，为 HTTP、Redis、SQLx、邮件、配置、JWT 和 AES 初始化/外部 I/O
   提供脱敏结构化事件；新增依赖它的 `logging` feature，提供显式一次性的 `LogUtils` 同步无
   ANSI subscriber，支持标准输出、文件、双输出和 Never/分钟/小时/天轮转；不记录 URL、凭据、

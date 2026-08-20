@@ -49,6 +49,39 @@ SQLx 能力通过 `sqlx + tokio` 组合 feature 提供；它使用 SQLx `0.9.0` 
 Tokio runtime、不调用 `block_on`，首版不配置 TLS，`fetch_all` 默认限制 1_024 行并逐行消费。完整 API、feature 矩阵和关闭/脱敏边界见
 [SQLx 使用文档](https://github.com/crx-96/axutils-rust/blob/main/docs/examples/sqlx.md)。
 
+Tokio 服务基础通过 `tokio` feature 提供：`TokioUtils` 普通方法使用调用方 runtime，只有显式
+`build_runtime`/`run` 创建 runtime；`tokio + tokio-util` 提供线性化关闭的 `TokioTaskGroup`，并通过 `futures-timer` 保证关闭 grace 在 Tokio time driver 被禁用时仍可用。
+Axum HTTP/1 服务需要 `axum + tokio`，支持 Router/state、单次运行状态机和协作式 graceful
+shutdown；Tower、Tower HTTP、tower_governor middleware 分别由同名 provider feature 提供。
+首版不提供 TLS、HTTP/2、强制 drain deadline 或可信代理 CIDR 验证。`tower_governor` 0.8 的
+Axum 集成会启用 Axum default（含 form/json/query/tracing 等）并间接启用 Tokio macros；这是固定上游
+feature 扩张，不表示 axutils 默认安装这些行为。完整 API 与边界见
+[Tokio 工具文档](docs/examples/tokio.md)和 [Axum 服务文档](docs/examples/axum.md)。
+
+调度器能力严格要求 `chrono + chrono_tz + tokio + croner` 四项 feature：`Scheduler` 提供有界的
+一次、固定间隔和六段 cron 任务，cron 使用显式 IANA 时区；`SchedulerUtils` 是只能成功初始化一次的
+进程级入口。调度器不创建 runtime、不调用 `block_on`、不接管 signal，也不负责业务重试或持久化；
+注册任务时必须处于启用了 time driver 的调用方 Tokio runtime 中。`croner` 是直接依赖的同名
+provider feature，单独启用会编译 Croner 及其内部 `chrono` 依赖，但不会导出本 crate 的调度器或
+`chrono` 公共 API。完整 API、DST、取消、容量和全局生命周期边界见
+[Scheduler 使用文档](docs/examples/scheduler.md)。
+
+```toml
+[dependencies]
+axutils = { version = "0.1", default-features = false, features = ["axum", "tokio", "tower-http"] }
+axum = { version = "0.8.9", default-features = false }
+tokio = { version = "1.53.1", features = ["macros", "rt-multi-thread"] }
+```
+
+需要调度器时显式启用全部四项前置 feature；应用自己的 Tokio 依赖负责宏、runtime flavor 和
+time driver：
+
+```toml
+[dependencies]
+axutils = { version = "0.1", default-features = false, features = ["chrono", "chrono_tz", "tokio", "croner"] }
+tokio = { version = "1.53.1", default-features = false, features = ["macros", "rt-multi-thread", "time"] }
+```
+
 库内日志事件通过 `tracing` feature 提供；同步 `LogUtils` 初始化器需要 `logging` feature。
 库不会自动安装全局 subscriber；`LogUtils` 只在调用方显式初始化时安装一次无 ANSI formatter，
 可写标准输出、文件或双输出，支持 Never/分钟/小时/天轮转，并可通过 `with_directives` 配置
@@ -769,4 +802,5 @@ FreeBSD 不属于本 crate 首期已承诺的验证目标；消费方必须自�
 满足各自的组合前提。`RegUtils::is_phone` 必须同时启用 `regex` 与 `libphonenumber`，异步邮件
 必须同时启用 `lettre` 与 `tokio`。`CryptoUtils` 的十六进制编解码与 `TextEncoding::Utf8` 默认
 可用；`Base64*`/`md5*`/`Aes*` 分别仅在 `base64`/`md5`/`aes` 下导出，`aes_encrypt_base64`/
-`aes_decrypt_base64` 需要同时启用 `aes` 与 `base64`。
+`aes_decrypt_base64` 需要同时启用 `aes` 与 `base64`。调度器模块、领域类型和 `SchedulerUtils`
+仅在 `chrono + chrono_tz + tokio + croner` 全部启用时导出；其余 15 种缺项组合均不导出半套 API。

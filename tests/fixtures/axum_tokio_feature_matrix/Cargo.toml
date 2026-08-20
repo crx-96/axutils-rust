@@ -1,0 +1,40 @@
+[package]
+name = "axum-tokio-feature-matrix"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[features]
+default = []
+none = []
+tokio-only = ["axutils/tokio"]
+axum-only = ["axutils/axum"]
+core = ["axutils/axum", "axutils/tokio", "dep:axum"]
+task-group = ["axutils/tokio", "axutils/tokio-util"]
+tower = ["core", "axutils/tower"]
+tower-http = ["core", "axutils/tower-http"]
+governor = ["core", "axutils/tower_governor"]
+providers-only = ["axutils/tower", "axutils/tower-http", "axutils/tower_governor", "axutils/tokio-util"]
+provider-tower-only = ["axutils/tower"]
+provider-tower-http-only = ["axutils/tower-http"]
+provider-governor-only = ["axutils/tower_governor"]
+provider-tokio-util-only = ["axutils/tokio-util"]
+tracing-positive = ["tower-http", "axutils/tracing"]
+negative-no-tokio-axum-server = ["axutils/axum"]
+negative-no-axum-server = ["axutils/tokio"]
+negative-no-task-group = ["axutils/tokio"]
+negative-no-tower-method = ["core"]
+negative-no-tower-http-method = ["core"]
+negative-no-tracing-method = ["core", "axutils/tower-http"]
+negative-no-governor-method = ["core"]
+negative-no-tokio-root = []
+negative-no-tokio-module = []
+negative-no-tokio-utils = []
+negative-no-tokio-utils-module = []
+negative-no-tokio-axum-module = ["axutils/axum"]
+negative-no-tokio-axum-utils = ["axutils/axum"]
+negative-no-tokio-axum-utils-module = ["axutils/axum"]
+
+[dependencies]
+axutils = { path = "../../..", default-features = false }
+axum = { version = "0.8.9", default-features = false, optional = true }

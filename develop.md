@@ -36,6 +36,7 @@ feature 背景和发布操作命令。两者出现冲突时，先按标准文档
     ├── email/         # SMTP 配置、消息、错误与多实例客户端（需要 lettre feature）
     ├── lib.rs          # crate 入口和公共导出
     ├── redis/          # Redis 配置、客户端、命令、事务与错误（需要 redis feature）
+    ├── scheduler/      # 一次、固定间隔和 IANA 时区 cron 调度器（需要 chrono + chrono_tz + tokio + croner）
     ├── sqlx/           # SQLx Any 配置、客户端、事务与错误（需要 sqlx + tokio）
     ├── tracing/        # 各领域脱敏 tracing 事件的私有辅助实现（需要 tracing）
     └── utils/
@@ -45,6 +46,7 @@ feature 背景和发布操作命令。两者出现冲突时，先按标准文档
         ├── path_utils.rs  # PathUtils 实现与单元测试
         ├── random_utils.rs # RandomUtils 实现与单元测试（需要 rand feature）
         ├── redis_utils.rs # RedisUtils 一次初始化的全局转发（需要 redis feature）
+        ├── scheduler_utils.rs # SchedulerUtils 一次初始化的全局转发（需要四项调度 feature）
         ├── sqlx_utils.rs  # SqlxUtils 一次初始化的全局转发（需要 sqlx + tokio）
         ├── reg_utils.rs  # RegUtils 实现与单元测试
         ├── time_utils.rs # TimeUtils 实现与单元测试
@@ -96,6 +98,21 @@ cargo test --no-default-features --features sqlx,tokio --test sqlx -- --test-thr
 cargo test --no-default-features --features sqlx,tokio --doc
 cargo tree --no-default-features --features sqlx,tokio -e normal,build,features
 cargo check --no-default-features --features tracing
+cargo check --no-default-features --features tokio
+cargo check --no-default-features --features axum,tokio
+cargo test --no-default-features --features tokio,tokio-util --test tokio -- --test-threads=1
+cargo test --no-default-features --features axum,tokio,tower,tower-http,tower_governor,tracing --test axum -- --test-threads=1
+cargo test --no-default-features --features axum,tokio,tokio-util,tower,tower-http,tower_governor,tracing --doc
+cargo clippy --all-targets --no-default-features --features axum,tokio,tokio-util,tower,tower-http,tower_governor,tracing -- -D warnings
+cargo tree --no-default-features --features axum,tokio,tower_governor -e normal,build,features
+cargo check --no-default-features --features croner
+cargo check --no-default-features --features chrono,chrono_tz,tokio,croner
+cargo test --no-default-features --features chrono,chrono_tz,tokio,croner --test scheduler -- --test-threads=1
+cargo test --no-default-features --features chrono,chrono_tz,tokio,croner --test scheduler_global -- --test-threads=1
+cargo test --no-default-features --features chrono,chrono_tz,tokio,croner --doc
+cargo clippy --all-targets --no-default-features --features chrono,chrono_tz,tokio,croner -- -D warnings
+cargo tree --no-default-features --features croner -e normal,build,features
+cargo tree --no-default-features --features chrono,chrono_tz,tokio,croner -e normal,build,features
 cargo check --no-default-features --features logging
 cargo test --no-default-features --features logging --test log_global --test log_conflict -- --test-threads=1
 cargo test --no-default-features --features tracing,http --test log_observability -- --test-threads=1
@@ -219,6 +236,14 @@ crate，与 `PathUtils` 同类）；`base64`/`md5`/`aes` 各自解锁对应算�
 为 `TextEncoding` 追加 legacy 编码变体（不是零效果的空 feature），`aes + base64` 才有
 `aes_encrypt_base64`/`aes_decrypt_base64` 便捷方法。
 
+调度器公共 API 只在 `chrono + chrono_tz + tokio + croner` 四项完整组合下导出。四项 feature
+彼此独立，不互相隐式启用；`croner` 遵循直接依赖同名 provider 规则，单独启用只编译 Croner
+及其内部 `chrono` 默认 feature（含 `clock`）、`derive_builder`、`strum`，不会启用本 crate 的
+`chrono` feature 或导出调度器。`tests/fixtures/scheduler_feature_matrix/` 必须枚举全部 16 种组合，
+只允许完整组合导入成功，其余 15 种组合核对稳定的缺失 API 诊断。生产 `tokio` feature 当前启用
+`fs`、`io-util`、`net`、`rt`、`rt-multi-thread`、`signal`、`sync`、`time`，但不启用 `macros`；
+调度器使用调用方已有且启用了 time driver 的 runtime，不创建 runtime、不调用 `block_on` 或接管 signal。
+
 配置文件异步读取要求调用方显式同时启用 `serde` 与 `tokio`；`tokio` 单 feature 不导出配置
 模块，`serde` 单 feature 只提供同步入口。异步入口只替换受限文件读取，不创建 runtime 或
 调用 `block_on`，解析阶段仍在当前 Tokio worker 中执行；测试需覆盖 `ConfigUtils` 四个包装、
@@ -322,6 +347,8 @@ serde = ["dep:serde", "dep:serde_json", "dep:serde_urlencoded"]
 strfmt = ["dep:strfmt"]
 minijinja = ["dep:minijinja"]
 chrono = ["dep:chrono"]
+chrono_tz = ["dep:chrono_tz"]
+croner = ["dep:croner"]
 time = ["dep:time"]
 jiff = ["dep:jiff"]
 lettre = ["dep:lettre"]
@@ -336,13 +363,17 @@ redis = [
   "redis/cluster",
 ]
 tokio = [
-  "dep:tokio",
-  "lettre?/tokio1-rustls",
-  "redis?/cluster-async",
-  "redis?/connection-manager",
-  "redis?/tokio-comp",
+  "dep:tokio", "tokio/fs", "tokio/io-util", "tokio/net", "tokio/rt",
+  "tokio/rt-multi-thread", "tokio/signal", "tokio/sync", "tokio/time",
+  "axum?/http1", "axum?/tokio", "lettre?/tokio1-rustls",
+  "redis?/cluster-async", "redis?/connection-manager", "redis?/tokio-comp",
   "sqlx?/runtime-tokio",
 ]
+axum = ["dep:axum", "dep:tower", "tower?/util", "tower_governor?/axum"]
+tokio-util = ["dep:tokio-util", "tokio-util/rt", "dep:futures-timer"]
+tower = ["dep:tower", "tower/util", "tower/limit", "tower/load-shed"]
+tower-http = ["dep:tower-http", "tower-http/catch-panic", "tower-http/cors", "tower-http/limit", "tower-http/request-id", "tower-http/timeout", "tower-http/trace", "axum?/matched-path"]
+tower_governor = ["dep:tower_governor", "dep:futures-timer"]
 toml = ["dep:toml"]
 serde-saphyr = ["dep:serde-saphyr"]
 rust-ini = ["dep:rust-ini"]
@@ -424,8 +455,9 @@ feature 后，最终 binary 只能保留一个 global allocator；现有 `--all-
 邮件模块只由 `lettre` feature 导出；`tokio` feature 通过弱依赖语法为“已经启用的
 `lettre`”打开 Tokio Rustls 适配，因此单独启用 `tokio` 不会拉入 `lettre`。同一个 `tokio`
 feature 也为 `serde + tokio` 配置异步入口提供 `fs`/`io-util`；生产依赖不使用 `tokio` 的
-`full`、`macros` 或 `rt-multi-thread`，测试和 ignored 真实测试所需 runtime feature 只放在
-dev-dependency。`lettre` 最低版本为经核验的 `0.11.23`，使用 Cargo 默认 caret
+`full` 或 `macros`；当前生产集合显式包含 `fs`、`io-util`、`net`、`rt`、`rt-multi-thread`、
+`signal`、`sync`、`time`，测试专用的 `test-util` 和属性宏仍只由 dev-dependency 提供。
+`lettre` 最低版本为经核验的 `0.11.23`，使用 Cargo 默认 caret
 约束，允许后续兼容版本；使用的 feature 包括 `builder`、`smtp-transport`、`pool`、`rustls`、
 `ring` 和 `webpki-roots`，不启用 native-tls、OpenSSL 或
 机会式 STARTTLS。
