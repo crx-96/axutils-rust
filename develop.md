@@ -130,7 +130,13 @@ cargo test --no-default-features --features logging --doc
 cargo tree --no-default-features --features tracing -e normal,build,features
 cargo tree --no-default-features --features logging -e normal,build,features
 
-# 需要覆盖所有已启用模块、feature/API 依赖边界和文档时，按下面的固定清单顺序串行执行。
+# 局部公共 API 或单 feature/依赖变更只运行对应的 ignored matrix 测试，并补充直接相关的
+# check/test/doc 与 cargo tree；将占位符替换为实际测试函数名。
+cargo test --no-default-features --test feature_matrix <相关测试函数名> -- --ignored --test-threads=1
+
+# 仅在 REVIEW_ACCEPTANCE.md 的完整验证触发条件成立或用户明确要求完整验证时，
+# 才按下面的固定清单顺序串行执行；日常局部变更默认使用上面的直接相关命令。
+# 完整验证用于覆盖所有已启用模块、feature/API 依赖边界和文档。
 # 不要让其他 Cargo/rustdoc 进程同时写这些 target 目录；综合组合明确排除两个 allocator。
 # 这 37 项必须与 Cargo.toml 的 [features] 机械比较，新增或删除 feature 时同步更新本段。
 $nonAllocatorFeatures = "itoa,ryu,zmij,uuid,jwt,tracing,logging,rand,regex,libphonenumber,serde,strfmt,minijinja,chrono,chrono_tz,croner,time,jiff,lettre,http,redis,sqlx,tokio,axum,tokio-util,tower,tower-http,tower_governor,tempfile,tempfile-async,toml,serde-saphyr,rust-ini,base64,md5,aes,encoding_rs"
@@ -216,10 +222,12 @@ git diff --check
 新增方法时优先评估性能和安全边界；新增、删除或重命名工具类/公共模块时，必须同步维护
 `docs/module-map.md` 中的职责、导出、依赖和使用场景定位。
 
-新增普通 feature 时，应同步更新 `Cargo.toml`、`README.md`、`CHANGELOG.md` 和本文件，并至少验证默认
-feature、`--no-default-features`、相关单 feature、组合 feature 和适用的 `--all-features`。`mimalloc`
-与 `rpmalloc` 是有意互斥的进程级 allocator feature，必须分别验证单 feature、依赖边界和下游
-重复注册失败；双 feature 及由此触发的 `--all-features` 组合属于预期编译失败。
+新增普通 feature 时，应同步更新 `Cargo.toml`、`README.md`、`CHANGELOG.md` 和本文件，并验证与该
+feature 直接相关的 `--no-default-features`、单 feature、必要组合、正负 fixture、filtered matrix
+和依赖树；普通局部 feature 变更不默认运行 `--all-features` 或无关 feature 组合。只有命中
+`REVIEW_ACCEPTANCE.md` 的高影响或完整验证条件时才扩大范围。`mimalloc` 与 `rpmalloc` 是有意互斥
+的进程级 allocator feature，必须分别验证单 feature、依赖边界和下游重复注册失败；双 feature
+及由此触发的 `--all-features` 组合属于预期编译失败。
 配置读取能力以 `serde` 为基础 feature；YAML、TOML、INI 分别还需要
 `serde-saphyr`、`toml`、`rust-ini`，且单独启用这些后端 feature 时不得导出配置 API。
 `CryptoUtils` 本身与十六进制/`TextEncoding::Utf8` 文本编解码能力默认可用（不依赖任何第三方

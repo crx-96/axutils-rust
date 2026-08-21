@@ -1,7 +1,7 @@
 //! `axutils` 的通用工具模块。
 //!
-//! `PathUtils`、`TimeUtils` 和 `FormatUtils` 的持续时间格式化默认可用；`FormatUtils` 的
-//! 模板能力需要显式同时启用 `serde` 和 `strfmt` 或 `minijinja` feature，并通过
+//! `PathUtils`、`TimeUtils` 和 `FormatUtils` 的持续时间格式化与字符串脱敏默认可用；
+//! `FormatUtils` 的模板能力需要显式同时启用 `serde` 和 `strfmt` 或 `minijinja` feature，并通过
 //! `TemplateEngine` 参数显式选择后端。`RandomUtils` 及其相关类型需要 `rand` feature，
 //! `RegUtils` 需要 `regex` feature；SMTP 邮件能力需要 `lettre` feature，异步发送还需要
 //! 同时启用 `tokio`。配置文件读取能力（`ConfigUtils`）需要 `serde` feature，文件异步入口还

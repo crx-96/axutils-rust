@@ -5,6 +5,7 @@ edition = "2021"
 publish = false
 
 [features]
+format-default = []
 format-serde-strfmt = ["axutils/serde", "axutils/strfmt"]
 format-serde-minijinja = ["axutils/serde", "axutils/minijinja"]
 format-serde-all = ["axutils/serde", "axutils/strfmt", "axutils/minijinja"]

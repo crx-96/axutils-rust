@@ -6,8 +6,9 @@
 `serde-saphyr 1.0.1`，其 `edition = "2024"` 和 let-chains 语法要求 Rust 1.88；邮件能力使用的
 `lettre 0.11.23` 只要求 Rust 1.85。因此，使用新版本 `axutils` 的 Rust 1.88—1.94 项目需要先升级工具链。
 
-默认 feature 为空。默认可用的是 `PathUtils`、`FsUtils`、`TimeUtils`、`FormatUtils::seconds_to_human`，以及时间
-格式化共用的根类型；`CryptoUtils` 的十六进制编解码和 `TextEncoding::Utf8` 文本编解码同样默认可用。
+默认 feature 为空。默认可用的是 `PathUtils`、`FsUtils`、`TimeUtils`、`FormatUtils` 的持续时间
+格式化与字符串脱敏，以及时间格式化共用的根类型；`CryptoUtils` 的十六进制编解码和
+`TextEncoding::Utf8` 文本编解码同样默认可用。
 `RegUtils` 需要 `regex`，`RandomUtils` 需要 `rand`，模板、日期后端、邮件、配置读取和 `CryptoUtils`
 的 Base64/MD5/AES 能力都需要显式 feature。公共导出路径和完整边界见各模块使用文档。
 
@@ -108,7 +109,7 @@ axutils = { version = "0.1", default-features = false, features = ["logging"] }
 axutils = "0.1"
 ```
 
-这会提供 `PathUtils`、`FsUtils`、`TimeUtils` 和 `FormatUtils::seconds_to_human`。需要正则校验时启用
+这会提供 `PathUtils`、`FsUtils`、`TimeUtils` 和 `FormatUtils` 的持续时间格式化与字符串脱敏。需要正则校验时启用
 `regex`：
 
 ```toml
@@ -411,6 +412,22 @@ assert!(nanoseconds >= microseconds * 1_000);
 use axutils::FormatUtils;
 
 assert_eq!(FormatUtils::seconds_to_human(90), "1分钟30秒");
+```
+
+通用脱敏按零基、左闭右开的 Unicode 字符范围工作；邮箱脱敏默认从本地部分第 4 个字符开始，
+也可传入一基起始位置，本地部分比该位置短时会全部脱敏：
+
+```rust
+use axutils::FormatUtils;
+
+assert_eq!(
+    FormatUtils::mask("13812345678", &[(3, 7)], None),
+    Some("138****5678".to_owned())
+);
+assert_eq!(
+    FormatUtils::mask_email("alice@example.com", None),
+    Some("ali****@example.com".to_owned())
+);
 ```
 
 启用 `serde` 与 `strfmt` 或 `minijinja` 后，可以通过 `TemplateEngine` 选择模板后端：

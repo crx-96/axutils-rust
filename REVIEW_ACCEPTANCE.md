@@ -323,25 +323,43 @@ Rust 代码块时，必须：
 
 ### 8.2 按影响范围选择命令
 
+默认执行与变更影响范围一致的最小充分验证，不主动运行完整项目验证清单。先运行直接相关的
+单元/集成测试、受影响 feature、fixture、doctest 和依赖边界检查；普通单 feature/依赖调整也
+默认停留在对应组合、filtered matrix 和依赖树。只有变更实际跨模块或跨多个能力单元、改变默认
+feature、共享/传递依赖、TLS/runtime/allocator 等安全或平台边界，影响范围无法局部证明，涉及
+发布，或者用户明确要求完整验证时，才扩大到第 8.4 节的完整验证。扩大前必须记录触发原因、
+拟增加的验证范围和预计耗时，不能仅因完整清单存在就默认执行。
+
 | 影响范围 | 最小验证 | 需要增加的验证 |
 | --- | --- | --- |
 | 仅私有局部实现 | `cargo fmt --all -- --check`；直接相关单元/集成测试；`git diff --check` | 触及资源、安全、并发或跨平台时增加相应边界和 feature 检查 |
 | 公共行为或错误语义 | 上述检查 + 相关 feature 测试 + API doc/doctest | `docs/examples` 全代码块、CHANGELOG 判断、公开路径和回归测试 |
-| 公共导出、签名、模块或 feature | 相关单元/集成测试 + 正负 fixture + `cargo tree` | `tests/feature_matrix.rs` ignored 矩阵、所有受影响文档 feature、兼容性审查 |
-| 依赖、Cargo 配置、TLS/runtime 或 MSRV | 相关组合的 `cargo check/test/doc` + 依赖树 | 默认能力隔离、fresh-resolution、平台前提、发布包检查；必要时完整验证 |
+| 公共导出、签名或模块 | 相关单元/集成测试 + API doc/doctest + 对应正负 fixture | 对应的 filtered ignored matrix、受影响文档 feature 和兼容性审查；不因仅新增方法默认运行完整矩阵 |
+| feature、依赖、Cargo 配置、TLS/runtime 或 MSRV | 相关组合的 `check/test/doc`、正负 fixture、filtered ignored matrix 和依赖树 | 默认能力隔离、fresh-resolution、传递 feature 和平台前提；命中高影响条件或局部证据不足时才扩大完整矩阵 |
 | 跨模块、公共安全边界或发布 | 完整项目验证清单 | `cargo package --list`、必要的 publish dry-run；外部发布仍需明确授权 |
 
-局部验证不得被描述为全量验证。命令失败时保留关键输出，区分代码失败、环境缺失、预期负向
-失败和未授权外部操作。
+局部验证不得被描述为完整或全量验证。未命中完整验证触发条件时，不得用与变更无关的全仓测试
+替代影响分析。命令失败时保留关键输出，区分代码失败、环境缺失、预期负向失败和未授权外部操作。
 
 ### 8.3 本项目的固定契约验证
 
-`tests/feature_matrix.rs` 中的 ignored 测试是慢速契约的一部分，涉及公共 API、feature、
-依赖边界或跨模块行为时至少运行：
+`tests/feature_matrix.rs` 中的 ignored 测试是慢速契约的一部分。局部公共 API 变更默认只运行
+与目标模块对应的测试函数，例如：
+
+```powershell
+cargo test --no-default-features --test feature_matrix <相关测试函数名> -- --ignored --test-threads=1
+```
+
+只有 feature/依赖变更影响默认能力、共享/传递依赖、安全或平台边界、跨多个能力单元，或者
+跨模块 API/行为、公共安全边界、发布、局部 fixture 无法证明契约、用户明确要求完整验证时，
+才运行全部 ignored matrix：
 
 ```powershell
 cargo test --no-default-features --test feature_matrix -- --ignored --test-threads=1
 ```
+
+选择 filtered matrix 时必须确认对应测试覆盖本次变更的公开路径、feature 组合和预期失败诊断；
+缺少覆盖时先补 fixture/matrix，再运行对应测试，不能用过滤参数跳过本应验证的相关组合。
 
 新增 feature 时，必须在 `tests/fixtures/` 增加或调整正向和负向最小 crate，并在矩阵中记录：
 
@@ -362,8 +380,9 @@ cargo check --no-default-features --features mimalloc,rpmalloc
 
 ### 8.4 完整验证清单
 
-当变更属于跨模块、公共 feature/依赖、公共安全边界、发布或局部证据不足时，执行并报告
-[`develop.md`](develop.md) 的“本地开发”和“发布步骤”清单。至少包括：
+当变更属于跨模块或跨能力单元、高影响 feature/依赖边界、公共安全边界、发布或局部证据不足时，执行并报告
+[`develop.md`](develop.md) 的“本地开发”和“发布步骤”清单；用户明确要求完整验证时同样执行。
+未命中上述条件时，默认停留在第 8.2 节定义的最小充分验证。至少包括：
 
 ```powershell
 cargo fmt --all -- --check

@@ -1,6 +1,6 @@
 # FormatUtils 使用文档
 
-> `FormatUtils::seconds_to_human` 默认可用；运行时模板需要 `serde` 与至少一个模板后端
+> `FormatUtils::seconds_to_human`、`mask` 和 `mask_email` 默认可用；运行时模板需要 `serde` 与至少一个模板后端
 > (`strfmt` 或 `minijinja`)。两个后端同时启用时，通过 `TemplateEngine` 显式选择语法。
 
 ## 导出内容
@@ -34,7 +34,7 @@
 
 ## 安装与启用
 
-持续时间格式化无需额外 feature：
+持续时间格式化与字符串脱敏无需额外 feature：
 
 ```toml
 [dependencies]
@@ -61,6 +61,67 @@ serde = { version = "1", features = ["derive"] }
 `features = ["serde", "strfmt", "minijinja"]`，并在调用时显式传入引擎。
 
 ## 函数与方法详解
+
+### `FormatUtils::mask(value: &str, ranges: &[(usize, usize)], replacement: Option<&str>) -> Option<String>`
+
+- **feature**：默认可用。
+- **参数**：`value` 是待处理字符串；`ranges` 是按 Unicode 标量值计数的零基、左闭右开字符
+  范围；`replacement` 是每段共同使用的替换串，`None` 表示 `"****"`。
+- **返回值**：成功返回拥有的脱敏字符串；任一范围无效或结果内存预留失败时返回 `None`。
+
+范围必须按升序排列、互不重叠、至少包含一个字符且不越界；相邻范围允许存在。空范围列表
+返回输入的拥有副本，显式传入空替换串会删除选中的段：
+
+```rust
+use axutils::FormatUtils;
+
+assert_eq!(
+    FormatUtils::mask("13812345678", &[(3, 7)], None),
+    Some("138****5678".to_owned())
+);
+assert_eq!(
+    FormatUtils::mask("甲乙丙丁戊己", &[(1, 3), (4, 6)], Some("#")),
+    Some("甲#丁#".to_owned())
+);
+assert_eq!(FormatUtils::mask("abc", &[(2, 1)], None), None);
+```
+
+该方法按字符边界处理，不会在多字节 UTF-8 字符中间切片。时间复杂度为 `O(n + r)`，并为字符
+边界及结果分配与输入/输出相称的内存；调用方应限制不可信输入、范围数量和替换串长度。它只
+替换返回值中的指定内容，不识别字段语义，也不清除输入或其他副本。
+
+### `FormatUtils::mask_email(email: &str, start: Option<usize>) -> Option<String>`
+
+- **feature**：默认可用。
+- **参数**：`email` 是待脱敏的邮箱字符串；`start` 是一基的脱敏起始位置，`None` 默认表示第
+  4 个字符。
+- **返回值**：输入恰好包含一个 `@` 且两侧非空时，返回脱敏后的拥有字符串；结构无法安全
+  拆分或结果内存预留失败时返回 `None`。
+
+本地部分从指定位置开始统一替换为 `"****"`；如果本地部分字符数小于指定位置，则从第 1 个
+字符开始全部替换。位置 `0` 无效并返回 `None`，域名始终保持不变：
+
+```rust
+use axutils::FormatUtils;
+
+assert_eq!(
+    FormatUtils::mask_email("alice@example.com", None),
+    Some("ali****@example.com".to_owned())
+);
+assert_eq!(
+    FormatUtils::mask_email("alice@example.com", Some(2)),
+    Some("a****@example.com".to_owned())
+);
+assert_eq!(
+    FormatUtils::mask_email("李雷@example.com", None),
+    Some("****@example.com".to_owned())
+);
+assert_eq!(FormatUtils::mask_email("invalid", None), None);
+assert_eq!(FormatUtils::mask_email("alice@example.com", Some(0)), None);
+```
+
+该方法只检查一个 `@` 和非空两侧，不是 RFC 邮箱验证器，也不验证域名或邮箱真实性。需要格式
+校验时可另外启用 `regex` feature 并使用 `RegUtils`。
 
 ### `FormatUtils::seconds_to_human(seconds: u64) -> String`
 
@@ -214,9 +275,10 @@ assert_eq!(
 
 ## 使用场景与限制
 
-`seconds_to_human` 适合人类可读的简单持续时间展示；`template` 适合受控模板和小型上下文。
-本模块不提供模板缓存、沙箱、国际化时间单位、HTML 清理、自动转义、模板文件读取或密码学
-秘密处理。对不可信模板和上下文，调用方需要自行限制资源并决定是否进行输出净化。
+`seconds_to_human` 适合人类可读的简单持续时间展示；`mask`/`mask_email` 适合展示、日志写入前
+对字符串副本做位置型遮盖；`template` 适合受控模板和小型上下文。本模块不提供模板缓存、沙箱、
+国际化时间单位、HTML 清理、自动转义、模板文件读取、邮箱真实性验证或内存秘密擦除。对不可信
+输入、模板和上下文，调用方需要自行限制资源并决定是否进行输出净化。
 
 ## 更多信息
 

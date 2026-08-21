@@ -7,6 +7,10 @@
 
 ### Added
 
+- 为默认可用的 `FormatUtils` 新增 `mask` 多段 Unicode 字符范围脱敏和 `mask_email` 邮箱本地
+  部分脱敏；通用方法支持自定义或默认 `****` 替换串，邮箱默认从第 4 位开始并支持自定义一基
+  起始位置，本地部分比起始位置短时全部脱敏；非法范围与无法安全拆分的邮箱返回 `None`。
+
 - 新增仅在 `chrono + chrono_tz + tokio + croner` 完整组合下导出的 `Scheduler`、
   `SchedulerConfig`、`TaskSchedule`、`TaskId`、`SchedulerError` 与一次初始化的
   `SchedulerUtils`；支持有界的一次、固定间隔和显式 IANA 时区六段 cron 任务，同一任务 callback

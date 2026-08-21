@@ -1,7 +1,7 @@
 //! `axutils` 是一个按 feature 组织的 Rust 常用工具库。
 //!
-//! 默认不启用第三方依赖，因此 `PathUtils`、`TimeUtils` 和 `FormatUtils` 的持续时间格式化
-//! 能力以及同步文件系统操作 `FsUtils` 可以直接使用。
+//! 默认不启用第三方依赖，因此 `PathUtils`、`TimeUtils` 和 `FormatUtils` 的持续时间格式化、
+//! 字符串脱敏能力以及同步文件系统操作 `FsUtils` 可以直接使用。
 //! `FsUtils` 直接操作调用方提供的本地路径，支持文件/目录查询、创建、受限读取、写入、浅层
 //! 列举、复制、rename 移动和删除；`copy_file_with` 还提供串行的同步/异步块处理器流水线。
 //! 异步 `_async` 方法还需要 `tokio` feature 与调用方提供的 Tokio runtime。同步/异步临时

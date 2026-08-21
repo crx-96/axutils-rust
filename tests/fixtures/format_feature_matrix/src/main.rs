@@ -1,3 +1,22 @@
+#[cfg(feature = "format-default")]
+fn main() {
+    use axutils::format_utils::FormatUtils as FormatModuleUtils;
+    use axutils::utils::format_utils::FormatUtils as UtilsModuleUtils;
+    use axutils::utils::FormatUtils as UtilsFormatUtils;
+    use axutils::FormatUtils;
+
+    assert_eq!(
+        FormatUtils::mask("13812345678", &[(3, 7)], None),
+        Some("138****5678".to_owned())
+    );
+    assert_eq!(
+        FormatModuleUtils::mask_email("alice@example.com", None),
+        Some("ali****@example.com".to_owned())
+    );
+    assert_eq!(UtilsFormatUtils::seconds_to_human(60), "1分钟0秒");
+    let _ = UtilsModuleUtils;
+}
+
 #[cfg(any(
     feature = "format-serde-strfmt",
     feature = "format-serde-minijinja",
@@ -87,6 +106,7 @@ fn main() {
 }
 
 #[cfg(not(any(
+    feature = "format-default",
     feature = "format-serde-strfmt",
     feature = "format-serde-minijinja",
     feature = "format-serde-all",

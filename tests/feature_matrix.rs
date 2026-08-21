@@ -478,6 +478,7 @@ fn verifies_format_template_feature_api_matrix() {
     )));
 
     for (feature, expected_success, diagnostic_token) in [
+        ("format-default", true, ""),
         ("format-serde-strfmt", true, ""),
         ("format-serde-minijinja", true, ""),
         ("format-serde-all", true, ""),
