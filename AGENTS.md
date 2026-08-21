@@ -1,6 +1,6 @@
 # axutils 项目协作规则
 
-本文件与 [`CLAUDE.md`](CLAUDE.md) 是面向不同 Agent 工具的同步项目规则副本；两者正文必须保持一致。
+两份同步项目规则副本（[`AGENTS.md`](AGENTS.md) 与 [`CLAUDE.md`](CLAUDE.md)）面向不同 Agent 工具；两份文件正文必须保持一致。
 项目实现、公共 API、feature/依赖、测试、文档和发布工作的详细设计与验收要求统一维护在
 [`REVIEW_ACCEPTANCE.md`](REVIEW_ACCEPTANCE.md)，本文件不重复复制其细则。
 
@@ -59,7 +59,7 @@ crate 的能力默认可用，其他能力通过显式 feature 提供。工具�
 
 ## 规则文件同步
 
-修改本文件或 [`CLAUDE.md`](CLAUDE.md) 时必须同步修改另一份，并保持正文一致；修改
+修改任一同步规则文件（[`AGENTS.md`](AGENTS.md) 或 [`CLAUDE.md`](CLAUDE.md)）时，必须同步修改另一份并保持正文一致；修改
 [`REVIEW_ACCEPTANCE.md`](REVIEW_ACCEPTANCE.md) 或 Skill 的触发条件时，同时检查两份规则文件中的
 链接、读取顺序和触发描述。项目级 Skill 的正文必须保持工具无关；工具如何发现或调用 Skill 由
 各 Agent 工具自身处理，不写入 Skill 正文。

@@ -17,7 +17,13 @@ use std::{error::Error, fmt};
 #[non_exhaustive]
 pub enum SchedulerError {
     /// 配置字段无效。
-    InvalidConfig { field: &'static str },
+    InvalidConfig {
+        /// 无效配置的固定字段分类；当前实现使用 `"max_tasks"`，不包含 cron、时区、回调
+        /// 或其他配置值。
+        ///
+        /// 调用方可按字段名匹配并给出配置提示，但应保留 wildcard 以兼容未来分类。
+        field: &'static str,
+    },
     /// 一次或固定间隔调度参数无效。
     InvalidSchedule,
     /// cron 表达式或未来触发时间无效。

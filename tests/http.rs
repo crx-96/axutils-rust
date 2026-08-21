@@ -1,7 +1,7 @@
 #![cfg(feature = "http")]
 
 use std::io::ErrorKind;
-use std::io::{Read, Write};
+use std::io::{self, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -41,7 +41,17 @@ fn spawn_server(responses: Vec<TestResponse>) -> (String, thread::JoinHandle<()>
                     Err(error) => panic!("accept test request: {error}"),
                 }
             };
-            let _ = read_request(&mut stream);
+            // Windows may inherit the listener's nonblocking mode; read timeouts do not
+            // turn an accepted nonblocking stream into a blocking one.
+            stream.set_nonblocking(false).unwrap_or_else(|error| {
+                panic!("set test request #{received} stream blocking: {error}")
+            });
+            let peer = stream
+                .peer_addr()
+                .unwrap_or_else(|error| panic!("inspect test request #{received} peer: {error}"));
+            read_request(&mut stream).unwrap_or_else(|error| {
+                panic!("read test request #{received} from {peer}: {error}")
+            });
             if !response.delay.is_zero() {
                 thread::sleep(response.delay);
             }
@@ -50,26 +60,59 @@ fn spawn_server(responses: Vec<TestResponse>) -> (String, thread::JoinHandle<()>
                 response.status,
                 response.body.len()
             );
-            let _ = stream.write_all(header.as_bytes());
-            let _ = stream.write_all(response.body);
-            let _ = stream.flush();
+            if let Err(error) = stream.write_all(header.as_bytes()) {
+                if is_client_disconnect(&error) {
+                    eprintln!(
+                        "test response #{received} to {peer} headers not delivered: client disconnected: {error}"
+                    );
+                    continue;
+                }
+                panic!("write test response #{received} to {peer} headers: {error}");
+            }
+            if let Err(error) = stream.write_all(response.body) {
+                if is_client_disconnect(&error) {
+                    eprintln!(
+                        "test response #{received} to {peer} body not delivered: client disconnected: {error}"
+                    );
+                    continue;
+                }
+                panic!("write test response #{received} to {peer} body: {error}");
+            }
+            if let Err(error) = stream.flush() {
+                if is_client_disconnect(&error) {
+                    eprintln!(
+                        "test response #{received} to {peer} flush incomplete: client disconnected: {error}"
+                    );
+                    continue;
+                }
+                panic!("flush test response #{received} to {peer}: {error}");
+            }
         }
     });
     (address, handle)
 }
 
-fn read_request(stream: &mut TcpStream) -> Vec<u8> {
-    stream
-        .set_read_timeout(Some(Duration::from_secs(2)))
-        .expect("set server read timeout");
+fn is_client_disconnect(error: &io::Error) -> bool {
+    matches!(
+        error.kind(),
+        ErrorKind::BrokenPipe
+            | ErrorKind::ConnectionAborted
+            | ErrorKind::ConnectionReset
+            | ErrorKind::NotConnected
+    ) || matches!(error.raw_os_error(), Some(10053 | 10054))
+}
+
+fn read_request(stream: &mut TcpStream) -> io::Result<Vec<u8>> {
+    stream.set_read_timeout(Some(Duration::from_secs(2)))?;
     let mut request = Vec::new();
     let mut byte = [0u8; 1];
     while request.len() < 64 * 1024 {
-        let Ok(read) = stream.read(&mut byte) else {
-            break;
-        };
+        let read = stream.read(&mut byte)?;
         if read == 0 {
-            break;
+            return Err(io::Error::new(
+                ErrorKind::UnexpectedEof,
+                "request ended before headers",
+            ));
         }
         request.push(byte[0]);
         if request.ends_with(b"\r\n\r\n") {
@@ -88,15 +131,16 @@ fn read_request(stream: &mut TcpStream) -> Vec<u8> {
     let body_start = request.len();
     let mut remaining = content_length.saturating_sub(request.len().saturating_sub(body_start));
     while remaining > 0 {
-        let Ok(read) = stream.read(&mut byte) else {
-            break;
-        };
+        let read = stream.read(&mut byte)?;
         if read == 0 {
-            break;
+            return Err(io::Error::new(
+                ErrorKind::UnexpectedEof,
+                format!("request body ended with {remaining} bytes remaining"),
+            ));
         }
         remaining -= read;
     }
-    request
+    Ok(request)
 }
 
 fn spawn_observing_server(
@@ -124,15 +168,28 @@ fn spawn_observing_server(
                 Err(error) => panic!("accept observing request: {error}"),
             }
         };
-        let request = read_request(&mut stream);
+        // Keep the observing fixture's accepted stream compatible with its read timeout too.
+        stream
+            .set_nonblocking(false)
+            .expect("set observing request stream blocking");
+        let peer = stream.peer_addr().expect("inspect observing request peer");
+        let request = read_request(&mut stream)
+            .unwrap_or_else(|error| panic!("read observing request: {error}"));
         *observed_for_thread.lock().expect("observed request lock") = request;
         let header = format!(
             "HTTP/1.1 {} Test\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
             response.status,
             response.body.len()
         );
-        let _ = stream.write_all(header.as_bytes());
-        let _ = stream.write_all(response.body);
+        stream
+            .write_all(header.as_bytes())
+            .unwrap_or_else(|error| panic!("write observing response to {peer} headers: {error}"));
+        stream
+            .write_all(response.body)
+            .unwrap_or_else(|error| panic!("write observing response to {peer} body: {error}"));
+        stream
+            .flush()
+            .unwrap_or_else(|error| panic!("flush observing response to {peer}: {error}"));
     });
     (address, observed, handle)
 }

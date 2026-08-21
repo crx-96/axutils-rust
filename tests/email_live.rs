@@ -8,6 +8,8 @@ use std::{
 
 use axutils::{EmailClient, EmailConfig, EmailMessage, EmailSecurity};
 
+const LIVE_TEST_ENV: &str = "AXUTILS_EMAIL_LIVE_TEST";
+
 struct LiveConfig {
     smtp_host: String,
     smtp_port: u16,
@@ -19,21 +21,48 @@ struct LiveConfig {
     to_email: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LiveConfigError {
+    MissingAuthorization,
+    MissingConfigFile,
+    MissingRequiredField,
+    InvalidPort,
+    InvalidSecurity,
+}
+
+impl std::fmt::Display for LiveConfigError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let message = match self {
+            Self::MissingAuthorization => {
+                "SMTP live test requires explicit authorization via AXUTILS_EMAIL_LIVE_TEST=1"
+            }
+            Self::MissingConfigFile => {
+                "SMTP live test requires the local email-test.toml configuration file"
+            }
+            Self::MissingRequiredField => {
+                "SMTP live test configuration is missing a required field"
+            }
+            Self::InvalidPort => "SMTP live test configuration contains an invalid port",
+            Self::InvalidSecurity => {
+                "SMTP live test configuration contains an invalid security mode"
+            }
+        };
+        formatter.write_str(message)
+    }
+}
+
 #[test]
 #[ignore = "requires config/email-test.toml and explicit AXUTILS_EMAIL_LIVE_TEST=1"]
 fn sends_email_with_sync_client_live() {
-    let config = match load_live_config() {
-        Ok(Some(config)) => config,
-        Ok(None) => return,
-        Err(field) => panic!("SMTP live configuration is invalid: {field}"),
-    };
+    let config = load_live_config()
+        .unwrap_or_else(|error| panic!("SMTP live configuration rejected: {error}"));
     let message = live_message(&config.to_email)
         .unwrap_or_else(|| panic!("SMTP live message configuration is invalid: to_email"));
     let client =
         build_client(config).unwrap_or_else(|| panic!("SMTP live client configuration is invalid"));
 
-    if let Err(error) = client.send(message) {
-        panic!("SMTP live test failed: {error}");
+    if client.send(message).is_err() {
+        panic!("SMTP live test failed; SMTP server interaction did not succeed");
     }
 }
 
@@ -41,18 +70,15 @@ fn sends_email_with_sync_client_live() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "requires config/email-test.toml and explicit AXUTILS_EMAIL_LIVE_TEST=1"]
 async fn sends_email_with_async_client_live() {
-    let config = match load_live_config() {
-        Ok(Some(config)) => config,
-        Ok(None) => return,
-        Err(field) => panic!("SMTP live configuration is invalid: {field}"),
-    };
+    let config = load_live_config()
+        .unwrap_or_else(|error| panic!("SMTP live configuration rejected: {error}"));
     let message = live_message(&config.to_email)
         .unwrap_or_else(|| panic!("SMTP live message configuration is invalid: to_email"));
     let client =
         build_client(config).unwrap_or_else(|| panic!("SMTP live client configuration is invalid"));
 
-    if let Err(error) = client.send_async(message).await {
-        panic!("SMTP live test failed: {error}");
+    if client.send_async(message).await.is_err() {
+        panic!("SMTP live test failed; SMTP server interaction did not succeed");
     }
 }
 
@@ -85,43 +111,58 @@ fn live_message(to_email: &str) -> Option<EmailMessage> {
     .ok()
 }
 
-fn load_live_config() -> Result<Option<LiveConfig>, &'static str> {
-    if env::var("AXUTILS_EMAIL_LIVE_TEST").ok().as_deref() != Some("1") {
-        return Ok(None);
+fn load_live_config() -> Result<LiveConfig, LiveConfigError> {
+    if env::var(LIVE_TEST_ENV).ok().as_deref() != Some("1") {
+        return Err(LiveConfigError::MissingAuthorization);
     }
 
     let path: PathBuf = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("config")
         .join("email-test.toml");
-    let content = match fs::read_to_string(path) {
-        Ok(content) => content,
-        Err(_) => return Ok(None),
-    };
+    let content = fs::read_to_string(path).map_err(|_| LiveConfigError::MissingConfigFile)?;
+    parse_live_config(true, Some(&content))
+}
+
+fn parse_live_config(
+    authorized: bool,
+    content: Option<&str>,
+) -> Result<LiveConfig, LiveConfigError> {
+    if !authorized {
+        return Err(LiveConfigError::MissingAuthorization);
+    }
+    let content = content.ok_or(LiveConfigError::MissingConfigFile)?;
     let values = content
         .lines()
         .filter_map(parse_line)
         .collect::<std::collections::HashMap<_, _>>();
 
-    let required = |field: &'static str| values.get(field).cloned().ok_or(field);
+    let required = |field: &'static str| {
+        values
+            .get(field)
+            .cloned()
+            .ok_or(LiveConfigError::MissingRequiredField)
+    };
     let smtp_security = parse_security(required("smtp_security")?.as_str())?;
 
-    Ok(Some(LiveConfig {
+    Ok(LiveConfig {
         smtp_host: required("smtp_host")?,
-        smtp_port: required("smtp_port")?.parse().map_err(|_| "smtp_port")?,
+        smtp_port: required("smtp_port")?
+            .parse()
+            .map_err(|_| LiveConfigError::InvalidPort)?,
         smtp_security,
         smtp_username: required("smtp_username")?,
         smtp_password: required("smtp_password")?,
         from_email: required("from_email")?,
         from_name: values.get("from_name").cloned(),
         to_email: required("to_email")?,
-    }))
+    })
 }
 
-fn parse_security(value: &str) -> Result<EmailSecurity, &'static str> {
+fn parse_security(value: &str) -> Result<EmailSecurity, LiveConfigError> {
     match value {
         "tls" | "implicit_tls" => Ok(EmailSecurity::ImplicitTls),
         "starttls" => Ok(EmailSecurity::StartTls),
-        _ => Err("smtp_security"),
+        _ => Err(LiveConfigError::InvalidSecurity),
     }
 }
 
@@ -143,8 +184,25 @@ fn parse_line(line: &str) -> Option<(String, String)> {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_line, parse_security};
+    use super::{parse_line, parse_live_config, parse_security, LiveConfig, LiveConfigError};
     use axutils::EmailSecurity;
+
+    const VALID_CONFIG: &str = r#"
+smtp_host = "smtp.example.invalid"
+smtp_port = "2525"
+smtp_security = "starttls"
+smtp_username = "username-placeholder"
+smtp_password = "password-placeholder"
+from_email = "sender@example.invalid"
+to_email = "recipient@example.invalid"
+"#;
+
+    fn expect_error(result: Result<LiveConfig, LiveConfigError>) -> LiveConfigError {
+        match result {
+            Ok(_) => panic!("live configuration was unexpectedly accepted"),
+            Err(error) => error,
+        }
+    }
 
     #[test]
     fn accepts_documented_security_values_and_inline_comments() {
@@ -163,6 +221,48 @@ mod tests {
         assert_eq!(
             parse_line(r#"smtp_security = "tls" # inline comment"#),
             Some(("smtp_security".to_owned(), "tls".to_owned()))
+        );
+    }
+
+    #[test]
+    fn rejects_live_config_without_explicit_authorization() {
+        let error = expect_error(parse_live_config(false, Some(VALID_CONFIG)));
+        assert_eq!(error, LiveConfigError::MissingAuthorization);
+        assert_eq!(
+            error.to_string(),
+            "SMTP live test requires explicit authorization via AXUTILS_EMAIL_LIVE_TEST=1"
+        );
+    }
+
+    #[test]
+    fn rejects_live_config_without_a_file() {
+        let error = expect_error(parse_live_config(true, None));
+        assert_eq!(error, LiveConfigError::MissingConfigFile);
+        assert_eq!(
+            error.to_string(),
+            "SMTP live test requires the local email-test.toml configuration file"
+        );
+    }
+
+    #[test]
+    fn rejects_live_config_with_a_missing_required_field() {
+        let content = VALID_CONFIG.replace("smtp_username = \"username-placeholder\"\n", "");
+        let error = expect_error(parse_live_config(true, Some(&content)));
+        assert_eq!(error, LiveConfigError::MissingRequiredField);
+        assert_eq!(
+            error.to_string(),
+            "SMTP live test configuration is missing a required field"
+        );
+    }
+
+    #[test]
+    fn rejects_live_config_with_an_invalid_port() {
+        let content = VALID_CONFIG.replace("smtp_port = \"2525\"", "smtp_port = \"not-a-port\"");
+        let error = expect_error(parse_live_config(true, Some(&content)));
+        assert_eq!(error, LiveConfigError::InvalidPort);
+        assert_eq!(
+            error.to_string(),
+            "SMTP live test configuration contains an invalid port"
         );
     }
 }

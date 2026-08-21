@@ -130,29 +130,45 @@ cargo test --no-default-features --features logging --doc
 cargo tree --no-default-features --features tracing -e normal,build,features
 cargo tree --no-default-features --features logging -e normal,build,features
 
-# 需要覆盖所有已启用模块、feature/API 依赖边界和文档时，使用下面的完整清单；其中
-# feature/API/依赖边界矩阵是慢速测试，默认 cargo test 会跳过。allocator 后端必须分别验证；
-# mimalloc + rpmalloc 是预期失败组合，不能把 --all-features 作为成功验收命令。
+# 需要覆盖所有已启用模块、feature/API 依赖边界和文档时，按下面的固定清单顺序串行执行。
+# 不要让其他 Cargo/rustdoc 进程同时写这些 target 目录；综合组合明确排除两个 allocator。
+# 这 37 项必须与 Cargo.toml 的 [features] 机械比较，新增或删除 feature 时同步更新本段。
+$nonAllocatorFeatures = "itoa,ryu,zmij,uuid,jwt,tracing,logging,rand,regex,libphonenumber,serde,strfmt,minijinja,chrono,chrono_tz,croner,time,jiff,lettre,http,redis,sqlx,tokio,axum,tokio-util,tower,tower-http,tower_governor,tempfile,tempfile-async,toml,serde-saphyr,rust-ini,base64,md5,aes,encoding_rs"
+
 cargo fmt --all -- --check
-cargo test --no-default-features --test feature_matrix -- --ignored --test-threads=1
 cargo test --no-default-features
+cargo test --no-default-features --test feature_matrix -- --ignored --test-threads=1
+
+# 非 allocator 37-feature 综合成功组合；不能替换为 --all-features。
+cargo test --no-default-features --features $nonAllocatorFeatures
+cargo clippy --all-targets --no-default-features --features $nonAllocatorFeatures -- -D warnings
+
+# 默认与综合 rustdoc/doctest 必须串行，并使用互不相同的隔离 target 目录。
+cargo rustdoc --target-dir target/axutils-default-rustdoc --no-default-features -- -D missing_docs
+cargo rustdoc --target-dir target/axutils-comprehensive-rustdoc --no-default-features --features $nonAllocatorFeatures -- -D missing_docs
+cargo test --target-dir target/axutils-default-doctest --no-default-features --doc
+cargo test --target-dir target/axutils-comprehensive-doctest --no-default-features --features $nonAllocatorFeatures --doc
+
+# 19 份 docs/examples 的 ignored 外部编译 harness，逐块报告编译状态。
+cargo test --no-default-features --test docs_examples -- --ignored --test-threads=1
+
+# 两个进程级 allocator 必须分别成功验证；综合组合不能包含它们。
 cargo test --no-default-features --features mimalloc
-cargo test --no-default-features --features rpmalloc
-cargo test --no-default-features --features mimalloc --doc
-cargo test --no-default-features --features rpmalloc --doc
 cargo clippy --all-targets --no-default-features --features mimalloc -- -D warnings
+cargo test --no-default-features --features rpmalloc
 cargo clippy --all-targets --no-default-features --features rpmalloc -- -D warnings
+
+# 互斥负向契约：命令必须以非零状态退出并报告两个 allocator 冲突；返回 0 即验收失败。
+cargo check --no-default-features --features mimalloc,rpmalloc
+
+# 既有逐 feature、后端和依赖树证据仍按需执行；这些命令不替代上面的固定综合命令。
+cargo test --target-dir target/axutils-mimalloc-doctest --no-default-features --features mimalloc --doc
+cargo test --target-dir target/axutils-rpmalloc-doctest --no-default-features --features rpmalloc --doc
 cargo tree --no-default-features --features mimalloc -e normal,build,features
 cargo tree --no-default-features --features rpmalloc -e normal,build,features
 cargo check --no-default-features --features lettre
 cargo check --no-default-features --features lettre,tokio
-cargo test --doc --no-default-features --features lettre,tokio
-cargo check --no-default-features --features tokio
-cargo check --no-default-features --features sqlx
-cargo check --no-default-features --features sqlx,tokio
-cargo test --no-default-features --features sqlx,tokio --test sqlx -- --test-threads=1
-cargo test --no-default-features --features sqlx,tokio --doc
-cargo tree --no-default-features --features sqlx,tokio -e normal,build,features
+cargo test --target-dir target/axutils-lettre-doctest --doc --no-default-features --features lettre,tokio
 cargo check --no-default-features --features serde
 cargo check --no-default-features --features serde,tokio
 cargo check --no-default-features --features serde,tokio,toml,serde-saphyr,rust-ini
@@ -175,8 +191,6 @@ cargo tree --no-default-features --features base64 -e normal
 cargo tree --no-default-features --features md5 -e normal
 cargo tree --no-default-features --features aes -e normal
 cargo tree --no-default-features --features encoding_rs -e normal
-cargo check --no-default-features --features tracing
-cargo check --no-default-features --features logging
 cargo check --no-default-features --features logging,http
 cargo check --no-default-features --features logging,http,tokio
 cargo check --no-default-features --features logging,redis
@@ -187,32 +201,9 @@ cargo check --no-default-features --features logging,lettre
 cargo check --no-default-features --features logging,lettre,tokio
 cargo check --no-default-features --features logging,serde
 cargo check --no-default-features --features logging,serde,tokio
-cargo test --no-default-features --features http --test http_tls -- --test-threads=1
-cargo test --no-default-features --features http,tokio --test http_tls -- --test-threads=1
-cargo test --no-default-features --features logging --test log_global --test log_conflict -- --test-threads=1
-cargo test --no-default-features --features tracing,http --test log_observability -- --test-threads=1
-cargo test --no-default-features --features tracing,http,tokio --test log_observability -- --test-threads=1
-cargo test --no-default-features --features tracing,serde --test log_observability -- --test-threads=1
-cargo test --no-default-features --features tracing,serde,tokio --test log_observability -- --test-threads=1
-cargo test --no-default-features --features tracing,sqlx,tokio --test log_observability -- --test-threads=1
-cargo test --no-default-features --features tracing,http --test log_lifecycle -- --test-threads=1
-cargo test --no-default-features --features tracing,redis --test log_lifecycle -- --test-threads=1
-cargo test --no-default-features --features tracing,lettre --test log_lifecycle -- --test-threads=1
-cargo test --no-default-features --features tracing,jwt --test log_lifecycle -- --test-threads=1
-cargo test --no-default-features --features tracing,aes --test log_lifecycle -- --test-threads=1
-cargo test --no-default-features --features tracing,sqlx,tokio --test log_lifecycle -- --test-threads=1
-cargo test --no-default-features --features logging --doc
-cargo tree --no-default-features --features tracing -e normal,build,features
-cargo tree --no-default-features --features logging -e normal,build,features
-cargo package --list
+
 cargo package --allow-dirty --list
 git diff --check
-```
-
-allocator 的负向契约单独执行，预期以非零状态退出并包含固定诊断；该命令不属于上面的成功清单：
-
-```powershell
-cargo check --no-default-features --features mimalloc,rpmalloc
 ```
 
 每个公开方法都应同时具备：
@@ -331,7 +322,8 @@ Redis 单机真实测试使用 `tests/redis_live.rs`，同步/异步测试固定
 
 默认 feature 为空；不依赖第三方包的能力直接可用，所有第三方能力都通过显式 feature 提供。
 `rand`、`regex`、`libphonenumber` 分别用于启用可选的第三方依赖 `rand`、`regex` 和
-crates.io 上的 `phonenumber`；模板、日期和邮件能力使用下列独立 feature：
+crates.io 上的 `phonenumber`；模板、日期和邮件能力使用下列独立 feature。下面的
+`[features]` 是与当前 `Cargo.toml` 同步的完整项目 feature 映射，不是节选：
 
 ```toml
 [features]
@@ -374,6 +366,8 @@ tokio-util = ["dep:tokio-util", "tokio-util/rt", "dep:futures-timer"]
 tower = ["dep:tower", "tower/util", "tower/limit", "tower/load-shed"]
 tower-http = ["dep:tower-http", "tower-http/catch-panic", "tower-http/cors", "tower-http/limit", "tower-http/request-id", "tower-http/timeout", "tower-http/trace", "axum?/matched-path"]
 tower_governor = ["dep:tower_governor", "dep:futures-timer"]
+tempfile = ["dep:tempfile"]
+tempfile-async = ["dep:async-tempfile", "tokio"]
 toml = ["dep:toml"]
 serde-saphyr = ["dep:serde-saphyr"]
 rust-ini = ["dep:rust-ini"]

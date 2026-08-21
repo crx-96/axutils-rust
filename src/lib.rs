@@ -54,7 +54,9 @@
 //! serde = { version = "1", features = ["derive"] }
 //! ```
 //!
-//! `TimeUtils` 的日期格式化能力分别由 `chrono`、`time` 和 `jiff` feature 提供。三个
+//! `TimeUtils` 的五个 `try_timestamp*` 入口默认可用，并以 `Result` 返回
+//! [`TimeError::BeforeUnixEpoch`]；保留的五个旧时间戳入口仍可能在纪元前系统时钟下 panic，
+//! 且已标记为 deprecated。日期格式化能力分别由 `chrono`、`time` 和 `jiff` feature 提供。三个
 //! feature 相互独立；只启用一个后端时可以使用无后缀方法，同时启用多个后端时应调用带
 //! 后缀的方法以明确日期类型。日期默认模板为 `yyyy-MM-dd`，含时间值默认模板为
 //! `yyyy-MM-dd HH:mm:ss`；带偏移方法的 `offset: Option<TimeZoneOffset>` 传入 `None` 时
@@ -264,7 +266,7 @@ pub use utils::time_utils;
 pub use utils::TimeUtils;
 
 pub use time::{
-    TimeFormatError, TimeFormatToken, TimeValueKind, TimeZoneOffset, TimeZoneOffsetError,
+    TimeError, TimeFormatError, TimeFormatToken, TimeValueKind, TimeZoneOffset, TimeZoneOffsetError,
 };
 
 pub use utils::format_utils;

@@ -27,9 +27,22 @@ pub enum HttpTransportErrorKind {
 #[non_exhaustive]
 pub enum HttpError {
     /// 配置字段无效。
-    InvalidConfig { field: &'static str },
+    InvalidConfig {
+        /// 无效配置的固定字段分类，例如 `"connect_timeout"`、`"max_request_body_bytes"`、
+        /// `"max_response_body_bytes"`、`"max_inflight_keys"`、`"backoff"` 或
+        /// `"retry_status"`；不包含 URL、Header、请求体或具体配置值。
+        ///
+        /// 调用方可按字段名匹配配置错误，但应保留 wildcard 以兼容未来分类。
+        field: &'static str,
+    },
     /// 请求字段无效。
-    InvalidRequest { field: &'static str },
+    InvalidRequest {
+        /// 无效请求部分的固定分类，例如 `"method"`、`"url"`、`"timeout"` 或 `"request"`；
+        /// 不包含 URL、Header、请求体或底层错误文本。
+        ///
+        /// 调用方可按字段分类决定修复请求还是拒绝发送，不应从错误消息恢复请求内容。
+        field: &'static str,
+    },
     /// URL 不是 HTTP 或 HTTPS 绝对地址，或不能作为安全的相对地址解析。
     InvalidUrl,
     /// Header 名称不是合法的 HTTP token。
@@ -41,9 +54,19 @@ pub enum HttpError {
     /// 不允许合并敏感重复 Header。
     DuplicateSensitiveHeader,
     /// 请求体超过限制。
-    RequestBodyTooLarge { limit: usize },
+    RequestBodyTooLarge {
+        /// 请求体允许的最大字节数；不包含请求体内容。
+        ///
+        /// 调用方可读取该预算后缩小请求或分块处理，并据此匹配超限错误。
+        limit: usize,
+    },
     /// 响应体超过限制。
-    ResponseTooLarge { limit: usize },
+    ResponseTooLarge {
+        /// 响应体允许的最大字节数；不包含响应体内容。
+        ///
+        /// 调用方可据此匹配本地响应预算耗尽并调整请求或配置。
+        limit: usize,
+    },
     /// 响应体不是有效 UTF-8。
     InvalidUtf8,
     /// 使用 Serde JSON 序列化请求体失败。

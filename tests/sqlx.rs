@@ -30,6 +30,37 @@ fn config_is_local_bounded_and_redacted() {
     ));
 }
 
+#[test]
+fn remote_scheme_construction_is_offline_and_redacted() {
+    // 这里只验证 SqlxConfig 的本地解析；只有 SqlxClient::connect 才允许触发远端 I/O。
+    for (url, driver) in [
+        (
+            "postgres://user:secret@example.invalid/db?sslmode=disable&application_name=hidden-query",
+            "PostgreSql",
+        ),
+        (
+            "postgresql://user:secret@example.invalid/db?sslmode=disable",
+            "PostgreSql",
+        ),
+        (
+            "mysql://user:secret@example.invalid/db",
+            "MySql",
+        ),
+        (
+            "mariadb://user:secret@example.invalid/db",
+            "MySql",
+        ),
+    ] {
+        let config = SqlxConfig::new(url).expect("supported URL scheme should parse locally");
+        let debug = format!("{config:?}");
+        assert!(debug.contains(driver), "Debug should identify the driver: {debug}");
+        assert!(!debug.contains(url));
+        for secret in ["user", "secret", "example.invalid", "hidden-query"] {
+            assert!(!debug.contains(secret), "Debug leaked `{secret}`: {debug}");
+        }
+    }
+}
+
 #[tokio::test]
 async fn client_covers_query_families_limits_errors_and_close() {
     let config = SqlxConfig::new("sqlite::memory:")
@@ -215,7 +246,9 @@ async fn pool_acquire_timeout_and_cancellation_release_connections() {
     let timeout_client = SqlxClient::connect(
         SqlxConfig::new("sqlite::memory:")
             .unwrap()
-            .with_acquire_timeout(Duration::from_millis(1))
+            // 连接池初始化本身也受 acquire timeout 约束；1ms 在高负载 CI 上可能先让
+            // 初始 SQLite 连接超时，无法到达本测试真正要验证的“池已占满”路径。
+            .with_acquire_timeout(Duration::from_millis(100))
             .unwrap(),
     )
     .await

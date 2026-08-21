@@ -142,10 +142,11 @@ Serde 值使用受限 writer 生成紧凑 MessagePack。读取值会在反序列
 当作受锁保护；Redis 传输或协议错误返回 `Err`，不能当作释放成功。TTL 上限为 24 小时，
 正但不足一毫秒的 duration 向上取 1 ms。
 
-同步 guard 的 `Drop` 只做一次不重试的最佳努力 token 校验释放，不 panic；它不是可靠的
-释放确认，正常路径应显式调用 `release`。异步 guard 的 `Drop` 不会发起网络操作、创建
-后台 task 或等待 runtime，正常路径必须 `await release()`，取消、异常或 runtime 关闭时
-依赖 TTL 兜底。释放/续租错误期间不会伪造成功，业务应停止后续受保护写入。
+同步和异步 guard 的 `Drop` 都不会 checkout 连接池、发送 Redis 命令、创建后台 task 或
+等待 runtime；显式 `release`/`await release()` 是唯一可观察的远端释放主路径。正常退出、
+panic unwind、取消或 runtime 关闭时，未显式释放的锁都依赖当前有效 TTL 兜底：获取后的 TTL
+或最近一次成功续租设置的 TTL，最大为 24 小时。释放/续租错误期间不会伪造成功，业务应停止
+后续受保护写入；需要缩短残留时间时应在退出前显式释放，而不能依赖 `Drop`。
 
 该锁不是跨多个相互独立 Redis 主节点的 Redlock，也不提供 fencing token。临界区若会写
 数据库或触发外部副作用，仍应使用条件更新、唯一约束、事务和幂等设计；锁只能减少同一
@@ -550,14 +551,15 @@ let _ = guarded;
 
 `RedisLockGuard` 是非 `Clone`、非 `Copy` 的同步锁所有权 guard。其 token、完整 key 和
 客户端句柄不提供 getter；`Debug` 只显示非敏感的活动状态和当前 TTL。正常路径应显式
-调用 `release`；guard 被丢弃时会再做一次最佳努力释放，但不能把 `Drop` 当作可靠确认。
+调用 `release`；guard 被丢弃时不访问网络，远端锁最多残留到当前有效 TTL 到期，不能把
+`Drop` 当作释放确认。
 
 ### `RedisLockGuard::release`
 
 签名：`pub fn release(&mut self) -> Result<bool, RedisError>`。
 使用 token 校验脚本原子释放当前锁。`Ok(true)` 表示删除了当前锁，`Ok(false)` 表示锁已
 过期、已由其他 token 持有或 guard 已失效；重复调用不会访问 Redis。传输/协议 `Err` 不
-伪造成功，同步 guard 的 `Drop` 仍可能再尝试一次。
+伪造成功，guard 仍保持活动以便调用方决定是否重试；`Drop` 不会重试或补发释放命令。
 
 ```rust,no_run
 use axutils::RedisLockGuard;
@@ -1072,7 +1074,8 @@ let _ = RedisClient::ping;
 
 `RedisAsyncLockGuard` 只在 `redis,tokio` 下导出，是非 `Clone`、非 `Copy` 的异步锁所有权
 guard。它的 `Drop` 不发送网络命令；取消或异常路径依赖 Redis TTL。正常路径必须显式
-`await release()`，并处理 `Ok(false)` 和 `Err`。
+`await release()`，并处理 `Ok(false)` 和 `Err`。未显式释放时，锁最多残留到获取时或最近
+一次成功续租后的有效 TTL 到期，TTL 上限为 24 小时；`Drop` 不会重试或创建后台任务。
 
 ### `RedisAsyncLockGuard::release`
 
@@ -2140,7 +2143,8 @@ let _ = RedisUtils::set_nx_with_expiry::<&str, u8>;
 签名：`pub fn try_lock<K: AsRef<[u8]>>(key: K, ttl: Duration) -> Result<Option<RedisLockGuard>, RedisError>`。
 转发到已初始化的全局 `RedisClient`，不在 `RedisUtils` 内维护 guard 注册表，也不返回对
 `OnceLock` 的借用；guard 自己持有 client clone。未初始化返回 `NotInitialized`，其余
-返回值和同步 `RedisClient::try_lock` 相同。
+返回值和同步 `RedisClient::try_lock` 相同；同步 guard 的 `Drop` 不会执行网络清理，未显式
+释放时依赖当前有效 TTL（获取或最近一次成功续租的 TTL，最大 24 小时）。
 
 ```rust,no_run
 use axutils::{RedisLockGuard, RedisUtils};
@@ -2687,7 +2691,8 @@ let _ = RedisUtils::set_nx_with_expiry_async::<&str, u8>;
 
 签名：`pub async fn try_lock_async<K: AsRef<[u8]>>(key: K, ttl: Duration) -> Result<Option<RedisAsyncLockGuard>, RedisError>`。
 转发到全局客户端并返回拥有 client clone 的异步 guard；全局入口不提供进程内锁表，
-异步 guard 的 `Drop` 不会执行网络清理。
+异步 guard 的 `Drop` 不会执行网络清理，未显式释放时依赖获取时或最近一次成功续租后的
+有效 TTL，最长为 24 小时。
 
 ```rust,no_run
 # #[cfg(all(feature = "redis", feature = "tokio"))]

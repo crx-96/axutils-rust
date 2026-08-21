@@ -45,17 +45,40 @@ impl fmt::Display for RedisTransportErrorKind {
 #[non_exhaustive]
 pub enum RedisError {
     /// 配置字段无效。
-    InvalidConfig { field: &'static str },
+    InvalidConfig {
+        /// 无效配置的固定字段分类，例如 `"url"`、`"scheme"`、`"nodes"`、`"credentials"`、
+        /// `"database"`、`"pool_size"` 或 `"ttl"`；不包含 URL、节点地址、用户名、密码或
+        /// 其他配置值。
+        ///
+        /// 调用方可按字段名匹配配置错误，但不应把字段名误当成可安全记录配置内容的许可。
+        field: &'static str,
+    },
     /// key 为空或超过当前配置上限。
     InvalidKey,
     /// Hash field 为空或超过当前配置上限。
     InvalidField,
     /// 值、批量参数或事务编码超过限制；`limit` 的单位由具体操作决定。
-    ValueTooLarge { limit: usize },
+    ValueTooLarge {
+        /// 当前操作允许的输入或批量预算；单位由操作决定，通常是序列化/原始值或批量累计
+        /// 字节数，也可能是批量项数。该值不包含 Redis key、value 或服务端响应内容。
+        ///
+        /// 调用方可读取它向用户报告对应预算并匹配此变体；不要假定所有操作都以字节计量。
+        limit: usize,
+    },
     /// 多项响应累计字节数超过限制。
-    ResponseTooLarge { limit: usize },
+    ResponseTooLarge {
+        /// 响应累计大小上限，单位为字节；只表示本地预算，不包含响应内容。
+        ///
+        /// 调用方可用它区分响应预算耗尽与其他传输错误，并据此缩小查询或调整配置。
+        limit: usize,
+    },
     /// 集合或列表返回项数超过限制。
-    CollectionTooLarge { limit: usize },
+    CollectionTooLarge {
+        /// 集合或列表允许返回的最大项数，单位为项；只表示本地数量预算，不包含返回值。
+        ///
+        /// 调用方可用它匹配结果数量超限并改用分页或更小的范围。
+        limit: usize,
+    },
     /// MessagePack 序列化失败。
     Serialize,
     /// MessagePack 反序列化失败。

@@ -107,9 +107,10 @@ fn finish_renew(
 /// 跨业务共享 key。token 仅是内部所有权标记，不是业务身份、认证凭据或可持久化数据。
 /// 该协议不覆盖主从异步复制故障切换造成的锁丢失，也不是跨独立主节点的 Redlock 或
 /// fencing token；临界区仍需数据库条件更新、唯一约束、事务或幂等保护。
-/// 正常路径应显式调用 [`RedisLockGuard::release`] 并处理返回值；同步 guard 被丢弃时会
-/// 尝试执行一次带 token 校验的释放，释放失败时不 panic，锁仍由 TTL 兜底。该 `Drop` 行为
-/// 不是可靠的释放确认。
+/// 正常路径必须显式调用 [`RedisLockGuard::release`] 并处理返回值；同步 guard 被丢弃时
+/// 不会 checkout 连接池或发送 Redis 命令，锁由获取时或最近一次成功续租后的有效 TTL 兜底。
+/// TTL 严格大于 0 且不超过 24 小时，因此正常退出和 panic unwind 都可能让远端锁继续残留至
+/// 当前 TTL 到期；`Drop` 不提供释放确认，也不会创建线程或 runtime 来补做释放。
 pub struct RedisLockGuard {
     client: RedisClient,
     key: Vec<u8>,
@@ -138,8 +139,8 @@ impl RedisLockGuard {
     ///
     /// 返回 `Ok(true)` 表示删除了当前 token 对应的锁；`Ok(false)` 表示锁已过期、已由其他
     /// token 持有，或 guard 已经释放。只有 Redis 命令可靠返回后才会将 guard 标记为非活动；
-    /// 传输或协议错误会原样返回，之后同步 `Drop` 仍可再做一次最佳努力释放。调用方应把
-    /// `Err` 和 `Ok(false)` 都视为无法继续依赖锁。
+    /// 传输或协议错误会原样返回，guard 仍保持活动以便调用方决定是否重试；`Drop` 不会
+    /// 重试或补发释放命令。调用方应把 `Err` 和 `Ok(false)` 都视为无法继续依赖锁。
     ///
     /// # Examples
     ///
@@ -205,11 +206,7 @@ impl RedisLockGuard {
 }
 
 impl Drop for RedisLockGuard {
-    fn drop(&mut self) {
-        if self.active {
-            let _ = self.client.release_lock_sync(&self.key, &self.token);
-        }
-    }
+    fn drop(&mut self) {}
 }
 
 impl fmt::Debug for RedisLockGuard {
@@ -230,8 +227,9 @@ impl fmt::Debug for RedisLockGuard {
 /// 跨业务共享 key。token 仅是内部所有权标记，不是业务身份、认证凭据或可持久化数据。
 /// 该协议不覆盖主从异步复制故障切换造成的锁丢失，也不是跨独立主节点的 Redlock 或
 /// fencing token；临界区仍需数据库条件更新、唯一约束、事务或幂等保护。
-/// 异步 guard 的 `Drop` 不会发起网络操作；正常路径必须显式 `await release()`，取消或
-/// runtime 关闭时只能依赖 TTL 兜底。
+/// 异步 guard 的 `Drop` 不会 checkout 连接池、发送网络命令或创建后台任务；正常路径必须
+/// 显式 `await release()`，取消、panic unwind 或 runtime 关闭时只能依赖获取时或最近一次
+/// 成功续租后的有效 TTL 兜底，TTL 上限为 24 小时。
 pub struct RedisAsyncLockGuard {
     client: RedisClient,
     key: Vec<u8>,
@@ -498,6 +496,101 @@ mod tests {
         assert_eq!(guard.release(), Ok(false));
     }
 
+    #[test]
+    fn active_sync_guard_drop_does_not_checkout_or_send_command() {
+        let (client, backend) = RedisClient::test_fake(Ok(1));
+        {
+            let _guard = super::RedisLockGuard::new(
+                client,
+                b"drop-lock-key".to_vec(),
+                [b'D'; 32],
+                Duration::from_secs(30),
+            );
+        }
+
+        assert_eq!(backend.checkout_count(), 0);
+        assert_eq!(backend.command_count(), 0);
+    }
+
+    #[test]
+    fn explicit_sync_release_is_observable_and_repeated_release_is_local() {
+        let (client, backend) = RedisClient::test_fake(Ok(1));
+        let mut guard = super::RedisLockGuard::new(
+            client,
+            b"explicit-release-key".to_vec(),
+            [b'R'; 32],
+            Duration::from_secs(30),
+        );
+
+        assert_eq!(guard.release(), Ok(true));
+        assert_eq!(backend.checkout_count(), 1);
+        assert_eq!(backend.command_count(), 1);
+        assert_eq!(guard.release(), Ok(false));
+        assert_eq!(backend.checkout_count(), 1);
+        assert_eq!(backend.command_count(), 1);
+        drop(guard);
+        assert_eq!(backend.checkout_count(), 1);
+        assert_eq!(backend.command_count(), 1);
+    }
+
+    #[test]
+    fn sync_release_error_is_observable_and_drop_does_not_retry() {
+        let error = RedisError::Transport(crate::redis::RedisTransportErrorKind::Network);
+        let (client, backend) = RedisClient::test_fake(Err(error));
+        let mut guard = super::RedisLockGuard::new(
+            client,
+            b"release-error-key".to_vec(),
+            [b'E'; 32],
+            Duration::from_secs(30),
+        );
+
+        assert_eq!(guard.release(), Err(error));
+        assert_eq!(backend.checkout_count(), 1);
+        assert_eq!(backend.command_count(), 1);
+        drop(guard);
+        assert_eq!(backend.checkout_count(), 1);
+        assert_eq!(backend.command_count(), 1);
+    }
+
+    #[test]
+    fn sync_drop_after_successful_renew_uses_no_remote_cleanup() {
+        let (client, backend) = RedisClient::test_fake(Ok(1));
+        let mut guard = super::RedisLockGuard::new(
+            client,
+            b"renewed-drop-key".to_vec(),
+            [b'N'; 32],
+            Duration::from_secs(1),
+        );
+
+        assert!(guard.renew(Duration::from_secs(60)).unwrap());
+        assert_eq!(guard.ttl, Duration::from_secs(60));
+        let checkout_count = backend.checkout_count();
+        let command_count = backend.command_count();
+        assert_eq!(checkout_count, 1);
+        assert_eq!(command_count, 1);
+        drop(guard);
+        assert_eq!(backend.checkout_count(), checkout_count);
+        assert_eq!(backend.command_count(), command_count);
+    }
+
+    #[test]
+    fn sync_drop_during_panic_does_not_attempt_remote_release() {
+        let (client, backend) = RedisClient::test_fake(Ok(1));
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _guard = super::RedisLockGuard::new(
+                client,
+                b"panic-drop-key".to_vec(),
+                [b'P'; 32],
+                Duration::from_secs(30),
+            );
+            panic!("test panic while a Redis lock guard is alive");
+        }));
+
+        assert!(result.is_err());
+        assert_eq!(backend.checkout_count(), 0);
+        assert_eq!(backend.command_count(), 0);
+    }
+
     #[cfg(all(feature = "redis", feature = "tokio"))]
     #[test]
     fn async_guard_debug_omits_key_and_token() {
@@ -517,6 +610,65 @@ mod tests {
         assert!(debug.contains("RedisAsyncLockGuard"));
         assert!(!debug.contains("secret-async-lock-key"));
         assert!(!debug.contains("AAAA"));
+    }
+
+    #[cfg(all(feature = "redis", feature = "tokio"))]
+    #[tokio::test(flavor = "current_thread")]
+    async fn active_async_guard_drop_does_not_checkout_or_send_command() {
+        let (client, backend) = RedisClient::test_fake(Ok(1));
+        {
+            let _guard = super::RedisAsyncLockGuard::new(
+                client,
+                b"async-drop-lock-key".to_vec(),
+                [b'D'; 32],
+                Duration::from_secs(30),
+            );
+        }
+
+        assert_eq!(backend.checkout_count(), 0);
+        assert_eq!(backend.command_count(), 0);
+    }
+
+    #[cfg(all(feature = "redis", feature = "tokio"))]
+    #[tokio::test(flavor = "current_thread")]
+    async fn explicit_async_release_is_observable_and_repeated_release_is_local() {
+        let (client, backend) = RedisClient::test_fake(Ok(1));
+        let mut guard = super::RedisAsyncLockGuard::new(
+            client,
+            b"async-explicit-release-key".to_vec(),
+            [b'R'; 32],
+            Duration::from_secs(30),
+        );
+
+        assert_eq!(guard.release().await, Ok(true));
+        assert_eq!(backend.checkout_count(), 1);
+        assert_eq!(backend.command_count(), 1);
+        assert_eq!(guard.release().await, Ok(false));
+        assert_eq!(backend.checkout_count(), 1);
+        assert_eq!(backend.command_count(), 1);
+        drop(guard);
+        assert_eq!(backend.checkout_count(), 1);
+        assert_eq!(backend.command_count(), 1);
+    }
+
+    #[cfg(all(feature = "redis", feature = "tokio"))]
+    #[tokio::test(flavor = "current_thread")]
+    async fn async_release_error_is_observable_and_drop_does_not_retry() {
+        let error = RedisError::Transport(crate::redis::RedisTransportErrorKind::Network);
+        let (client, backend) = RedisClient::test_fake(Err(error));
+        let mut guard = super::RedisAsyncLockGuard::new(
+            client,
+            b"async-release-error-key".to_vec(),
+            [b'E'; 32],
+            Duration::from_secs(30),
+        );
+
+        assert_eq!(guard.release().await, Err(error));
+        assert_eq!(backend.checkout_count(), 1);
+        assert_eq!(backend.command_count(), 1);
+        drop(guard);
+        assert_eq!(backend.checkout_count(), 1);
+        assert_eq!(backend.command_count(), 1);
     }
 
     #[test]

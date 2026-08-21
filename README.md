@@ -14,13 +14,13 @@
 `ConvertUtils` 始终提供无状态工具类型；`itoa`、`ryu`/`zmij`、`uuid` feature 分别开放整数、
 浮点数和 UUID 的借用型、追加型及拥有型字符串转换。浮点同时启用两个后端时通过
 `FloatFormat` 显式选择，完整 API、feature 矩阵和 UUID 直接依赖声明见
-[ConvertUtils 使用文档](docs/examples/convert.md)。
+[ConvertUtils 使用文档](https://github.com/crx-96/axutils-rust/blob/main/docs/examples/convert.md)。
 
 `FsUtils::copy_file_with` 提供默认可用的串行文件块处理器流水线，并返回输入/输出字节数和
 块数；启用 `tokio` 后追加异步处理器入口。临时文件和目录 wrapper 由独立的
 `tempfile`/`tempfile-async` feature 提供，使用 `FsUtilsContext` 保存显式配置，不修改进程级
 临时目录；异步入口由调用方提供 Tokio runtime。完整 API、错误分类、取消语义和 feature
-边界见 [FsUtils 使用文档](docs/examples/fs.md)。
+边界见 [FsUtils 使用文档](https://github.com/crx-96/axutils-rust/blob/main/docs/examples/fs.md)。
 
 `mimalloc` 和 `rpmalloc` feature 用于为依赖该 library 的最终 Rust binary 选择进程级全局内存
 分配器；两者不能同时启用，也不会提供运行时切换 API。应用或递归依赖已有
@@ -56,7 +56,7 @@ shutdown；Tower、Tower HTTP、tower_governor middleware 分别由同名 provid
 首版不提供 TLS、HTTP/2、强制 drain deadline 或可信代理 CIDR 验证。`tower_governor` 0.8 的
 Axum 集成会启用 Axum default（含 form/json/query/tracing 等）并间接启用 Tokio macros；这是固定上游
 feature 扩张，不表示 axutils 默认安装这些行为。完整 API 与边界见
-[Tokio 工具文档](docs/examples/tokio.md)和 [Axum 服务文档](docs/examples/axum.md)。
+[Tokio 工具文档](https://github.com/crx-96/axutils-rust/blob/main/docs/examples/tokio.md)和 [Axum 服务文档](https://github.com/crx-96/axutils-rust/blob/main/docs/examples/axum.md)。
 
 调度器能力严格要求 `chrono + chrono_tz + tokio + croner` 四项 feature：`Scheduler` 提供有界的
 一次、固定间隔和六段 cron 任务，cron 使用显式 IANA 时区；`SchedulerUtils` 是只能成功初始化一次的
@@ -64,7 +64,7 @@ feature 扩张，不表示 axutils 默认安装这些行为。完整 API 与边�
 注册任务时必须处于启用了 time driver 的调用方 Tokio runtime 中。`croner` 是直接依赖的同名
 provider feature，单独启用会编译 Croner 及其内部 `chrono` 依赖，但不会导出本 crate 的调度器或
 `chrono` 公共 API。完整 API、DST、取消、容量和全局生命周期边界见
-[Scheduler 使用文档](docs/examples/scheduler.md)。
+[Scheduler 使用文档](https://github.com/crx-96/axutils-rust/blob/main/docs/examples/scheduler.md)。
 
 ```toml
 [dependencies]
@@ -92,7 +92,7 @@ EnvFilter target 规则，例如由调用方传入 `lettre=off,rustls=off`。这
 HTTP URL、Header/body、
 SQL/bind、Redis key/value/token、邮件和配置敏感内容不会写入库内事件。完整事件 target、
 字段和边界见
-[日志与 tracing 使用文档](docs/examples/log.md)。
+[日志与 tracing 使用文档](https://github.com/crx-96/axutils-rust/blob/main/docs/examples/log.md)。
 
 ```toml
 [dependencies]
@@ -191,7 +191,7 @@ tokio = { version = "1.53.1", features = ["macros", "rt-multi-thread"] }
 文件系统能力由默认可用的 `FsUtils` 提供：同步入口支持查询、创建、受限读取、写入、追加、浅层
 列举、普通文件复制、rename 移动和删除；带 `_async` 后缀的入口需要同时启用 `tokio`，并由应用
 提供 Tokio runtime。`FsUtils` 不提供安全根、抗 TOCTOU、原子写或递归删除回滚；完整方法、错误分类、
-符号链接和资源边界见 [FsUtils 使用文档](docs/examples/fs.md)。只需要文件工具的异步入口时，可显式
+符号链接和资源边界见 [FsUtils 使用文档](https://github.com/crx-96/axutils-rust/blob/main/docs/examples/fs.md)。只需要文件工具的异步入口时，可显式
 启用现有 `tokio` feature：
 
 ```toml
@@ -252,7 +252,7 @@ client.close_async().await?;
 `SqlxConfig` 只做本地校验；`connect`/`init` 才会访问网络或产生 SQLite 文件 I/O。SQLite
 `sqlite::memory:` 使用 `max_connections = 1`；事务内执行使用 SQLx 原生的 `&mut *tx`，调用方
 必须显式 `commit`/`rollback`。完整方法清单、行数 sentinel、全局生命周期和错误脱敏规则见
-[SQLx 使用文档](docs/examples/sqlx.md)。
+[SQLx 使用文档](https://github.com/crx-96/axutils-rust/blob/main/docs/examples/sqlx.md)。
 
 配置读取启用 `serde` 后提供 JSON 和 `.env`；YAML、TOML、INI 分别额外启用
 `serde-saphyr`、`toml`、`rust-ini`：
@@ -314,7 +314,7 @@ axutils = { version = "0.1", features = ["mimalloc"] }
 
 除互斥的 `mimalloc` 与 `rpmalloc` 外，各 feature 可以按各自组合前提启用；两个 allocator
 feature 不能同时启用。完整 API 和每个方法的可编译示例见下面对应的模块文档。全局分配器的
-作用域、构建前置条件和下游兼容性见[全局内存分配器使用文档](docs/examples/allocator.md)。
+作用域、构建前置条件和下游兼容性见[全局内存分配器使用文档](https://github.com/crx-96/axutils-rust/blob/main/docs/examples/allocator.md)。
 
 ## 使用 JWT
 
@@ -363,7 +363,7 @@ assert_eq!(contents, "hello");
 ```
 
 异步方法统一带 `_async` 后缀，仅在 `tokio` feature 下提供，并要求调用方自己创建和保持 Tokio
-runtime。完整方法清单、错误变体、限制和符号链接语义见 [FsUtils 使用文档](docs/examples/fs.md)。
+runtime。完整方法清单、错误变体、限制和符号链接语义见 [FsUtils 使用文档](https://github.com/crx-96/axutils-rust/blob/main/docs/examples/fs.md)。
 
 ## 使用 `PathUtils`
 
@@ -381,21 +381,25 @@ assert_eq!(path, std::path::PathBuf::from("project").join("README.md"));
 
 ## 使用 `TimeUtils`
 
-`TimeUtils` 提供 `timestamp`、`timestamp_seconds`、`timestamp_milliseconds`、
-`timestamp_microseconds` 和 `timestamp_nanoseconds` 五个 Unix 时间戳入口；日期格式化后端按需
-启用 `chrono`、`time` 或 `jiff`。
+`TimeUtils` 推荐使用 `try_timestamp`、`try_timestamp_seconds`、`try_timestamp_milliseconds`、
+`try_timestamp_microseconds` 和 `try_timestamp_nanoseconds` 五个 `Result` Unix 时间戳入口；
+系统时钟早于 Unix 纪元时统一返回 `TimeError::BeforeUnixEpoch`。原有的
+`timestamp`、`timestamp_seconds`、`timestamp_milliseconds`、`timestamp_microseconds` 和
+`timestamp_nanoseconds` 入口保留原签名和 panic 语义，但已标记为 `deprecated`，仍可能在纪元前
+系统时钟下 panic。日期格式化后端按需启用 `chrono`、`time` 或 `jiff`。
 
 ```rust
 use axutils::TimeUtils;
 
-let (seconds, milliseconds, microseconds, nanoseconds) = TimeUtils::timestamp();
+let (seconds, milliseconds, microseconds, nanoseconds) = TimeUtils::try_timestamp()?;
 assert!(seconds > 0);
 assert!(milliseconds >= seconds as u128 * 1_000);
 assert!(microseconds >= milliseconds * 1_000);
 assert!(nanoseconds >= microseconds * 1_000);
+# Ok::<(), axutils::TimeError>(())
 ```
 
-系统时间早于 Unix 纪元时，时间戳方法会 panic；日期模板、固定偏移和各后端方法见详细文档。
+日期模板、固定偏移和各后端方法见详细文档。
 
 完整示例与边界说明见 [TimeUtils 使用文档](https://github.com/crx-96/axutils-rust/blob/main/docs/examples/time.md)。
 

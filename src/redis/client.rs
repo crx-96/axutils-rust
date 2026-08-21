@@ -1,5 +1,11 @@
 use std::{fmt, sync::Arc, time::Duration};
 
+#[cfg(test)]
+use std::sync::{
+    atomic::{AtomicUsize, Ordering},
+    Mutex,
+};
+
 use ::redis::ConnectionLike;
 use r2d2::{ManageConnection, Pool};
 use serde::{de::DeserializeOwned, Serialize};
@@ -39,6 +45,8 @@ pub(crate) struct RedisClientInner {
 enum SyncBackend {
     Single(SinglePool),
     Cluster(ClusterPool),
+    #[cfg(test)]
+    Fake(Arc<TestRedisBackend>),
 }
 
 #[cfg(all(feature = "redis", feature = "tokio"))]
@@ -53,6 +61,47 @@ enum AsyncBackend {
         client: ::redis::cluster::ClusterClient,
         connection: tokio::sync::Mutex<Option<::redis::cluster_async::ClusterConnection>>,
     },
+    #[cfg(test)]
+    Fake(Arc<TestRedisBackend>),
+}
+
+#[cfg(test)]
+#[derive(Clone)]
+pub(crate) struct TestRedisBackend {
+    checkout_count: Arc<AtomicUsize>,
+    command_count: Arc<AtomicUsize>,
+    result: Arc<Mutex<Result<i64, RedisError>>>,
+}
+
+#[cfg(test)]
+impl TestRedisBackend {
+    fn new(result: Result<i64, RedisError>) -> Self {
+        Self {
+            checkout_count: Arc::new(AtomicUsize::new(0)),
+            command_count: Arc::new(AtomicUsize::new(0)),
+            result: Arc::new(Mutex::new(result)),
+        }
+    }
+
+    pub(crate) fn checkout_count(&self) -> usize {
+        self.checkout_count.load(Ordering::Relaxed)
+    }
+
+    pub(crate) fn command_count(&self) -> usize {
+        self.command_count.load(Ordering::Relaxed)
+    }
+
+    fn execute<T: ::redis::FromRedisValue>(&self) -> Result<T, RedisError> {
+        self.checkout_count.fetch_add(1, Ordering::Relaxed);
+        self.command_count.fetch_add(1, Ordering::Relaxed);
+        let result = *self
+            .result
+            .lock()
+            .expect("test Redis backend result lock should not be poisoned");
+        let value = result?;
+        T::from_redis_value(::redis::Value::Int(value))
+            .map_err(|_| RedisError::Transport(RedisTransportErrorKind::Protocol))
+    }
 }
 
 struct SingleManager {
@@ -302,6 +351,28 @@ impl RedisClient {
                 async_backend,
             }),
         })
+    }
+
+    #[cfg(test)]
+    pub(crate) fn test_fake(result: Result<i64, RedisError>) -> (Self, TestRedisBackend) {
+        let config = RedisConfig::single("redis://127.0.0.1:6379/0")
+            .expect("test fake Redis URL should be valid");
+        let backend = TestRedisBackend::new(result);
+        let sync = SyncBackend::Fake(Arc::new(backend.clone()));
+        #[cfg(all(feature = "redis", feature = "tokio"))]
+        let async_backend = AsyncBackend::Fake(Arc::new(backend.clone()));
+
+        (
+            Self {
+                inner: Arc::new(RedisClientInner {
+                    config,
+                    sync,
+                    #[cfg(all(feature = "redis", feature = "tokio"))]
+                    async_backend,
+                }),
+            },
+            backend,
+        )
     }
 
     /// 读取 MessagePack 值；key 不存在时返回 `None`。
@@ -2488,6 +2559,8 @@ impl RedisClient {
         let mut connection = match &self.inner.sync {
             SyncBackend::Single(pool) => pool.get().map_err(|error| pool_error(&error))?,
             SyncBackend::Cluster(_) => return Err(RedisError::UnsupportedMode),
+            #[cfg(test)]
+            SyncBackend::Fake(_) => return Err(RedisError::UnsupportedMode),
         };
         let mut pipeline = ::redis::pipe();
         pipeline.atomic();
@@ -2547,6 +2620,8 @@ impl RedisClient {
                 },
                 Err(error) => Err(pool_error(&error)),
             },
+            #[cfg(test)]
+            SyncBackend::Fake(backend) => backend.execute(),
         };
         #[cfg(not(feature = "tracing"))]
         let _ = connection_discarded;
@@ -2607,6 +2682,8 @@ impl RedisClient {
                         .map_err(|error| RedisError::from_upstream(&error)),
                     Err(error) => Err(error),
                 },
+                #[cfg(test)]
+                AsyncBackend::Fake(backend) => backend.execute(),
             }
         };
         #[cfg(feature = "tracing")]

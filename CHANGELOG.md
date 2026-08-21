@@ -122,8 +122,9 @@
   Cluster 事务、WATCH/CAS 或无界 keys/scan；Cluster 跨 slot 错误统一映射为 `CrossSlot`。
 - 新增 `RedisClient::try_lock`、`RedisLockGuard`、`RedisLockGuard::release`/`renew` 以及
   `RedisUtils::try_lock`，提供单 Redis 逻辑主节点/单 Cluster 拓扑的单键租约锁：使用 OS
-  CSPRNG token、24 小时以内 TTL 和 token 校验 Lua `EVAL`，同步 guard 支持一次最佳努力
-  `Drop` 释放，锁丢失时返回 `Ok(false)` 而不删除新持有者的锁。
+  CSPRNG token、24 小时以内 TTL 和 token 校验 Lua `EVAL`，锁丢失时返回 `Ok(false)` 而不
+  删除新持有者的锁；同步和异步 guard 的远端释放均由显式 `release` 入口负责，隐式 `Drop`
+  依赖 TTL 兜底。
 - 新增 `redis,tokio` 组合下的 `_async` Redis 命令和独立事务通道；异步连接惰性初始化，
   不创建 Tokio runtime、不调用 `block_on`，调用方必须提供 runtime。Redis feature 直接启用
   专用 `serde` 依赖但不自动启用项目公共 `serde` feature。
@@ -145,6 +146,15 @@
 
 ### Changed
 
+- Redis 单键租约 guard 的同步和异步 `Drop` 不再 checkout 连接池或发送 Redis 命令，也不
+  创建 runtime、线程或后台任务；显式同步/异步 `release` 入口是唯一可观察的远端释放主路径。
+  正常退出、panic unwind、取消或 runtime 关闭时，未显式释放的锁最多残留到获取时或
+  最近一次成功续租后的有效 TTL 到期，TTL 上限为 24 小时。这是从旧有同步 `Drop` 最佳
+  努力释放到 TTL 兜底的可见行为变化；依赖隐式释放的调用方应迁移到显式入口。
+- `TimeUtils` 新增五个 `try_timestamp*` `Result` 入口和稳定的
+  `TimeError::BeforeUnixEpoch` 错误分类；系统时钟早于 Unix 纪元时推荐入口返回错误而不
+  panic。原有五个时间戳入口保留返回签名和纪元前 panic 语义，并统一标记为 `deprecated`，
+  调用方应迁移到对应的 `try_` 入口。
 - SQLx 依赖升级到 `0.9.0` 并改用 `sqlite-bundled` feature；这是一次 breaking 迁移。`SqlxClient`/
   `SqlxUtils` 的 query/query_as/query_scalar 入口现在遵循 SQLx 0.9 的 `SqlSafeStr` 约束：静态
   SQL 字面量可直接传入，经过审计的动态 SQL 必须由调用方显式包装 `sqlx::AssertSqlSafe`，用户数据

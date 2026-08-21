@@ -11,9 +11,21 @@ pub struct TimeZoneOffset(i32);
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TimeZoneOffsetError {
     /// 整小时偏移不在 `-23..=23` 内。
-    HoursOutOfRange { hours: i32 },
+    HoursOutOfRange {
+        /// 调用方传入的整小时偏移量，单位为小时；合法范围是 `-23..=23`。
+        ///
+        /// 该值只反映范围分类，不包含其他输入或敏感信息；匹配此错误时可读取它来
+        /// 诊断调用方的小时参数。
+        hours: i32,
+    },
     /// 秒级偏移不在 `-86_399..=86_399` 内。
-    SecondsOutOfRange { seconds: i32 },
+    SecondsOutOfRange {
+        /// 调用方传入的秒级偏移量，单位为秒；合法范围是 `-86_399..=86_399`。
+        ///
+        /// 该值是稳定的数值诊断信息，不是时区名称或其他敏感数据；匹配此错误时可用它
+        /// 判断是否应改用合法的固定偏移。
+        seconds: i32,
+    },
 }
 
 impl TimeZoneOffset {

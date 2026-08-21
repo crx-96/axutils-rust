@@ -180,6 +180,8 @@ assert_eq!(stats.output_bytes, stats.input_bytes);
 
 ### `FsUtils::copy_file_with<P, Q, C>(source, destination, options, processor) -> Result<FsTransferStats, FsTransferError<C::Error>>`
 
+签名：`pub fn copy_file_with<P, Q, C>(source: P, destination: Q, options: FsTransferOptions, processor: C) -> Result<FsTransferStats, FsTransferError<C::Error>>`；默认 feature 即可用，
+同步 I/O 会阻塞当前线程。
 同步入口先校验 options 和词法路径相等，再用 `symlink_metadata` 要求源以及已存在的目标是
 普通文件；缺失目标允许创建，目标会被截断，父目录不会自动创建。它用填充循环处理普通
 文件的短读，用 `write_all` 处理短写并在结束时 flush。源 I/O、目标 I/O、处理器错误、
@@ -187,13 +189,41 @@ assert_eq!(stats.output_bytes, stats.input_bytes);
 和源/目标路径。失败可能已经写入前序块或留下空的截断目标，不提供 atomic replace、回滚、
 canonicalize、硬链接别名检测或抗 TOCTOU 保证。
 
-### `FsAsyncChunkProcessor` 与 `FsUtils::copy_file_with_async`
+```rust,no_run
+use axutils::{FsChunkProcessor, FsTransferOptions, FsUtils};
 
-启用 `tokio` 后，异步处理器通过 GAT 返回借用当前处理器的 future；处理仍是串行的。异步
-入口在首次 poll 时先执行 options/词法路径检查，再要求调用方已有 Tokio runtime；库不创建
-runtime、不调用 `block_on`，也不隐式 `spawn_blocking`。入口返回 owned `'static` future，路径、
-options 和处理器不会借用调用方；future 取消可能留下部分目标内容。异步 I/O 同样不提供
-atomic replace、回滚或抗 TOCTOU 保证。
+struct Identity;
+impl FsChunkProcessor for Identity {
+    type Error = std::convert::Infallible;
+
+    fn process(&mut self, chunk: Vec<u8>) -> Result<Vec<u8>, Self::Error> {
+        Ok(chunk)
+    }
+}
+
+let _stats = FsUtils::copy_file_with(
+    "source.bin",
+    "destination.bin",
+    FsTransferOptions::default(),
+    Identity,
+)?;
+# Ok::<(), axutils::FsTransferError<std::convert::Infallible>>(())
+```
+
+### `FsAsyncChunkProcessor`
+
+启用 `tokio` 后，异步处理器通过 GAT 返回借用当前处理器的 future；处理按源顺序串行，不为每个
+块创建后台任务或 runtime。`process` 的输入块拥有所有权，处理器错误原值由传输错误保留；调用方
+仍需自行控制处理器分配和总资源。
+
+### `FsUtils::copy_file_with_async`
+
+签名：`pub fn copy_file_with_async<P, Q, C>(source: P, destination: Q, options: FsTransferOptions, processor: C) -> impl Future<Output = Result<FsTransferStats, FsTransferError<C::Error>>> + 'static`；
+要求 `tokio` feature、直接依赖并运行 Tokio，以及 `C: FsAsyncChunkProcessor`。首次 poll 先执行
+options/词法路径检查，再要求 runtime；不创建 runtime、不调用 `block_on` 或隐式
+`spawn_blocking`。输入按 `chunk_size` 分块，`max_output_bytes` 和 checked 统计提供有限上限；
+源/目标 I/O、处理器、超限、溢出和 runtime 错误分别返回 `FsTransferError`。取消或失败可能留下
+部分目标内容，不提供 atomic replace、回滚或 TOCTOU 防护。
 
 ```rust,no_run
 # #[cfg(feature = "tokio")]
@@ -267,6 +297,9 @@ fn category(error: &FsTempError) -> &'static str {
 
 ### `FsUtils::with_temp_config(config) -> FsUtilsContext`
 
+签名：`pub fn with_temp_config(config: FsTempConfig) -> FsUtilsContext`；要求启用
+`tempfile` 或 `tempfile-async`。只拥有配置，不访问文件系统或创建对象；无效父目录和命名片段
+由后续创建方法报告。
 该方法只拥有配置，不访问文件系统；`directory` 指定的父目录必须在实际创建时已经存在。
 `FsTempConfig::with_prefix` 和 `with_suffix` 只接受文件名片段，不能包含路径分隔符或 NUL。
 
@@ -285,8 +318,72 @@ fn example() {
 }
 ```
 
+### `FsUtils::create_temp_file`
+
+签名：`pub fn create_temp_file() -> Result<FsTempFile, FsTempError>`；只在 `tempfile` feature
+下提供。使用默认 `FsTempConfig` 创建同步临时文件并访问本地文件系统；创建失败返回
+`FsTempError::Create` 或 `InvalidConfig`，成功后 wrapper 负责清理，Drop 不能回传清理错误。
+
+```rust,no_run
+# #[cfg(feature = "tempfile")]
+fn example() -> Result<(), axutils::FsTempError> {
+    let file = axutils::FsUtils::create_temp_file()?;
+    file.close()?;
+    Ok(())
+}
+```
+
+### `FsUtils::create_temp_dir`
+
+签名：`pub fn create_temp_dir() -> Result<FsTempDir, FsTempError>`；只在 `tempfile` feature
+下提供。使用默认配置创建同步临时目录；创建 I/O 失败返回 `FsTempError::Create`，wrapper
+Drop 或显式 `close` 负责递归清理，不删除系统临时目录本身。
+
+```rust,no_run
+# #[cfg(feature = "tempfile")]
+fn example() -> Result<(), axutils::FsTempError> {
+    let directory = axutils::FsUtils::create_temp_dir()?;
+    directory.close()?;
+    Ok(())
+}
+```
+
+### `FsUtils::create_temp_file_async`
+
+签名：`pub fn create_temp_file_async() -> impl Future<Output = Result<FsAsyncTempFile, FsTempError>> + 'static`；
+只在 `tempfile-async` feature 下提供，并联动本 crate 的 `tokio`。使用默认配置创建异步临时
+文件；首次 poll 无调用方 Tokio runtime 返回 `RuntimeRequired`，创建失败返回 `Create` 或
+`InvalidConfig`。成功后 wrapper 负责清理，取消创建 future 不保证已删除。
+
+```rust,no_run
+# #[cfg(feature = "tempfile-async")]
+async fn example() -> Result<(), axutils::FsTempError> {
+    let file = axutils::FsUtils::create_temp_file_async().await?;
+    file.drop_async().await;
+    Ok(())
+}
+```
+
+### `FsUtils::create_temp_dir_async`
+
+签名：`pub fn create_temp_dir_async() -> impl Future<Output = Result<FsAsyncTempDir, FsTempError>> + 'static`；
+只在 `tempfile-async` feature 下提供并要求调用方 Tokio runtime。首次 poll 无 runtime 返回
+`RuntimeRequired`；创建失败返回 `FsTempError`，成功后 wrapper 负责递归清理，取消不提供已删除
+保证。
+
+```rust,no_run
+# #[cfg(feature = "tempfile-async")]
+async fn example() -> Result<(), axutils::FsTempError> {
+    let directory = axutils::FsUtils::create_temp_dir_async().await?;
+    directory.drop_async().await;
+    Ok(())
+}
+```
+
 ### `FsUtilsContext::config()`
 
+签名：`pub fn config(&self) -> &FsTempConfig`；要求启用任一临时 feature。同步返回 context
+持有的配置借用，不访问文件系统、不返回错误，也不提供修改其他 context 或进程级默认目录的入口。
 `config()` 返回 context 自身配置的只读引用，不提供修改其他 context 或进程级默认目录的
 入口。若要变更配置，应创建另一个 context。
 
@@ -300,53 +397,92 @@ fn example() {
 }
 ```
 
-### `FsTempConfig::new`、`with_directory`、`with_prefix`、`with_suffix`
+### `FsTempConfig::new`
 
-这些 builder 只保存拥有型配置，均可链式调用；创建方法才会校验父目录和 prefix/suffix。
-配置父目录不会被自动创建：
+签名：`pub fn new() -> FsTempConfig`；要求 `tempfile` 或 `tempfile-async` feature。创建使用
+后端系统临时目录和默认命名规则的拥有型配置，不访问文件系统、不返回错误；父目录和命名片段
+只在后续创建方法中校验。
 
-```rust,no_run
+```rust
 # #[cfg(any(feature = "tempfile", feature = "tempfile-async"))]
 fn example() {
-    use axutils::FsTempConfig;
+    let config = axutils::FsTempConfig::new();
+    assert!(config.directory.is_none());
+}
+```
 
-    let config = FsTempConfig::new()
-        .with_directory("existing-temp-parent")
-        .with_prefix("upload-")
-        .with_suffix(".tmp");
+### `FsTempConfig::with_directory`
+
+签名：`pub fn with_directory<P: Into<PathBuf>>(self, directory: P) -> FsTempConfig`；要求任一
+临时 feature。只保存拥有型父目录路径，不检查或创建目录，也不返回错误；目录不存在会在创建
+临时对象时返回 `FsTempError::Create`。
+
+```rust
+# #[cfg(any(feature = "tempfile", feature = "tempfile-async"))]
+fn example() {
+    let config = axutils::FsTempConfig::new().with_directory("existing-temp-parent");
+    assert_eq!(config.directory.as_deref().and_then(|p| p.to_str()), Some("existing-temp-parent"));
+}
+```
+
+### `FsTempConfig::with_prefix`
+
+签名：`pub fn with_prefix<S: Into<String>>(self, prefix: S) -> FsTempConfig`；要求任一临时
+feature。保存文件名片段，不在 builder 阶段校验；创建时若含 `/`、`\\` 或 NUL 返回
+`FsTempError::InvalidConfig { field: "prefix" }`，不产生 I/O 副作用。
+
+```rust
+# #[cfg(any(feature = "tempfile", feature = "tempfile-async"))]
+fn example() {
+    let config = axutils::FsTempConfig::new().with_prefix("upload-");
+    assert_eq!(config.prefix.as_deref(), Some("upload-"));
+}
+```
+
+### `FsTempConfig::with_suffix`
+
+签名：`pub fn with_suffix<S: Into<String>>(self, suffix: S) -> FsTempConfig`；要求任一临时
+feature。保存文件名片段，不在 builder 阶段校验；创建时若含 `/`、`\\` 或 NUL 返回
+`FsTempError::InvalidConfig { field: "suffix" }`。
+
+```rust
+# #[cfg(any(feature = "tempfile", feature = "tempfile-async"))]
+fn example() {
+    let config = axutils::FsTempConfig::new().with_suffix(".tmp");
     assert_eq!(config.suffix.as_deref(), Some(".tmp"));
 }
 ```
 
-无效片段在创建时返回 `FsTempError::InvalidConfig`，例如
-`with_prefix("not/a-name")`；缺失父目录返回 `FsTempError::Create`，不会留下隐式创建的
-父目录。
+### `FsUtilsContext::create_temp_file`
 
-### `FsUtilsContext::create_temp_file()` 与 `create_temp_dir()`
-
-这两个同步方法只在 `tempfile` feature 下提供，返回拥有清理责任的 wrapper，而不是只返回
-可能立即失效的 `PathBuf`。文件可通过 `as_file`/`as_file_mut` 使用标准库句柄；文件和目录
-都可以通过 `close` 显式关闭并观察删除错误：
+签名：`pub fn create_temp_file(&self) -> Result<FsTempFile, FsTempError>`；只在 `tempfile`
+feature 下提供。按 context 配置创建同步命名临时文件并访问本地文件系统；父目录缺失或命名
+片段非法分别返回 `Create` 或 `InvalidConfig`。wrapper 持有句柄和清理责任，创建失败不返回
+对象；显式 `close` 才能观察删除错误，Drop 只能尽力清理。
 
 ```rust,no_run
 # #[cfg(feature = "tempfile")]
-fn example() -> Result<(), Box<dyn std::error::Error>> {
-    use std::io::Write;
-    use axutils::{FsTempConfig, FsUtils};
-
-    let context = FsUtils::with_temp_config(
-        FsTempConfig::new().with_directory("existing-temp-parent"),
-    );
-    let mut file = context.create_temp_file()?;
-    file.as_file_mut().write_all(b"temporary")?;
-    let file_path = file.path().to_path_buf();
+fn example() -> Result<(), axutils::FsTempError> {
+    let context = axutils::FsUtils::with_temp_config(axutils::FsTempConfig::new());
+    let file = context.create_temp_file()?;
     file.close()?;
-    assert!(!file_path.exists());
+    Ok(())
+}
+```
 
+### `FsUtilsContext::create_temp_dir`
+
+签名：`pub fn create_temp_dir(&self) -> Result<FsTempDir, FsTempError>`；只在 `tempfile`
+feature 下提供。创建同步临时目录并返回拥有型 wrapper；父目录或命名配置失败返回
+`FsTempError`，目录及其内容的清理由 wrapper 负责。创建会进行本地文件系统 I/O，不自动创建
+配置中的父目录。
+
+```rust,no_run
+# #[cfg(feature = "tempfile")]
+fn example() -> Result<(), axutils::FsTempError> {
+    let context = axutils::FsUtils::with_temp_config(axutils::FsTempConfig::new());
     let directory = context.create_temp_dir()?;
-    let directory_path = directory.path().to_path_buf();
     directory.close()?;
-    assert!(!directory_path.exists());
     Ok(())
 }
 ```
@@ -375,9 +511,11 @@ fn example() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
-#### `FsTempFile::path()`
+### `FsTempFile::path`
 
-返回临时文件当前路径；路径只在 wrapper 仍存活时使用，`close` 或 Drop 后不再属于调用方。
+签名：`pub fn path(&self) -> &Path`；只在 `tempfile` feature 下提供。返回临时文件当前路径的
+借用；路径只在 wrapper 仍存活时使用，`close` 或 Drop 后不再属于调用方。本方法不访问文件系统、
+不返回错误，也不改变清理状态。
 
 ```rust,no_run
 # #[cfg(feature = "tempfile")]
@@ -389,41 +527,79 @@ fn example() -> Result<(), axutils::FsTempError> {
 }
 ```
 
-#### `FsTempFile::as_file()` 与 `as_file_mut()`
+### `FsTempFile::as_file`
 
-这两个方法只借用 wrapper 内部的 `std::fs::File`；可变句柄适合写入临时文件，句柄不会从
-wrapper 中脱离：
+签名：`pub fn as_file(&self) -> &std::fs::File`；只在 `tempfile` feature 下提供。借用 wrapper
+内部的只读文件句柄，不转移所有权，不访问额外路径或返回 axutils 错误；标准库句柄操作可能
+阻塞并返回 `std::io::Error`。
+
+```rust,no_run
+# #[cfg(feature = "tempfile")]
+fn example() -> Result<(), Box<dyn std::error::Error>> {
+    let mut file = axutils::FsUtils::create_temp_file()?;
+    let _metadata = file.as_file().metadata()?;
+    file.close()?;
+    Ok(())
+}
+```
+
+### `FsTempFile::as_file_mut`
+
+签名：`pub fn as_file_mut(&mut self) -> &mut std::fs::File`；只在 `tempfile` feature 下提供。
+借用可变标准库句柄，调用方负责 `std::io` 错误和可能的阻塞；句柄不会从 wrapper 中脱离，
+临时文件仍由 wrapper 拥有。
 
 ```rust,no_run
 # #[cfg(feature = "tempfile")]
 fn example() -> Result<(), Box<dyn std::error::Error>> {
     use std::io::Write;
-
     let mut file = axutils::FsUtils::create_temp_file()?;
-    let _metadata = file.as_file().metadata()?;
     file.as_file_mut().write_all(b"temporary")?;
     file.close()?;
     Ok(())
 }
 ```
 
-#### `FsTempFile::close()`
+### `FsTempFile::close`
 
-`close(self)` 会先关闭文件句柄，再删除临时文件；删除失败返回 `FsTempError::Close`。
-不调用 `close` 时，Drop 仍会尽力自动清理，但无法把错误返回给调用方。
+签名：`pub fn close(self) -> Result<(), FsTempError>`；只在 `tempfile` feature 下提供。先关闭
+句柄再删除临时文件；删除失败返回 `FsTempError::Close`。操作可能阻塞当前线程；不调用时由
+Drop 尽力清理，但错误无法返回。
 
-#### `FsTempDir::path()` 与 `FsTempDir::close()`
+```rust,no_run
+# #[cfg(feature = "tempfile")]
+fn example() -> Result<(), axutils::FsTempError> {
+    let file = axutils::FsUtils::create_temp_file()?;
+    file.close()
+}
+```
 
-目录 wrapper 的 `path()` 用于在目录存活期间创建或处理内容，`close()` 会递归删除临时目录
-及其内容，但不会删除配置中的父目录：
+### `FsTempDir::path`
+
+签名：`pub fn path(&self) -> &Path`；只在 `tempfile` feature 下提供。返回目录路径借用，不访问
+文件系统、不返回错误；路径只在 wrapper 存活期间有效。`close` 或 Drop 后不得继续使用该路径。
 
 ```rust,no_run
 # #[cfg(feature = "tempfile")]
 fn example() -> Result<(), axutils::FsTempError> {
     let directory = axutils::FsUtils::create_temp_dir()?;
-    let path = directory.path().to_path_buf();
+    let _path = directory.path().to_path_buf();
     directory.close()?;
-    assert!(!path.exists());
+    Ok(())
+}
+```
+
+### `FsTempDir::close`
+
+签名：`pub fn close(self) -> Result<(), FsTempError>`；只在 `tempfile` feature 下提供。递归删除
+临时目录及其内容但不删除配置中的父目录；失败返回 `FsTempError::Close`，调用可能阻塞当前
+线程。Drop 仍会尽力清理但不回传错误。
+
+```rust,no_run
+# #[cfg(feature = "tempfile")]
+fn example() -> Result<(), axutils::FsTempError> {
+    let directory = axutils::FsUtils::create_temp_dir()?;
+    directory.close()?;
     Ok(())
 }
 ```
@@ -473,49 +649,89 @@ Drop、取消或 panic 后备仍可能在 runtime worker 上执行同步删除�
 `FsTempError::RuntimeRequired`；取消创建或清理 future 时仍应按 RAII 后备清理语义处理，
 不能把取消当作成功删除保证。
 
-#### `FsUtilsContext::create_temp_file_async()` 与 `create_temp_dir_async()`
+### `FsUtilsContext::create_temp_file_async`
 
-这两个方法只在 `tempfile-async` feature 下提供，返回 axutils 自有的拥有型 wrapper；异步
-调用方必须直接依赖并保持 Tokio runtime：
+签名：`pub fn create_temp_file_async(&self) -> impl Future<Output = Result<FsAsyncTempFile, FsTempError>> + 'static`；
+只在 `tempfile-async` feature 下提供，并联动本 crate 的 `tokio`。路径和配置在返回 future 前被
+拥有化，首次 poll 需要调用方直接依赖并保持 Tokio runtime；无 runtime 返回 `RuntimeRequired`，
+父目录或命名配置错误返回 `Create`/`InvalidConfig`。创建会访问本地文件系统，不创建 runtime。
 
 ```rust,no_run
 # #[cfg(feature = "tempfile-async")]
 async fn example() -> Result<(), axutils::FsTempError> {
-    use axutils::{FsTempConfig, FsUtils};
-
-    let context = FsUtils::with_temp_config(FsTempConfig::new().with_prefix("job-"));
+    let context = axutils::FsUtils::with_temp_config(axutils::FsTempConfig::new());
     let file = context.create_temp_file_async().await?;
     file.drop_async().await;
+    Ok(())
+}
+```
 
+### `FsUtilsContext::create_temp_dir_async`
+
+签名：`pub fn create_temp_dir_async(&self) -> impl Future<Output = Result<FsAsyncTempDir, FsTempError>> + 'static`；
+只在 `tempfile-async` feature 下提供并要求调用方 Tokio runtime。首次 poll 无 runtime 返回
+`RuntimeRequired`，父目录/命名失败返回 `FsTempError`；成功后 wrapper 负责递归清理，取消
+future 不保证已经删除。
+
+```rust,no_run
+# #[cfg(feature = "tempfile-async")]
+async fn example() -> Result<(), axutils::FsTempError> {
+    let context = axutils::FsUtils::with_temp_config(axutils::FsTempConfig::new());
     let directory = context.create_temp_dir_async().await?;
     directory.drop_async().await;
     Ok(())
 }
 ```
 
-#### `FsAsyncTempFile::path()`、`drop_async()` 与 `close()`
+### `FsAsyncTempFile::path`
 
-`path()` 只借用当前路径；`drop_async()` 返回 `()`，因为后端异步清理不返回删除错误；
-`close()` 返回 `FsTempError::Close`，但会同步阻塞当前线程，不能把它当成异步方法：
+签名：`pub fn path(&self) -> &Path`；只在 `tempfile-async` feature 下提供。只借用当前路径，
+不访问文件系统、不返回错误；路径只在 wrapper 存活时有效，清理后不得继续使用。
 
 ```rust,no_run
 # #[cfg(feature = "tempfile-async")]
 async fn example() -> Result<(), axutils::FsTempError> {
     let file = axutils::FsUtils::create_temp_file_async().await?;
     let _path = file.path().to_path_buf();
-    file.close()?;
+    file.drop_async().await;
+    Ok(())
+}
+```
 
+### `FsAsyncTempFile::drop_async`
+
+签名：`pub async fn drop_async(self)`；只在 `tempfile-async` feature 下提供，要求调用方 Tokio
+runtime。后端异步删除不返回删除错误，因此返回 `()`；取消或 panic 会走后端同步 Drop 后备，
+可能在 runtime worker 上执行同步文件系统调用，不能把取消视为清理成功。
+
+```rust,no_run
+# #[cfg(feature = "tempfile-async")]
+async fn example() -> Result<(), axutils::FsTempError> {
     let file = axutils::FsUtils::create_temp_file_async().await?;
     file.drop_async().await;
     Ok(())
 }
 ```
 
-#### `FsAsyncTempDir::path()`、`drop_async()` 与 `close()`
+### `FsAsyncTempFile::close`
 
-异步目录 wrapper 的 `drop_async()` 会异步递归删除目录及内容；`close()` 仍是可能阻塞的
-同步错误报告入口。取消 `drop_async()` 后不保证目录已经删除，也不保证后备同步删除不会
-在 runtime worker 上执行：
+签名：`pub fn close(self) -> Result<(), FsTempError>`；只在 `tempfile-async` feature 下提供。
+同步关闭并删除文件，失败返回 `FsTempError::Close`；可能阻塞当前线程，异步上下文优先使用
+`drop_async`。
+
+```rust,no_run
+# #[cfg(feature = "tempfile-async")]
+async fn example() -> Result<(), axutils::FsTempError> {
+    let file = axutils::FsUtils::create_temp_file_async().await?;
+    file.close()?;
+    Ok(())
+}
+```
+
+### `FsAsyncTempDir::path`
+
+签名：`pub fn path(&self) -> &Path`；只在 `tempfile-async` feature 下提供。借用目录路径，不
+访问文件系统、不返回错误；路径只在 wrapper 存活期间有效。
 
 ```rust,no_run
 # #[cfg(feature = "tempfile-async")]
@@ -523,6 +739,36 @@ async fn example() -> Result<(), axutils::FsTempError> {
     let directory = axutils::FsUtils::create_temp_dir_async().await?;
     let _path = directory.path().to_path_buf();
     directory.drop_async().await;
+    Ok(())
+}
+```
+
+### `FsAsyncTempDir::drop_async`
+
+签名：`pub async fn drop_async(self)`；只在 `tempfile-async` feature 下提供，要求调用方 Tokio
+runtime。正常完成时异步递归删除，返回 `()`；取消或 panic 使用可能阻塞 worker 的同步 Drop
+后备，不能宣称已清理。
+
+```rust,no_run
+# #[cfg(feature = "tempfile-async")]
+async fn example() -> Result<(), axutils::FsTempError> {
+    let directory = axutils::FsUtils::create_temp_dir_async().await?;
+    directory.drop_async().await;
+    Ok(())
+}
+```
+
+### `FsAsyncTempDir::close`
+
+签名：`pub fn close(self) -> Result<(), FsTempError>`；只在 `tempfile-async` feature 下提供。
+同步递归关闭并删除目录，失败返回 `FsTempError::Close`，可能阻塞当前线程；异步上下文优先
+使用 `drop_async`。
+
+```rust,no_run
+# #[cfg(feature = "tempfile-async")]
+async fn example() -> Result<(), axutils::FsTempError> {
+    let directory = axutils::FsUtils::create_temp_dir_async().await?;
+    directory.close()?;
     Ok(())
 }
 ```

@@ -41,12 +41,21 @@ pub mod path_utils;
 pub mod time_utils;
 
 #[cfg(feature = "lettre")]
+/// SMTP 邮件工具模块。
+///
+/// 仅在 `lettre` feature 下公开；异步发送入口还需要 `tokio` feature，并由调用方提供
+/// Tokio runtime。模块中的配置和错误只应按固定字段分类处理，不把密码或其他凭据写入日志。
 pub mod email_utils;
 
 #[cfg(feature = "serde")]
 pub mod config_utils;
 
 #[cfg(feature = "jwt")]
+/// JWT 编解码和一次初始化的全局工具模块。
+///
+/// 仅在 `jwt` feature 下公开；全局入口成功初始化后不可替换。错误值提供固定字段、分类和
+/// 长度等脱敏元数据，不包含 token、claims 或 key 内容，调用方应按公开变体匹配并保留
+/// wildcard 分支。
 pub mod jwt_utils;
 
 #[cfg(feature = "http")]

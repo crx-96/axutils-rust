@@ -26,12 +26,17 @@ feature。SQLx 0.9.0 的驱动依赖会在内部依赖树中带出 `sqlx-core` �
 所有连接、执行、读取、事务、初始化和关闭操作都要求调用方已经在 Tokio runtime 中运行。
 crate 不创建 runtime、不调用 `block_on`，也不把 runtime 的所有权藏在 client 中。
 
+本 crate 的普通 SQLx 运行测试以离线的 `sqlite::memory:` 为唯一成功数据库场景（其他后端只做
+配置解析或失败路径检查）；它们不能证明 PostgreSQL 或
+MySQL/MariaDB 的 placeholder 规则、行解码差异或连接错误映射。无网络 fixture 只证明对象构造、
+公共 API 和 feature/依赖边界。本轮不运行远端数据库；若要验证 PG/MySQL 的运行时语义，必须另行
+获得授权，在受控服务和显式 ignored live test 环境中执行，不能把本文件的 SQLite 结果表述为跨后端
+运行时保证。
+
 ## URL、连接池和本地配置
 
-### `SqlxConfig`
-
-`SqlxConfig` 是可 clone 的本地配置。`new` 只解析 URL、检查 scheme、识别显式 TLS 要求并设置
-默认边界，不做网络连接、不安装 Any driver、不创建 pool。支持的 scheme 是：
+`SqlxConfig` 是可 clone 的本地配置。以下每个 builder 都要求 `sqlx + tokio` feature；它们只做
+本地校验，不连接数据库、不安装 Any driver、不创建 pool。支持的 scheme 是：
 
 - PostgreSQL：`postgres://`、`postgresql://`；
 - MySQL/MariaDB：`mysql://`、`mariadb://`；
@@ -42,48 +47,70 @@ crate 不创建 runtime、不调用 `block_on`，也不把 runtime 的所有权�
 会返回 `SqlxError::InvalidConfig { field: "tls" }`；没有显式 TLS 参数但远端 driver 后续要求
 TLS 时，连接错误仍会被映射为稳定的脱敏错误，不能把这类 URL 宣称为已支持 TLS。
 
+### `SqlxConfig::new`
+
+签名：`pub fn new(url: impl AsRef<str>) -> Result<SqlxConfig, SqlxError>`；要求 `sqlx + tokio` feature。
+解析 PostgreSQL、MySQL/MariaDB 或 SQLite URL，拒绝未知 scheme 和本地可识别的显式 TLS 要求，
+分别返回 `InvalidConfig { field: "url_scheme" }`、`InvalidConfig { field: "tls" }` 或 URL
+解析错误。普通 URL 的 `max_connections` 默认为 `10`，SQLite memory URL 默认为 `1`；其他默认值
+是 `min_connections = 0`、获取连接超时 30 秒、`max_rows = 1_024`。不访问网络、不创建 pool，
+`Debug` 不打印 URL 或凭据。
+
 ```rust
-fn build_config() -> Result<axutils::SqlxConfig, axutils::SqlxError> {
-    axutils::SqlxConfig::new("sqlite::memory:")?
-        .with_max_connections(1)?
-        .with_min_connections(0)?
-        .with_acquire_timeout(std::time::Duration::from_secs(5))?
-        .with_max_rows(512)
+fn example() -> Result<axutils::SqlxConfig, axutils::SqlxError> {
+    axutils::SqlxConfig::new("sqlite::memory:")
 }
 ```
 
-`SqlxConfig::new(url)`
+### `SqlxConfig::with_max_connections`
 
-- 返回 `Result<SqlxConfig, SqlxError>`；URL 语法、scheme 或本地可识别的 TLS 要求无效时返回
-  `InvalidConfig`；
-- 普通数据库 URL 的 `max_connections` 默认是 `10`，SQLite 内存 URL 默认是 `1`；
-- `min_connections` 默认是 `0`；
-- `acquire_timeout` 默认是 30 秒；
-- `max_rows` 默认是 `1_024`；
-- 不提供 URL getter；`Debug` 不打印 URL、用户名、密码、查询参数或其他凭据。
+签名：`pub fn with_max_connections(self, max_connections: u32) -> Result<Self, SqlxError>`；要求 `sqlx + tokio` feature。
+允许 `1..=100`；SQLite memory URL 只能为 `1`，且不能小于已设置的 `min_connections`。无效值
+返回 `InvalidConfig`，不访问网络或文件。
 
-`SqlxConfig::with_max_connections(max_connections)`
+```rust
+fn example() -> Result<axutils::SqlxConfig, axutils::SqlxError> {
+    axutils::SqlxConfig::new("sqlite::memory:")?.with_max_connections(1)
+}
+```
 
-允许 `1..=100`。SQLite 内存 URL 只能使用 `1`，因为每条独立连接可能拥有不同的内存数据库。
-`0`、超过 100、超过内存 SQLite 的 1，或小于当前 `min_connections` 的值都会返回
-`InvalidConfig`。普通 SQLite 文件 URL 可以使用多连接，但文件创建/修改和并发语义由 SQLite
-及调用方负责。
+### `SqlxConfig::with_min_connections`
 
-`SqlxConfig::with_min_connections(min_connections)`
+签名：`pub fn with_min_connections(self, min_connections: u32) -> Result<Self, SqlxError>`；要求 `sqlx + tokio` feature。
+允许 `0..=max_connections`；大于 0 的值可能在后续 `connect` 阶段预先建立多个连接并产生网络、
+认证或数据库资源副作用，但 builder 本身不连接。超过上限返回 `InvalidConfig`。
 
-允许 `0..=max_connections`。设置大于 0 的值可能在连接阶段预先建立多个连接，产生网络、认证
-和数据库资源副作用；配置 builder 本身仍不连接数据库。
+```rust
+fn example() -> Result<axutils::SqlxConfig, axutils::SqlxError> {
+    axutils::SqlxConfig::new("sqlite::memory:")?.with_min_connections(0)
+}
+```
 
-`SqlxConfig::with_acquire_timeout(acquire_timeout)`
+### `SqlxConfig::with_acquire_timeout`
 
-允许 `1ms..=5min`，拒绝零值、超长值和无限等待。该值限制 pool 获取连接的等待预算，不替代
-数据库 server 的 statement timeout。
+签名：`pub fn with_acquire_timeout(self, acquire_timeout: Duration) -> Result<Self, SqlxError>`；要求 `sqlx + tokio` feature。
+允许 `1ms..=5min`，拒绝零值、超长值和无限等待，错误为 `InvalidConfig`。它只限制 pool 获取
+连接的等待预算，不替代数据库 server 的 statement timeout，也不在 builder 阶段等待。
 
-`SqlxConfig::with_max_rows(max_rows)`
+```rust
+fn example() -> Result<axutils::SqlxConfig, axutils::SqlxError> {
+    axutils::SqlxConfig::new("sqlite::memory:")?
+        .with_acquire_timeout(std::time::Duration::from_secs(5))
+}
+```
 
-允许 `1..=100_000`，只限制 `fetch_all_async`/`fetch_all_as_async` 的结果行数，不限制单行
-字段大小，也不改变单行/可选行/标量入口。每个 builder 都返回 `Result<Self, SqlxError>`，
-因此单字段和跨字段约束会在 builder 阶段失败，而不是延迟到连接之后。
+### `SqlxConfig::with_max_rows`
+
+签名：`pub fn with_max_rows(self, max_rows: usize) -> Result<Self, SqlxError>`；要求 `sqlx + tokio` feature。
+允许 `1..=100_000`，错误为 `InvalidConfig`。该上限只约束 `fetch_all_async` 和
+`fetch_all_as_async` 的结果行数，不限制单行字段大小，也不改变单行、可选行或标量入口；设置
+只发生在内存中。
+
+```rust
+fn example() -> Result<axutils::SqlxConfig, axutils::SqlxError> {
+    axutils::SqlxConfig::new("sqlite::memory:")?.with_max_rows(512)
+}
+```
 
 ## `SqlxError` 与稳定错误分类
 
@@ -111,6 +138,8 @@ fn build_config() -> Result<axutils::SqlxConfig, axutils::SqlxError> {
 
 ### `SqlxClient::connect`
 
+签名：`pub async fn connect(config: SqlxConfig) -> Result<SqlxClient, SqlxError>`；要求
+`sqlx + tokio` 和调用方 Tokio runtime。
 `connect(config).await` 的顺序是：检查当前 Tokio runtime、再次校验本地配置、通过 SQLx 一次
 性默认注册器安装已编译的 Any drivers、建立 `AnyPool` 并返回 client。它可能访问 PostgreSQL/
 MySQL/MariaDB 网络，或创建/修改 SQLite 文件；配置构造阶段没有这些副作用。
@@ -129,20 +158,39 @@ async fn connect() -> Result<(), axutils::SqlxError> {
 }
 ```
 
-### 查询构造：`query`、`query_as`、`query_scalar`
+### `SqlxClient::query`
 
-`SqlxClient::query(sql)`、`SqlxClient::query_as::<T>(sql)` 和
-`SqlxClient::query_scalar::<T>(sql)` 只调用 SQLx 对应构造函数并固定 `Any` 后端，不访问 pool、
-不执行 SQL。返回对象保留 SQLx 的 `.bind(...)`、`.persistent(...)` 和其他链式 API。
-
-`query_as` 的 `T` 需要 `FromRow`；`query_scalar` 读取每行第一列为 `T`。参数必须通过
-`.bind(...)` 传入；SQL 片段和标识符不能把不可信输入直接拼接进 SQL。PostgreSQL/MySQL/
-SQLite 的占位符仍按实际 driver 和 SQLx 规则书写。
+签名：`pub fn query<'q>(&self, sql: impl sqlx::SqlSafeStr) -> sqlx::query::Query<'q, sqlx::Any, sqlx::any::AnyArguments>`；
+要求 `sqlx + tokio` feature。只构造固定 `Any` 后端的 query，不访问 pool、不执行 SQL，输出保留
+`.bind(...)`、`.persistent(...)` 等 SQLx 链式 API。SQLx 0.9 默认只接受静态 SQL；动态片段必须
+由调用方审计后包装 `sqlx::AssertSqlSafe`，不能把不可信标识符拼接进 SQL。
 
 ```rust
-fn make_queries(client: &axutils::SqlxClient) {
+fn example(client: &axutils::SqlxClient) {
     let _query = client.query("SELECT id FROM users WHERE id = ?").bind(1_i64);
+}
+```
+
+### `SqlxClient::query_as`
+
+签名：`pub fn query_as<'q, T>(&self, sql: impl sqlx::SqlSafeStr) -> sqlx::query::QueryAs<'q, sqlx::Any, T, sqlx::any::AnyArguments>`，
+其中 `T: for<'r> sqlx::FromRow<'r, axutils::SqlxRow>`；要求 `sqlx + tokio` feature。只构造 query，不访问
+pool，类型解码错误延迟到执行方法并映射为 `SqlxError`；值仍应使用 `.bind(...)`。
+
+```rust
+fn example(client: &axutils::SqlxClient) {
     let _mapped = client.query_as::<(i64,)>("SELECT id FROM users");
+}
+```
+
+### `SqlxClient::query_scalar`
+
+签名：`pub fn query_scalar<'q, T>(&self, sql: impl sqlx::SqlSafeStr) -> sqlx::query::QueryScalar<'q, sqlx::Any, T, sqlx::any::AnyArguments>`，
+其中 `(T,): for<'r> sqlx::FromRow<'r, axutils::SqlxRow>`；要求 `sqlx + tokio` feature。只构造读取第一列
+的 query，不执行 SQL；`Decode`/`Type` 兼容性和无行错误由执行方法报告。
+
+```rust
+fn example(client: &axutils::SqlxClient) {
     let _scalar = client.query_scalar::<i64>("SELECT COUNT(*) FROM users");
 }
 ```
@@ -158,8 +206,10 @@ fn build_dynamic_query() {
 }
 ```
 
-### `execute_async`
+### `SqlxClient::execute_async`
 
+签名：`pub async fn execute_async<'q>(&self, query: Query<'q, Any, sqlx::any::AnyArguments>) -> Result<SqlxQueryResult, SqlxError>`；
+要求 `sqlx + tokio` feature 和调用方 Tokio runtime。
 `execute_async(query).await` 接受固定为 `Any` 的 SQLx `Query`，包括
 `QueryBuilder::build()` 的结果，返回 `SqlxQueryResult`。它要求 runtime，并把 SQLx 错误映射为
 脱敏的 `SqlxError`；不会把 SQL 文本或数据库响应放进错误。
@@ -173,14 +223,29 @@ async fn create_table(client: &axutils::SqlxClient) -> Result<(), axutils::SqlxE
 }
 ```
 
-### 单行读取：`fetch_one_async`、`fetch_one_as_async`
+### `SqlxClient::fetch_one_async`
 
-`fetch_one_async(query).await` 返回原生 `SqlxRow`；`fetch_one_as_async::<T>(query).await` 返回
-映射后的 `T`。两者在没有行时都返回 `SqlxError::RowNotFound`，映射类型需要满足 SQLx 的
-`FromRow`、`Send` 和 `Unpin` 约束。
+签名：`pub async fn fetch_one_async<'q>(&self, query: Query<'q, Any, sqlx::any::AnyArguments>) -> Result<SqlxRow, SqlxError>`；
+要求 `sqlx + tokio` feature 和调用方 Tokio runtime。执行一个 query 并返回原生 `SqlxRow`；没有行返回
+`RowNotFound`，连接、解码或 server 失败返回脱敏的稳定 `SqlxError` 分类。一次只保留一行结果，
+不改变 pool 的配置行上限。
 
 ```rust,no_run
-async fn read_one(client: &axutils::SqlxClient) -> Result<(i64, String), axutils::SqlxError> {
+async fn example(client: &axutils::SqlxClient) -> Result<axutils::SqlxRow, axutils::SqlxError> {
+    client.fetch_one_async(client.query("SELECT id FROM items WHERE id = ?").bind(1_i64)).await
+}
+```
+
+### `SqlxClient::fetch_one_as_async`
+
+签名：`pub async fn fetch_one_as_async<'q, T>(&self, query: QueryAs<'q, Any, T, sqlx::any::AnyArguments>) -> Result<T, SqlxError>`；
+`T` 需要 `FromRow + Send + Unpin`。要求 `sqlx + tokio` feature 和 runtime；没有行返回 `RowNotFound`，
+类型解码、连接和 server 失败映射为脱敏 `SqlxError`。结果只有一个 `T`，不受多行上限影响。
+
+```rust,no_run
+async fn example(
+    client: &axutils::SqlxClient,
+) -> Result<(i64, String), axutils::SqlxError> {
     client
         .fetch_one_as_async(
             client
@@ -191,13 +256,30 @@ async fn read_one(client: &axutils::SqlxClient) -> Result<(i64, String), axutils
 }
 ```
 
-### 可选单行：`fetch_optional_async`、`fetch_optional_as_async`
+### `SqlxClient::fetch_optional_async`
 
-这两个入口分别返回 `Option<SqlxRow>` 和 `Option<T>`；没有行是 `Ok(None)`，不会转换成
-`RowNotFound`。SQLx 解码、类型不兼容和 server 错误仍按 `SqlxError` 的稳定分类返回。
+签名：`pub async fn fetch_optional_async<'q>(&self, query: Query<'q, Any, sqlx::any::AnyArguments>) -> Result<Option<SqlxRow>, SqlxError>`；
+要求 `sqlx + tokio` feature 和 runtime。没有行返回 `Ok(None)`，不会转换成 `RowNotFound`；SQLx 解码、
+连接和 server 错误仍按稳定分类返回。最多保留一行结果。
 
 ```rust,no_run
-async fn find_optional(
+async fn example(
+    client: &axutils::SqlxClient,
+) -> Result<Option<axutils::SqlxRow>, axutils::SqlxError> {
+    client
+        .fetch_optional_async(client.query("SELECT id FROM items WHERE id = ?").bind(999_i64))
+        .await
+}
+```
+
+### `SqlxClient::fetch_optional_as_async`
+
+签名：`pub async fn fetch_optional_as_async<'q, T>(&self, query: QueryAs<'q, Any, T, sqlx::any::AnyArguments>) -> Result<Option<T>, SqlxError>`；
+`T` 需要 `FromRow + Send + Unpin`。要求 `sqlx + tokio` feature 和 runtime；无行是 `Ok(None)`，类型、连接
+和 server 错误映射为脱敏 `SqlxError`。最多保留一行结果。
+
+```rust,no_run
+async fn example(
     client: &axutils::SqlxClient,
 ) -> Result<Option<(i64,)>, axutils::SqlxError> {
     client
@@ -208,21 +290,33 @@ async fn find_optional(
 }
 ```
 
-### 有界多行：`fetch_all_async`、`fetch_all_as_async`
+### `SqlxClient::fetch_all_async`
 
-`fetch_all_async(query).await` 返回 `Vec<SqlxRow>`；`fetch_all_as_async::<T>(query).await` 返回
-`Vec<T>`。两者都不调用 SQLx 无界的 `fetch_all`，而是逐行消费 stream：
-
-1. 最多读取 `max_rows + 1` 行；
-2. 0 行和刚好 `max_rows` 行返回成功；
-3. 读取到第 `max_rows + 1` 行时立即返回 `RowLimitExceeded { limit: max_rows }`；
-4. 超限后停止 stream，使连接回到 pool；stream 中先发生 SQLx 错误时返回对应脱敏错误。
-
-实现对 `max_rows + 1` 使用 checked addition；当前配置范围使其始终有界。该上限只限制行数，
-不限制单行字段大小，因此调用方仍应对 BLOB/TEXT 等字段设置业务级约束或分页。
+签名：`pub async fn fetch_all_async<'q>(&self, query: Query<'q, Any, sqlx::any::AnyArguments>) -> Result<Vec<SqlxRow>, SqlxError>`；
+要求 `sqlx + tokio` feature 和 runtime。逐行消费 query，最多读取 `max_rows + 1` 行；0 行或刚好达到
+`max_rows` 成功，读到第 `max_rows + 1` 行立即返回 `RowLimitExceeded { limit: max_rows }`，并停止
+stream 使连接回 pool。stream 先发生的 SQLx 错误按脱敏稳定分类返回。上限只约束行数，不约束单行
+字段大小，调用方仍需限制 BLOB/TEXT 和分页。
 
 ```rust,no_run
-async fn list_items(
+async fn example(
+    client: &axutils::SqlxClient,
+) -> Result<Vec<axutils::SqlxRow>, axutils::SqlxError> {
+    client
+        .fetch_all_async(client.query("SELECT id FROM items ORDER BY id"))
+        .await
+}
+```
+
+### `SqlxClient::fetch_all_as_async`
+
+签名：`pub async fn fetch_all_as_async<'q, T>(&self, query: QueryAs<'q, Any, T, sqlx::any::AnyArguments>) -> Result<Vec<T>, SqlxError>`；
+`T` 需要 `FromRow + Send + Unpin`。要求 `sqlx + tokio` feature 和 runtime；使用同样的逐行消费和
+`max_rows + 1` 上限，超限返回 `RowLimitExceeded`，解码/连接/server 失败映射为脱敏
+`SqlxError`。上限不约束单个字段大小。
+
+```rust,no_run
+async fn example(
     client: &axutils::SqlxClient,
 ) -> Result<Vec<(i64, String)>, axutils::SqlxError> {
     client
@@ -233,8 +327,10 @@ async fn list_items(
 }
 ```
 
-### `fetch_scalar_async`
+### `SqlxClient::fetch_scalar_async`
 
+签名：`pub async fn fetch_scalar_async<'q, T>(&self, query: QueryScalar<'q, Any, T, sqlx::any::AnyArguments>) -> Result<T, SqlxError>`；
+`T` 需要 `Send + Unpin` 且 `(T,): FromRow`，要求 `sqlx + tokio` feature 和 runtime。
 `fetch_scalar_async::<T>(query).await` 读取第一行的第一列并返回 `T`。没有行返回
 `RowNotFound`；`Decode`/`Type` 不兼容和其他 SQLx 错误保持稳定分类。需要区分“没有行”和
 “有一行但列值为 NULL”时，应按 SQLx 类型使用 `Option<T>`，并选择合适的查询形态。
@@ -247,8 +343,11 @@ async fn count_items(client: &axutils::SqlxClient) -> Result<i64, axutils::SqlxE
 }
 ```
 
-### `begin_async`
+### `SqlxClient::begin_async`
 
+签名：`pub async fn begin_async(&self) -> Result<SqlxTransaction<'static>, SqlxError>`；要求
+`sqlx + tokio` 和调用方 Tokio runtime。开始事务可能访问数据库并占用 pool 连接，失败返回脱敏
+`SqlxError`。
 `begin_async().await` 返回 `SqlxTransaction<'static>`，也就是 SQLx 原生
 `Transaction<'static, sqlx::Any>`。调用方必须显式 `commit` 或 `rollback`；事务 drop 只作为
 回滚兜底。
@@ -274,17 +373,30 @@ async fn insert_in_transaction(
 本 crate 不提供 callback transaction wrapper，也不复制一套事务专用 query 方法；事务中的
 原生 SQLx 错误不伪装成 `SqlxError`。
 
-### `close_async` 和 `is_closed`
+### `SqlxClient::close_async`
 
-`close_async().await` 会等待共享 pool 优雅关闭；它要求 runtime，返回 `Result<(), SqlxError>`。
-关闭后 `is_closed()` 返回 `true`，后续执行按 SQLx pool closed 语义返回 `PoolClosed`，不会重新
-打开 pool。client clone 共享同一 pool 和关闭状态。
+签名：`pub async fn close_async(&self) -> Result<(), SqlxError>`；要求 `sqlx + tokio` feature 和调用方
+Tokio runtime。等待共享 pool 优雅关闭，失败只返回脱敏 `SqlxError`；关闭后所有 clone 都进入
+closed 状态，后续执行返回 `PoolClosed`，不会重新打开或创建 runtime。等待时间受 pool/底层连接
+关闭语义约束，本方法不提供额外的超时预算。
 
 ```rust,no_run
 async fn close(client: &axutils::SqlxClient) -> Result<(), axutils::SqlxError> {
     client.close_async().await?;
     assert!(client.is_closed());
     Ok(())
+}
+```
+
+### `SqlxClient::is_closed`
+
+签名：`pub fn is_closed(&self) -> bool`；要求 `sqlx + tokio` feature，同步读取本地 pool 状态，不访问
+网络、不检查远端健康，也不返回错误。共享 pool 被 `close_async` 关闭后返回 `true`，没有资源
+副作用。
+
+```rust
+fn example(client: &axutils::SqlxClient) -> bool {
+    client.is_closed()
 }
 ```
 
@@ -296,6 +408,8 @@ async fn close(client: &axutils::SqlxClient) -> Result<(), axutils::SqlxError> {
 
 ### `SqlxUtils::init`
 
+签名：`pub async fn init(config: SqlxConfig) -> Result<(), SqlxError>`；要求 `sqlx + tokio` feature 和
+调用方 Tokio runtime。首次成功调用可能访问数据库或 SQLite 文件。
 `init(config).await` 在首次调用时连接并在成功后写入全局 slot；失败不会消耗初始化机会。已
 初始化时会在连接前快速返回 `AlreadyInitialized`，不会再次连接传入的 URL。并发初始化中输掉
 `OnceLock` 竞争的 client 会先执行 `close_async`；即使清理本身失败，公开结果仍稳定返回
@@ -309,6 +423,8 @@ async fn init_global() -> Result<(), axutils::SqlxError> {
 
 ### `SqlxUtils::is_initialized`
 
+签名：`pub fn is_initialized() -> bool`；要求 `sqlx + tokio` feature，同步读取进程内 `OnceLock`，不访问
+网络、不返回错误，也不产生 I/O 副作用。
 `is_initialized()` 只表示全局 slot 曾经成功写入，不检查远端健康状态，也不因 pool 关闭而回到
 `false`。它是同步方法，不访问网络。
 
@@ -318,46 +434,160 @@ fn state() -> bool {
 }
 ```
 
-### 静态查询构造：`query`、`query_as`、`query_scalar`
+### `SqlxUtils::query`
 
-三个静态构造入口与 `SqlxClient` 对应方法完全同义，只做 SQLx Any query 构造，不检查
-`SqlxUtils` 初始化状态；因此可以先构造 query，执行时再得到 `NotInitialized`。
+签名：`pub fn query<'q>(sql: impl sqlx::SqlSafeStr) -> Query<'q, Any, sqlx::any::AnyArguments>`；要求 `sqlx + tokio` feature。
+只构造 SQLx Any query，不检查全局初始化、不访问网络；执行时若尚未初始化才返回
+`NotInitialized`。动态 SQL 仍必须由调用方审计后使用 `sqlx::AssertSqlSafe`。
 
 ```rust
-fn make_global_queries() {
+fn example() {
     let _query = axutils::SqlxUtils::query("SELECT ?").bind(1_i64);
-    let _mapped = axutils::SqlxUtils::query_as::<(i64,)>("SELECT 1");
-    let _scalar = axutils::SqlxUtils::query_scalar::<i64>("SELECT 1");
 }
 ```
 
-### 静态执行和读取转发
+### `SqlxUtils::query_as`
 
-`SqlxUtils::execute_async`、`fetch_one_async`、`fetch_one_as_async`、`fetch_optional_async`、
-`fetch_optional_as_async`、`fetch_all_async`、`fetch_all_as_async` 和 `fetch_scalar_async` 只获取
-全局 client 后转发。因此它们与实例入口共享完全相同的 runtime、错误脱敏和行数上限语义；
-未初始化时返回 `NotInitialized`。
+签名：`pub fn query_as<'q, T>(sql: impl sqlx::SqlSafeStr) -> QueryAs<'q, Any, T, sqlx::any::AnyArguments>`，其中
+`T: FromRow`；要求 `sqlx + tokio` feature。只构造映射 query，不检查全局状态或执行 SQL；类型错误延迟
+到执行入口。
+
+```rust
+fn example() {
+    let _query = axutils::SqlxUtils::query_as::<(i64,)>("SELECT 1");
+}
+```
+
+### `SqlxUtils::query_scalar`
+
+签名：`pub fn query_scalar<'q, T>(sql: impl sqlx::SqlSafeStr) -> QueryScalar<'q, Any, T, sqlx::any::AnyArguments>`，其中
+`(T,): FromRow`；要求 `sqlx + tokio` feature。只构造读取第一列的 query，不访问 pool 或网络。
+
+```rust
+fn example() {
+    let _query = axutils::SqlxUtils::query_scalar::<i64>("SELECT 1");
+}
+```
+
+每个静态执行/读取入口都要求 `sqlx + tokio` feature 和调用方 Tokio runtime，只获取全局 client 后转发；
+未初始化时返回 `NotInitialized`。下面各节保留对应实例入口的独立错误和资源语义。
+
+### `SqlxUtils::execute_async`
+
+签名：`pub async fn execute_async<'q>(query: Query<'q, Any, sqlx::any::AnyArguments>) -> Result<SqlxQueryResult, SqlxError>`。
+执行 query 并返回影响行数结果；未初始化返回 `NotInitialized`，runtime、连接或 SQLx 失败返回
+脱敏 `SqlxError`。执行可能产生数据库写入或 DDL 副作用，不提供额外事务/超时上限。
 
 ```rust,no_run
-async fn use_global() -> Result<(), axutils::SqlxError> {
-    axutils::SqlxUtils::execute_async(axutils::SqlxUtils::query("CREATE TABLE items (id INTEGER)"))
-        .await?;
-    let _row: Option<(i64,)> = axutils::SqlxUtils::fetch_optional_as_async(
-        axutils::SqlxUtils::query_as::<(i64,)>("SELECT id FROM items WHERE id = ?").bind(1_i64),
+async fn example() -> Result<axutils::SqlxQueryResult, axutils::SqlxError> {
+    axutils::SqlxUtils::execute_async(axutils::SqlxUtils::query("SELECT 1")).await
+}
+```
+
+### `SqlxUtils::fetch_one_async`
+
+签名：`pub async fn fetch_one_async<'q>(query: Query<'q, Any, sqlx::any::AnyArguments>) -> Result<SqlxRow, SqlxError>`。
+未初始化返回 `NotInitialized`，无行返回 `RowNotFound`，其他 SQLx 错误按稳定脱敏分类返回；
+最多保留一个原生 row。
+
+```rust,no_run
+async fn example() -> Result<axutils::SqlxRow, axutils::SqlxError> {
+    axutils::SqlxUtils::fetch_one_async(axutils::SqlxUtils::query("SELECT 1")).await
+}
+```
+
+### `SqlxUtils::fetch_one_as_async`
+
+签名：`pub async fn fetch_one_as_async<'q, T>(query: QueryAs<'q, Any, T, sqlx::any::AnyArguments>) -> Result<T, SqlxError>`，
+`T: FromRow + Send + Unpin`。未初始化、无行、解码和连接错误分别保持 `NotInitialized`、
+`RowNotFound` 或稳定脱敏分类；结果只有一个映射值。
+
+```rust,no_run
+async fn example() -> Result<(i64,), axutils::SqlxError> {
+    axutils::SqlxUtils::fetch_one_as_async(
+        axutils::SqlxUtils::query_as::<(i64,)>("SELECT 1"),
     )
-    .await?;
-    let _rows = axutils::SqlxUtils::fetch_all_async(axutils::SqlxUtils::query("SELECT id FROM items"))
-        .await?;
-    let _value = axutils::SqlxUtils::fetch_scalar_async(
+    .await
+}
+```
+
+### `SqlxUtils::fetch_optional_async`
+
+签名：`pub async fn fetch_optional_async<'q>(query: Query<'q, Any, sqlx::any::AnyArguments>) -> Result<Option<SqlxRow>, SqlxError>`。
+未初始化返回 `NotInitialized`；无行是 `Ok(None)`，最多读取一行；解码、连接和 server 错误按
+稳定脱敏分类返回。
+
+```rust,no_run
+async fn example() -> Result<Option<axutils::SqlxRow>, axutils::SqlxError> {
+    axutils::SqlxUtils::fetch_optional_async(
+        axutils::SqlxUtils::query("SELECT 1 WHERE 0"),
+    )
+    .await
+}
+```
+
+### `SqlxUtils::fetch_optional_as_async`
+
+签名：`pub async fn fetch_optional_as_async<'q, T>(query: QueryAs<'q, Any, T, sqlx::any::AnyArguments>) -> Result<Option<T>, SqlxError>`，
+`T: FromRow + Send + Unpin`。无行是 `Ok(None)`，未初始化、解码和连接错误保持稳定分类；不受
+多行上限影响，因为最多返回一个值。
+
+```rust,no_run
+async fn example() -> Result<Option<(i64,)>, axutils::SqlxError> {
+    axutils::SqlxUtils::fetch_optional_as_async(
+        axutils::SqlxUtils::query_as::<(i64,)>("SELECT 1 WHERE 0"),
+    )
+    .await
+}
+```
+
+### `SqlxUtils::fetch_all_async`
+
+签名：`pub async fn fetch_all_async<'q>(query: Query<'q, Any, sqlx::any::AnyArguments>) -> Result<Vec<SqlxRow>, SqlxError>`。
+未初始化返回 `NotInitialized`；按全局 client 的 `max_rows` 逐行消费，读到第 `max_rows + 1` 行
+返回 `RowLimitExceeded`，不限制单行字段大小；其他错误脱敏返回。
+
+```rust,no_run
+async fn example() -> Result<Vec<axutils::SqlxRow>, axutils::SqlxError> {
+    axutils::SqlxUtils::fetch_all_async(axutils::SqlxUtils::query("SELECT 1")).await
+}
+```
+
+### `SqlxUtils::fetch_all_as_async`
+
+签名：`pub async fn fetch_all_as_async<'q, T>(query: QueryAs<'q, Any, T, sqlx::any::AnyArguments>) -> Result<Vec<T>, SqlxError>`，
+`T: FromRow + Send + Unpin`。使用全局 client 的 `max_rows` 逐行消费，超限返回 `RowLimitExceeded`，
+解码、连接和未初始化错误保持对应稳定分类；不限制单个字段大小。
+
+```rust,no_run
+async fn example() -> Result<Vec<(i64,)>, axutils::SqlxError> {
+    axutils::SqlxUtils::fetch_all_as_async(
+        axutils::SqlxUtils::query_as::<(i64,)>("SELECT 1"),
+    )
+    .await
+}
+```
+
+### `SqlxUtils::fetch_scalar_async`
+
+签名：`pub async fn fetch_scalar_async<'q, T>(query: QueryScalar<'q, Any, T, sqlx::any::AnyArguments>) -> Result<T, SqlxError>`，
+`(T,): FromRow + Send + Unpin`。未初始化返回 `NotInitialized`，无行返回 `RowNotFound`，第一列
+解码、连接和 server 错误按稳定脱敏分类返回。
+
+```rust,no_run
+async fn example() -> Result<i64, axutils::SqlxError> {
+    axutils::SqlxUtils::fetch_scalar_async(
         axutils::SqlxUtils::query_scalar::<i64>("SELECT COUNT(*) FROM items"),
     )
-    .await?;
-    Ok(())
+    .await
 }
 ```
 
 ### `SqlxUtils::begin_async`
 
+签名：`pub async fn begin_async() -> Result<SqlxTransaction<'static>, SqlxError>`；要求
+`sqlx + tokio` 和 runtime。未初始化返回 `NotInitialized`，成功后占用全局 pool 连接；事务错误
+保持原生 SQLx 语义。
 该方法转发全局 client 的原生事务入口，返回 `SqlxTransaction<'static>`；事务内仍使用
 `&mut *tx`，并由调用方显式 commit/rollback：
 
@@ -374,6 +604,8 @@ async fn global_transaction() -> Result<(), Box<dyn std::error::Error>> {
 
 ### `SqlxUtils::close_async`
 
+签名：`pub async fn close_async() -> Result<(), SqlxError>`；要求 `sqlx + tokio` feature 和 runtime。
+未初始化返回 `NotInitialized`；已初始化时等待共享 pool 关闭并返回脱敏错误。
 `close_async().await` 优雅关闭全局 pool，但不清除 `OnceLock`。关闭后
 `SqlxUtils::is_initialized()` 仍是 `true`，后续执行返回 `PoolClosed`，再次 `init` 返回
 `AlreadyInitialized`。这使全局入口不可 reset；需要重新连接时必须在新进程或直接使用新的

@@ -53,7 +53,13 @@ impl fmt::Display for SqlxTransportErrorKind {
 #[non_exhaustive]
 pub enum SqlxError {
     /// 配置字段无效。
-    InvalidConfig { field: &'static str },
+    InvalidConfig {
+        /// 无效配置的固定字段分类，例如 `"url"`、`"tls"` 或 `"max_rows"`；不包含完整
+        /// URL、用户名、密码、SQL 文本或数据库错误内容。
+        ///
+        /// 调用方可按字段名匹配配置错误，但应保留 wildcard 以兼容未来分类。
+        field: &'static str,
+    },
     /// 异步 API 必须在已有的 Tokio runtime 中调用。
     RuntimeRequired,
     /// 全局 [`crate::SqlxUtils`] 尚未初始化。
@@ -63,7 +69,12 @@ pub enum SqlxError {
     /// 查询要求至少一行，但结果为空。
     RowNotFound,
     /// 结果行数超过配置的最大值。
-    RowLimitExceeded { limit: usize },
+    RowLimitExceeded {
+        /// 查询结果允许的最大行数，单位为行；只表示本地预算，不包含 SQL 或结果数据。
+        ///
+        /// 调用方可据此匹配行数预算耗尽并改用分页或更小的查询范围。
+        limit: usize,
+    },
     /// 连接池获取连接时超时。
     PoolAcquireTimeout,
     /// 连接池已被关闭。

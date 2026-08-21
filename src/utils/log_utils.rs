@@ -325,11 +325,23 @@ impl LogConfig {
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum LogError {
     /// 配置无效；`field` 只返回固定字段类别，例如 `"output"` 或 `"filter"`。
-    InvalidConfig { field: &'static str },
+    InvalidConfig {
+        /// 无效配置的固定字段分类，例如 `"output"` 或 `"filter"`；不包含路径、过滤器
+        /// 内容或其他配置值。
+        ///
+        /// 调用方可按这些稳定分类匹配配置错误，但应保留 wildcard 以兼容未来新增分类。
+        field: &'static str,
+    },
     /// 文件路径没有可用的 UTF-8 basename、为空、为根路径或无法拆出父目录。
     InvalidPath,
     /// 创建目录或初始化 file appender 失败。
-    FileInit { kind: io::ErrorKind },
+    FileInit {
+        /// 文件系统初始化失败的 [`io::ErrorKind`] 稳定类别，例如权限或目录不存在；不携带
+        /// 路径、系统错误文本或日志内容。
+        ///
+        /// 调用方可按 `ErrorKind` 选择重试或报告策略，而不应从错误消息解析敏感路径。
+        kind: io::ErrorKind,
+    },
     /// 本 crate 已成功安装过 subscriber。
     AlreadyInitialized,
     /// 进程中已有其他全局 tracing subscriber。

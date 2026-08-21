@@ -6,11 +6,13 @@ use axum::{
     response::Response,
 };
 use std::time::Duration;
+#[cfg(feature = "tracing")]
+use tower_http::request_id::RequestId;
 use tower_http::{
     catch_panic::CatchPanicLayer,
     cors::{Any, CorsLayer},
     limit::RequestBodyLimitLayer,
-    request_id::{MakeRequestId, MakeRequestUuid, RequestId},
+    request_id::{MakeRequestId, MakeRequestUuid},
     timeout::TimeoutLayer,
 };
 

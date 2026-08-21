@@ -1,0 +1,15 @@
+[package]
+name = "axutils-reg-feature-matrix"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[features]
+default = []
+both = ["axutils/regex", "axutils/libphonenumber"]
+negative-regex-only-phone = ["axutils/regex"]
+negative-libphonenumber-only-reg = ["axutils/libphonenumber"]
+negative-none-reg = []
+
+[dependencies]
+axutils = { path = "../../..", default-features = false }

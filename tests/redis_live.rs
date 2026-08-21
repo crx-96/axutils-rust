@@ -241,16 +241,22 @@ fn exercises_sync_single_key_lock_ownership_and_ttl() {
         .expect("stale renew"));
     assert!(replacement.release().expect("second replacement release"));
 
+    let drop_ttl = Duration::from_millis(120);
     {
         let _drop_guard = client_a
-            .try_lock(&key, Duration::from_secs(1))
+            .try_lock(&key, drop_ttl)
             .expect("drop lock acquisition")
             .expect("drop lock should be available");
     }
+    assert!(client_b
+        .try_lock(&key, Duration::from_secs(1))
+        .expect("post-drop busy lock attempt")
+        .is_none());
+    std::thread::sleep(Duration::from_millis(180));
     let mut after_drop = client_b
         .try_lock(&key, Duration::from_secs(1))
-        .expect("post-drop lock acquisition")
-        .expect("sync Drop should release when Redis is available");
+        .expect("post-TTL lock acquisition")
+        .expect("dropped sync guard should rely on TTL");
     assert!(after_drop.release().expect("post-drop release"));
 }
 

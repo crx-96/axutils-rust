@@ -936,6 +936,41 @@ fn verifies_sqlx_feature_api_matrix_and_dependency_boundaries() {
 }
 
 #[test]
+#[ignore = "慢速 RegUtils regex/libphonenumber 公共 API 与依赖契约矩阵"]
+fn reg_feature_matrix_contracts() {
+    let fixture_manifest = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("fixtures")
+        .join("reg_feature_matrix")
+        .join("Cargo.toml");
+    let target_dir = unique_target("axutils-reg-feature-matrix");
+
+    for (feature, expected_success, diagnostic_token) in [
+        ("both", true, ""),
+        ("negative-regex-only-phone", false, "is_phone"),
+        ("negative-libphonenumber-only-reg", false, "RegUtils"),
+        ("negative-none-reg", false, "RegUtils"),
+    ] {
+        let output = run_fixture(&fixture_manifest, &target_dir.0, feature);
+        if expected_success {
+            assert!(
+                output.status.success(),
+                "RegUtils fixture feature `{feature}` should compile successfully: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        } else {
+            assert!(
+                !output.status.success(),
+                "RegUtils fixture feature `{feature}` should fail to compile"
+            );
+            assert_expected_diagnostic(&output, diagnostic_token, feature);
+        }
+    }
+
+    assert_reg_dependency_boundaries();
+}
+
+#[test]
 #[ignore = "慢速 feature/依赖契约矩阵；使用 cargo test --no-default-features --test feature_matrix -- --ignored 执行"]
 fn verifies_convert_feature_api_matrix_and_dependency_boundaries() {
     let fixture_manifest = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -2214,6 +2249,82 @@ fn assert_sqlx_dependency_boundaries() {
         assert!(
             !sqlx_tokio_feature_tree.contains(&format!("sqlx feature \"{feature}\"")),
             "SQLx facade unexpectedly enables feature `{feature}` with Tokio"
+        );
+    }
+}
+
+fn assert_reg_dependency_boundaries() {
+    let no_feature_tree = cargo_tree_with_edges("", "normal,build,features");
+    for package in [
+        "regex",
+        "phonenumber",
+        "serde",
+        "serde_json",
+        "serde_urlencoded",
+    ] {
+        assert!(
+            !has_package(&no_feature_tree, package),
+            "default RegUtils tree unexpectedly contains `{package}`"
+        );
+    }
+    assert_no_reg_runtime_packages(&no_feature_tree, "default");
+
+    let regex_tree = cargo_tree_with_edges("regex", "normal,build,features");
+    assert!(has_package(&regex_tree, "regex"));
+    assert!(!has_package(&regex_tree, "phonenumber"));
+    assert_no_reg_runtime_packages(&regex_tree, "regex-only");
+    let regex_feature_tree = cargo_tree_inverted_with_edges("regex", "regex", "features");
+    assert_reg_axutils_feature_edge(&regex_feature_tree, "regex", true, "regex-only");
+    assert_reg_axutils_feature_edge(&regex_feature_tree, "libphonenumber", false, "regex-only");
+
+    let libphonenumber_tree = cargo_tree_with_edges("libphonenumber", "normal,build,features");
+    assert!(has_package(&libphonenumber_tree, "phonenumber"));
+    assert_no_reg_runtime_packages(&libphonenumber_tree, "libphonenumber-only");
+    // `phonenumber` may add or remove these internal dependencies in a compatible
+    // release. When present, verify that axutils did not enable its own features;
+    // their presence is not itself part of axutils' dependency contract.
+    if has_package(&libphonenumber_tree, "regex") {
+        let inverted = cargo_tree_inverted_with_edges("libphonenumber", "regex", "features");
+        assert_reg_axutils_feature_edge(&inverted, "libphonenumber", true, "libphonenumber-only");
+        assert_reg_axutils_feature_edge(&inverted, "regex", false, "libphonenumber-only");
+    }
+    if has_package(&libphonenumber_tree, "serde") {
+        let inverted = cargo_tree_inverted_with_edges("libphonenumber", "serde", "features");
+        assert_reg_axutils_feature_edge(&inverted, "libphonenumber", true, "libphonenumber-only");
+        assert_reg_axutils_feature_edge(&inverted, "serde", false, "libphonenumber-only");
+    }
+
+    let both_tree = cargo_tree_with_edges("regex,libphonenumber", "normal,build,features");
+    assert!(has_package(&both_tree, "regex"));
+    assert!(has_package(&both_tree, "phonenumber"));
+    assert_no_reg_runtime_packages(&both_tree, "both");
+    let both_regex_tree =
+        cargo_tree_inverted_with_edges("regex,libphonenumber", "regex", "features");
+    assert_reg_axutils_feature_edge(&both_regex_tree, "regex", true, "both");
+    assert_reg_axutils_feature_edge(&both_regex_tree, "libphonenumber", true, "both");
+    if has_package(&both_tree, "serde") {
+        let both_serde_tree =
+            cargo_tree_inverted_with_edges("regex,libphonenumber", "serde", "features");
+        assert_reg_axutils_feature_edge(&both_serde_tree, "serde", false, "both");
+        assert_reg_axutils_feature_edge(&both_serde_tree, "regex", true, "both");
+        assert_reg_axutils_feature_edge(&both_serde_tree, "libphonenumber", true, "both");
+    }
+}
+
+fn assert_reg_axutils_feature_edge(tree: &str, feature: &str, expected: bool, feature_set: &str) {
+    let marker = format!("axutils feature \"{feature}\"");
+    assert_eq!(
+        tree.contains(&marker),
+        expected,
+        "RegUtils {feature_set} dependency graph axutils feature edge `{feature}` mismatch"
+    );
+}
+
+fn assert_no_reg_runtime_packages(tree: &str, feature_set: &str) {
+    for package in ["ureq", "reqwest", "url", "tokio"] {
+        assert!(
+            !has_package(tree, package),
+            "RegUtils {feature_set} tree unexpectedly contains runtime package `{package}`"
         );
     }
 }

@@ -17,9 +17,10 @@
 - `axutils::utils::TimeUtils`；
 - `axutils::utils::time_utils::TimeUtils`。
 
-`TimeZoneOffset`、`TimeZoneOffsetError`、`TimeFormatError`、`TimeFormatToken` 和
-`TimeValueKind` 由 crate 根直接导出：`axutils::TimeZoneOffset` 等；它们不从公开的
-`time_utils` 或 `utils::time_utils` 路径导出。`src/time/` 是私有实现目录，不是公共导入路径。
+`TimeError`、`TimeZoneOffset`、`TimeZoneOffsetError`、`TimeFormatError`、`TimeFormatToken` 和
+`TimeValueKind` 由 crate 根直接导出：`axutils::TimeError`、`axutils::TimeZoneOffset` 等；
+它们不从公开的 `time_utils` 或 `utils::time_utils` 路径导出。`src/time/` 是私有实现目录，
+不是公共导入路径。
 
 `TimeUtils` 是无字段工具结构体，无 `new` 方法，实现 `Debug`、`Clone`、`Copy`、`Default`。
 时间戳方法不依赖第三方 feature。
@@ -27,6 +28,9 @@
 `TimeZoneOffset` 的字段私有，实现 `Debug`、`Clone`、`Copy`、`PartialEq`、`Eq`、`Hash`、
 `Default`；`TimeZoneOffsetError` 实现 `Debug`、`Clone`、`Copy`、`PartialEq`、`Eq`、
 `Display` 和 `std::error::Error`。二者都没有 `#[non_exhaustive]`。
+
+`TimeError` 实现 `Debug`、`Clone`、`Copy`、`PartialEq`、`Eq`、`Display` 和
+`std::error::Error`，变体为 `BeforeUnixEpoch`；它不回显路径或系统环境文本。
 
 `TimeFormatToken` 有 `Year`、`Month`、`Day`、`Hour`、`Minute`、`Second`、`Millisecond`、
 `Offset`、`UnknownAscii` 九个变体；`TimeValueKind` 有 `Date`、`DateTime`、
@@ -71,13 +75,98 @@ chrono = { version = "0.4", default-features = false }
 
 ## 时间戳方法
 
-### `TimeUtils::timestamp() -> (u64, u128, u128, u128)`
+所有时间戳入口都默认可用，不需要第三方 feature。推荐使用下面五个 `try_timestamp*`
+入口：它们将系统时钟早于 Unix 纪元这一可恢复环境错误返回为
+`TimeError::BeforeUnixEpoch`，不会因该状态 panic。
 
-- **feature**：默认可用。
+### `TimeError::BeforeUnixEpoch`
+
+`TimeError` 从 crate 根导出：`axutils::TimeError`。当前稳定变体
+`TimeError::BeforeUnixEpoch` 表示 `SystemTime` 早于 1970-01-01 00:00:00 UTC；它的
+`Display`/`Debug` 只包含固定分类文本，不包含路径或系统环境文本，并实现
+`std::error::Error`。该枚举当前不使用 `#[non_exhaustive]`；调用方可直接按变体匹配，或为
+未来错误扩展保留 wildcard 分支。
+
+### `TimeUtils::try_timestamp() -> Result<(u64, u128, u128, u128), TimeError>`
+
 - **返回值**：按同一次 `SystemTime::now()` 采样依次返回秒、毫秒、微秒、纳秒 Unix 时间戳。
+- **错误**：系统时钟早于 Unix 纪元时返回 `Err(TimeError::BeforeUnixEpoch)`。
 - **示例**：
 
 ```rust
+use axutils::TimeUtils;
+
+let (seconds, milliseconds, microseconds, nanoseconds) = TimeUtils::try_timestamp()?;
+assert!(seconds > 0);
+assert_eq!(milliseconds / 1_000, seconds as u128);
+assert_eq!(microseconds / 1_000_000, seconds as u128);
+assert_eq!(nanoseconds / 1_000_000_000, seconds as u128);
+# Ok::<(), axutils::TimeError>(())
+```
+
+四个值基于同一次采样；系统时钟在调用之间可能调整，不能把不同调用的精度值当作同一次
+采样。
+
+### `TimeUtils::try_timestamp_seconds() -> Result<u64, TimeError>`
+
+- **返回值**：当前 Unix 纪元以来的完整秒数；独立采样系统时间。
+- **错误**：系统时钟早于 Unix 纪元时返回 `Err(TimeError::BeforeUnixEpoch)`。
+- **示例**：
+
+```rust
+use axutils::TimeUtils;
+
+assert!(TimeUtils::try_timestamp_seconds()?.checked_add(1).is_some());
+# Ok::<(), axutils::TimeError>(())
+```
+
+### `TimeUtils::try_timestamp_milliseconds() -> Result<u128, TimeError>`
+
+- **返回值**：当前 Unix 纪元以来的完整毫秒数；独立采样系统时间。
+- **错误**：系统时钟早于 Unix 纪元时返回 `Err(TimeError::BeforeUnixEpoch)`。
+- **示例**：
+
+```rust
+use axutils::TimeUtils;
+
+assert!(TimeUtils::try_timestamp_milliseconds()? > 0);
+# Ok::<(), axutils::TimeError>(())
+```
+
+### `TimeUtils::try_timestamp_microseconds() -> Result<u128, TimeError>`
+
+- **返回值**：当前 Unix 纪元以来的完整微秒数；独立采样系统时间。
+- **错误**：系统时钟早于 Unix 纪元时返回 `Err(TimeError::BeforeUnixEpoch)`。
+- **示例**：
+
+```rust
+use axutils::TimeUtils;
+
+assert!(TimeUtils::try_timestamp_microseconds()? > 0);
+# Ok::<(), axutils::TimeError>(())
+```
+
+### `TimeUtils::try_timestamp_nanoseconds() -> Result<u128, TimeError>`
+
+- **返回值**：当前 Unix 纪元以来的完整纳秒数；独立采样系统时间。
+- **错误**：系统时钟早于 Unix 纪元时返回 `Err(TimeError::BeforeUnixEpoch)`。
+- **示例**：
+
+```rust
+use axutils::TimeUtils;
+
+assert!(TimeUtils::try_timestamp_nanoseconds()? > 0);
+# Ok::<(), axutils::TimeError>(())
+```
+
+### 兼容入口 `TimeUtils::timestamp() -> (u64, u128, u128, u128)`
+
+该入口保留原有返回签名和 panic 语义，现已标记 `deprecated`；系统时钟早于 Unix 纪元时
+仍可能 panic。迁移到 [`TimeUtils::try_timestamp`]，不要把弃用入口用于不受控的系统时钟环境。
+
+```rust
+#![allow(deprecated)]
+
 use axutils::TimeUtils;
 
 let (seconds, milliseconds, microseconds, nanoseconds) = TimeUtils::timestamp();
@@ -87,52 +176,53 @@ assert_eq!(microseconds / 1_000_000, seconds as u128);
 assert_eq!(nanoseconds / 1_000_000_000, seconds as u128);
 ```
 
-**注意**：四个值基于同一次采样；如果系统时钟早于 Unix 纪元，内部 `duration_since` 会
-`panic`。系统时钟在调用之间可能调整，不能把不同调用的精度值当作同一次采样。
+### 兼容入口 `TimeUtils::timestamp_seconds() -> u64`
 
-### `TimeUtils::timestamp_seconds() -> u64`
-
-- **feature**：默认可用。
-- **返回值**：当前 Unix 纪元以来的完整秒数；独立采样系统时间。
-- **示例**：
+该入口保留原有返回签名和 panic 语义，现已标记 `deprecated`；系统时钟早于 Unix 纪元时
+仍可能 panic。迁移到 [`TimeUtils::try_timestamp_seconds`]。
 
 ```rust
+#![allow(deprecated)]
+
 use axutils::TimeUtils;
 
 assert!(TimeUtils::timestamp_seconds() > 0);
 ```
 
-### `TimeUtils::timestamp_milliseconds() -> u128`
+### 兼容入口 `TimeUtils::timestamp_milliseconds() -> u128`
 
-- **feature**：默认可用。
-- **返回值**：当前 Unix 纪元以来的完整毫秒数；独立采样系统时间。
-- **示例**：
+该入口保留原有返回签名和 panic 语义，现已标记 `deprecated`；系统时钟早于 Unix 纪元时
+仍可能 panic。迁移到 [`TimeUtils::try_timestamp_milliseconds`]。
 
 ```rust
+#![allow(deprecated)]
+
 use axutils::TimeUtils;
 
 assert!(TimeUtils::timestamp_milliseconds() > 0);
 ```
 
-### `TimeUtils::timestamp_microseconds() -> u128`
+### 兼容入口 `TimeUtils::timestamp_microseconds() -> u128`
 
-- **feature**：默认可用。
-- **返回值**：当前 Unix 纪元以来的完整微秒数；独立采样系统时间。
-- **示例**：
+该入口保留原有返回签名和 panic 语义，现已标记 `deprecated`；系统时钟早于 Unix 纪元时
+仍可能 panic。迁移到 [`TimeUtils::try_timestamp_microseconds`]。
 
 ```rust
+#![allow(deprecated)]
+
 use axutils::TimeUtils;
 
 assert!(TimeUtils::timestamp_microseconds() > 0);
 ```
 
-### `TimeUtils::timestamp_nanoseconds() -> u128`
+### 兼容入口 `TimeUtils::timestamp_nanoseconds() -> u128`
 
-- **feature**：默认可用。
-- **返回值**：当前 Unix 纪元以来的完整纳秒数；独立采样系统时间。
-- **示例**：
+该入口保留原有返回签名和 panic 语义，现已标记 `deprecated`；系统时钟早于 Unix 纪元时
+仍可能 panic。迁移到 [`TimeUtils::try_timestamp_nanoseconds`]。
 
 ```rust
+#![allow(deprecated)]
+
 use axutils::TimeUtils;
 
 assert!(TimeUtils::timestamp_nanoseconds() > 0);
