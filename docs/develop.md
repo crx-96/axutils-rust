@@ -2,11 +2,12 @@
 
 本文档面向项目维护者和贡献者，不属于 crates.io 发布包。`Cargo.toml` 使用
 `package.include` 白名单，将源码、`README.md`、`CHANGELOG.md`、`LICENSE`、Cargo 配置和
-`docs/examples/` 打入发布包；`develop.md`、`AGENTS.md` 以及 `docs/` 中的计划、
+`docs/examples/` 打入发布包；`docs/develop.md`、`AGENTS.md` 以及 `docs/` 中的计划、
 状态和其他开发资料不随包发布。
 
-实现、审查和验收的统一门槛见 [`REVIEW_ACCEPTANCE.md`](REVIEW_ACCEPTANCE.md)；本文档保留开发、
-feature 背景和发布操作命令。两者出现冲突时，先按标准文档的权威来源顺序核对当前源码和
+实现、审查和验收的统一门槛见
+[`review-rust-library-change`](skills/review-rust-library-change/SKILL.md) Skill；本文档保留开发、
+feature 背景和发布操作命令。两者出现冲突时，先按 Skill 的权威来源顺序核对当前源码和
 `Cargo.toml`，再同步修正文档。
 
 ## 项目结构
@@ -16,9 +17,9 @@ feature 背景和发布操作命令。两者出现冲突时，先按标准文档
 ├── Cargo.toml       # 包元数据、feature 和依赖
 ├── README.md        # 面向使用者，随包发布
 ├── CHANGELOG.md     # 面向使用者的版本变更记录，随包发布
-├── develop.md       # 面向开发者，不随包发布
 ├── AGENTS.md        # 项目协作规则，不随包发布
 ├── docs/
+│   ├── develop.md     # 面向开发者，不随包发布
 │   ├── examples/     # 模块详细使用文档，随包发布
 │   ├── module-map.md  # 工具类和公共模块定位，不随包发布
 │   ├── plans/         # 设计与实施计划，不随包发布
@@ -133,7 +134,7 @@ cargo tree --no-default-features --features logging -e normal,build,features
 # check/test/doc 与 cargo tree；将占位符替换为实际测试函数名。
 cargo test --no-default-features --test feature_matrix <相关测试函数名> -- --ignored --test-threads=1
 
-# 仅在 REVIEW_ACCEPTANCE.md 的完整验证触发条件成立或用户明确要求完整验证时，
+# 仅在 review-rust-library-change Skill 的完整验证触发条件成立或用户明确要求完整验证时，
 # 才按下面的固定清单顺序串行执行；日常局部变更默认使用上面的直接相关命令。
 # 完整验证用于覆盖所有已启用模块、feature/API 依赖边界和文档。
 # 不要让其他 Cargo/rustdoc 进程同时写这些 target 目录；综合组合明确排除两个 allocator。
@@ -224,7 +225,7 @@ git diff --check
 新增普通 feature 时，应同步更新 `Cargo.toml`、`README.md`、`CHANGELOG.md` 和本文件，并验证与该
 feature 直接相关的 `--no-default-features`、单 feature、必要组合、正负 fixture、filtered matrix
 和依赖树；普通局部 feature 变更不默认运行 `--all-features` 或无关 feature 组合。只有命中
-`REVIEW_ACCEPTANCE.md` 的高影响或完整验证条件时才扩大范围。`mimalloc` 与 `rpmalloc` 是有意互斥
+`review-rust-library-change` Skill 的高影响或完整验证条件时才扩大范围。`mimalloc` 与 `rpmalloc` 是有意互斥
 的进程级 allocator feature，必须分别验证单 feature、依赖边界和下游重复注册失败；双 feature
 及由此触发的 `--all-features` 组合属于预期编译失败。
 配置读取能力以 `serde` 为基础 feature；YAML、TOML、INI 分别还需要
@@ -307,7 +308,7 @@ Redis 单机真实测试使用 `tests/redis_live.rs`，同步/异步测试固定
 
    输出应包含 `README.md`、`CHANGELOG.md`、`src/` 和 `docs/examples/`，并按
    `docs/module-map.md` 的「使用示例文档」映射表逐项确认所有模块文档均在；
-   不应包含 `develop.md`、`AGENTS.md`、`docs/plans/`、`docs/status/` 或 `docs/skills/`。
+   不应包含 `docs/develop.md`、`AGENTS.md`、`docs/plans/`、`docs/status/` 或 `docs/skills/`。
 
 6. 先执行发布 dry-run：
 
@@ -401,7 +402,7 @@ feature，也不会引入 Tokio、TLS、JSON、ANSI 或 `tracing-log`。库不�
 `LogUtils::trace/debug/info/warn/error` 使用固定 target `axutils::log`。日志测试使用独立进程隔离
 全局状态，并区分 `InvalidConfig { field: "output" }` 与 `InvalidConfig { field: "filter" }`。
 详细公共 API、事件 target、脱敏字段和轮转副作用见
-[`docs/examples/log.md`](docs/examples/log.md)。
+[`docs/examples/log.md`](examples/log.md)。
 
 调用方直接依赖 `axutils = "0.1"` 即可使用 `PathUtils` 和 `TimeUtils`；需要
 `RandomUtils` 时显式选择：
@@ -429,7 +430,7 @@ tokio = { version = "1.53.1", features = ["macros", "rt-multi-thread"] }
 SQLite 文件 I/O。首版不配置 TLS、不创建 runtime；Any driver 默认注册是进程级一次性前提。
 查询构造仍使用 SQLx 的 `.bind(...)`/`FromRow`，事务内使用 `&mut *tx`；`fetch_all` 默认限制为
 1_024 行并在第 1_025 行返回限制错误。完整 API、feature 矩阵、关闭语义和脱敏边界见
-[`SQLx 使用文档`](docs/examples/sqlx.md)。
+[`SQLx 使用文档`](examples/sqlx.md)。
 
 国际手机号码校验的 `RegUtils::is_phone` 需要同时启用两个 feature：
 

@@ -1,11 +1,12 @@
 # axutils 项目协作规则
 
-项目实现、公共 API、feature/依赖、测试、文档和发布工作的详细设计与验收要求统一维护在
-[`REVIEW_ACCEPTANCE.md`](REVIEW_ACCEPTANCE.md)，本文件不重复复制其细则。
+项目实现、公共 API、feature/依赖、测试、文档和发布工作的详细设计、工作流与验收要求统一维护在
+[`review-rust-library-change`](docs/skills/review-rust-library-change/SKILL.md) Skill，本文件不重复复制其细则。
 
 ## 强制入口
 
-对以下任务，必须自动完整读取 [`REVIEW_ACCEPTANCE.md`](REVIEW_ACCEPTANCE.md)，再开始设计、实现、
+对以下任务，必须自动完整读取
+[`review-rust-library-change`](docs/skills/review-rust-library-change/SKILL.md)，再开始设计、实现、
 审查或验收；不能只依据本文件的摘要：
 
 - 修改或审查 `src/`、`Cargo.toml`、公共 API、错误语义、运行时行为或安全边界；
@@ -14,22 +15,21 @@
 - 进行回归排查、发布前检查，或用户要求“按标准审查/验收”。
 
 涉及具体工具类、领域模块、跨模块 API 或新增方法时，在标准文档之后再完整读取
-[`docs/module-map.md`](docs/module-map.md)。需要开发或发布命令时读取 [`develop.md`](develop.md)
+[`docs/module-map.md`](docs/module-map.md)。需要开发或发布命令时读取 [`docs/develop.md`](docs/develop.md)
 的对应章节。若源码、规则、标准或文档描述不一致，按标准文档中的权威来源顺序收集证据并处理，
 不能静默选择较宽松的解释。
 
 ## 项目级通用 Skill 触发规则
 
 [`review-rust-library-change`](docs/skills/review-rust-library-change/SKILL.md) 是项目级、工具无关的
-Rust library 变更工作流，不包含任何特定 Agent 工具的调用语法。
+Rust library 变更工作流与权威审查验收标准，不包含任何特定 Agent 工具的调用语法。
 
 当任务涉及 Rust library 的实现、模块归属、公共 API、feature、依赖、集成测试、编译 fixture、
 API 文档、README、`docs/examples/`、发布元数据、实现就绪性审查或验收时，必须在读取项目标准后
-完整读取并使用该 Skill。它用于组织工作流；[`REVIEW_ACCEPTANCE.md`](REVIEW_ACCEPTANCE.md) 仍是
-本项目具体的验收门槛和权威标准。
+完整读取并使用该 Skill。该 Skill 同时组织工作流并定义本项目具体的验收门槛和权威标准。
 
 纯翻译、简单措辞调整或与 Rust library 无关的文件操作不自动触发该 Skill；但只要涉及本项目
-规则、标准、模块定位或验收，仍必须读取 `REVIEW_ACCEPTANCE.md`。
+规则、标准、模块定位或验收，仍必须完整读取该 Skill。
 
 ## 项目定位与仓库边界
 
