@@ -2,7 +2,7 @@
 
 本文档面向项目维护者和贡献者，不属于 crates.io 发布包。`Cargo.toml` 使用
 `package.include` 白名单，将源码、`README.md`、`CHANGELOG.md`、`LICENSE`、Cargo 配置和
-`docs/examples/` 打入发布包；`develop.md`、`AGENTS.md`、`CLAUDE.md` 以及 `docs/` 中的计划、
+`docs/examples/` 打入发布包；`develop.md`、`AGENTS.md` 以及 `docs/` 中的计划、
 状态和其他开发资料不随包发布。
 
 实现、审查和验收的统一门槛见 [`REVIEW_ACCEPTANCE.md`](REVIEW_ACCEPTANCE.md)；本文档保留开发、
@@ -18,7 +18,6 @@ feature 背景和发布操作命令。两者出现冲突时，先按标准文档
 ├── CHANGELOG.md     # 面向使用者的版本变更记录，随包发布
 ├── develop.md       # 面向开发者，不随包发布
 ├── AGENTS.md        # 项目协作规则，不随包发布
-├── CLAUDE.md        # 项目协作规则（Claude Code 同步副本），不随包发布
 ├── docs/
 │   ├── examples/     # 模块详细使用文档，随包发布
 │   ├── module-map.md  # 工具类和公共模块定位，不随包发布
@@ -308,7 +307,7 @@ Redis 单机真实测试使用 `tests/redis_live.rs`，同步/异步测试固定
 
    输出应包含 `README.md`、`CHANGELOG.md`、`src/` 和 `docs/examples/`，并按
    `docs/module-map.md` 的「使用示例文档」映射表逐项确认所有模块文档均在；
-   不应包含 `develop.md`、`AGENTS.md`、`CLAUDE.md`、`docs/plans/`、`docs/status/` 或 `docs/skills/`。
+   不应包含 `develop.md`、`AGENTS.md`、`docs/plans/`、`docs/status/` 或 `docs/skills/`。
 
 6. 先执行发布 dry-run：
 
