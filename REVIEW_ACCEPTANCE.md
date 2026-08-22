@@ -80,6 +80,7 @@
 | 慢速契约 | `tests/feature_matrix.rs` 中的 ignored 测试覆盖公共 API、feature 和依赖边界，必须显式执行 |
 | 真实外部服务 | `tests/email_live.rs`、`tests/redis_live.rs` 等真实测试默认 ignored，只有用户明确授权和受控配置同时满足时才可运行 |
 | 发布白名单 | `Cargo.toml` 的 `package.include` 当前包含 `Cargo.toml`、README、CHANGELOG、LICENSE、`src/**` 和 `docs/examples/**` |
+| docs.rs 文档 | `Cargo.toml` 的 `[package.metadata.docs.rs].features` 启用非 allocator 综合成功组合，使可选公共 API 进入发布文档；互斥的 `mimalloc`、`rpmalloc` 不得加入该组合 |
 | 开发者文件 | 根目录标准、规则文件、`develop.md`、`docs/module-map.md`、`docs/skills/**`、测试和本地配置不属于发布运行时内容 |
 | 依赖锁定 | library crate 不把根目录 `Cargo.lock` 作为依赖版本策略提交；依赖下限由 manifest、MSRV 和无锁解析验证 |
 
@@ -181,6 +182,10 @@
   缺少组合 feature 的方法必须得到稳定、可识别的编译诊断；
 - 新增 feature 或修改依赖边界时，必须在 `Cargo.toml`、源码、module map、README、API doc、
   `docs/examples/`、fixture 和 CHANGELOG（如属用户可见变化）中保持一致；
+- 新增、删除、重命名 feature，或修改 feature 的依赖映射、组合前提、公共导出时，必须检查
+  `[package.metadata.docs.rs].features` 是否需要同步更新，并与 `develop.md` 的非 allocator 综合
+  成功组合机械比较。docs.rs 清单必须覆盖应展示的可选公共 API，并排除 `mimalloc`、`rpmalloc`
+  及其他只能作为负向契约或不能共同成功构建的组合；判断无需更新时，验收报告必须记录理由；
 - feature 选择不得悄悄改变 TLS、代理、OpenSSL/native-tls、Tokio runtime、全局分配器等
   安全或平台边界，依赖树必须验证实际结果。
 
@@ -433,7 +438,7 @@ Redis、转换和编码等组合的 `cargo check/test/doc` 与 `cargo tree`。�
 | 代码质量 | 方法注释、rustfmt、命名、错误处理、复杂度、资源边界和 unsafe 说明满足标准 | 源码、fmt/clippy 输出、设计说明 |
 | 公共 API | 导出路径、签名、可见性、feature 守卫、兼容性和错误语义均有证据 | `src/lib.rs`、领域模块、fixture、API doc |
 | feature/依赖 | 成功/失败组合和依赖树均符合预期，无隐式依赖或安全后端越界 | feature matrix、`cargo tree`、Cargo.toml |
-| 文档同步 | API doc、doctest、`docs/examples`、README、module map、CHANGELOG（如适用）同步 | 文档差异、scratch doc test、映射表 |
+| 文档同步 | API doc、doctest、`docs/examples`、README、module map、docs.rs feature 清单、CHANGELOG（如适用）同步 | 文档差异、scratch doc test、综合 rustdoc、映射表 |
 | 测试 | 每个变更方法及其正常、边界、错误、集成、公开路径和适用的负向 fixture 已覆盖 | 测试源码与命令输出 |
 | 安全与副作用 | 敏感信息不泄露，资源有界，外部副作用被隔离并记录 | 安全审查、忽略测试配置、错误输出 |
 | 发布边界 | package 白名单正确，开发者文件/凭据/测试不进入包，版本和 CHANGELOG 一致 | `cargo package --list` |
