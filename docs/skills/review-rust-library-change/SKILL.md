@@ -1,33 +1,30 @@
 ---
 name: review-rust-library-change
-description: 使用 axutils 的影响分析、公共 API 与 feature 守卫检查、文档与测试同步、依赖与安全审查及证据化验证标准，设计、实现、审查并验收 Rust library 变更。适用于修改或审查源码、模块、公共 API、feature、依赖、测试、API 文档、README、发布元数据或实现就绪性。
+description: 按 axutils 的影响分析、公共 API/feature/依赖边界、文档测试同步、安全审查和证据化标准，设计、实现、审查或验收源码、模块、公共 API、测试、文档及发布元数据变更。
 ---
 
 # axutils Rust library 变更审查与验收
 
-本 Skill 是 `axutils` 的设计、实现、代码审查和交付验收标准。它把项目规则中与
-代码质量、公共 API、feature/依赖边界、文档同步、测试和发布检查有关的要求集中到一处，
-避免项目规则与验收标准重复维护产生分歧。
-
-规则文件负责声明本 Skill 的强制入口；本 Skill 负责定义“什么才算完成”。以后涉及项目实现的
-修改、审查或验收，必须完整读取本 Skill，再按影响范围执行对应检查。精确的工具类归属、公共
-导出清单和能力边界仍以 [`docs/module-map.md`](../../module-map.md) 为准。面向开发人员的命令说明
-维护在 [`docs/develop.md`](../../develop.md)，但它不是 Agent 常规实现、测试或验收的必读上下文；
-只有任务新增、删除或修改开发/发布命令，或者需要同步开发人员操作说明时才读取并更新。
+本 Skill 集中定义 `axutils` 的设计、实现、审查和交付验收标准，即“什么才算完成”；项目规则
+声明强制入口，并保留仓库边界、授权及其他更具体约束，避免重复维护验收细则。工具类定位、
+公共导出和能力边界以
+[`docs/module-map.md`](../../module-map.md) 为准；[`docs/develop.md`](../../develop.md) 的读取条件见第 2 节。
 
 ## 1. 适用范围、术语和证据要求
 
-本标准适用于以下任何一种变更或请求：
+设计、实现、审查或验收以下任一内容时，适用本标准：
 
-- 修改 `src/` 中的实现、公共 API、错误语义、运行时行为或安全边界；
+- `src/` 中的实现、公共 API、错误语义、运行时行为或安全边界；
 - 新增、删除、重命名或调整工具类、领域模块、公开导出、类型、方法、trait、枚举、常量、
   类型别名、静态项或宏；
-- 修改 `Cargo.toml` 的 feature、依赖、依赖 feature、MSRV、发布白名单或 crate 元数据；
-- 修改集成测试、feature/API 编译 fixture、依赖边界断言、公开 API 文档、README、
-  `docs/examples/` 或发布文件；
-- 对上述内容进行设计、实现、代码审查、回归排查、验收或发布前检查。
+- `Cargo.toml` 的 feature、依赖、依赖 feature、MSRV、发布白名单或 crate 元数据；
+- 集成测试、feature/API 编译 fixture、依赖边界断言、公开 API 文档、README、`docs/examples/`
+  或发布文件，以及相关回归排查或发布前检查。
 
-本文档中的用词含义如下：
+纯翻译、简单措辞调整或与 Rust library 无关的文件操作不自动触发本 Skill；涉及本项目规则、
+标准、模块定位或验收时仍必须触发并完整读取。
+
+用词定义：
 
 - **必须**：没有满足时不能宣称通过验收；
 - **应**：默认要求，确有理由不能满足时必须记录原因、替代证据和剩余风险；
@@ -35,7 +32,7 @@ description: 使用 axutils 的影响分析、公共 API 与 feature 守卫检�
 - **证据**：可复核的源码、差异、测试输出、fixture 编译结果、文档编译结果、依赖树或
   发布包清单；“看起来正确”或“未发现问题”不算证据。
 
-验收结论必须区分：
+验收结论必须分别报告：
 
 - 已通过的门槛及对应证据；
 - 没有运行的检查及具体原因；
@@ -44,18 +41,18 @@ description: 使用 axutils 的影响分析、公共 API 与 feature 守卫检�
 
 ## 2. 读取顺序和权威来源
 
-每次开始实现或审查前，按以下顺序建立上下文：
+开始实现或审查前，按顺序建立上下文：
 
 1. 读取适用的 `AGENTS.md` 或更具体的目录规则；
 2. 完整读取本 Skill；
-3. 如果涉及具体工具类、领域模块、跨模块 API 或新增方法，读取
+3. 涉及具体工具类、领域模块、跨模块 API 或新增方法时，完整读取
    [`docs/module-map.md`](../../module-map.md)；
 4. 读取 `Cargo.toml` 的 `[package]`、`[features]`、`[dependencies]` 和相关
    `dev-dependencies`，尤其确认当前 `version` 与 `rust-version`；
 5. 读取目标源码、crate 根导出、调用方、已有测试、fixture、对应 `docs/examples/`、README
    相关段落和当前 `CHANGELOG.md` 条目；
-6. 仅当任务新增、删除或修改开发/发布命令，或需要同步开发人员操作说明时，读取
-   [`docs/develop.md`](../../develop.md) 的对应章节；普通实现、测试、审查和验收不读取该文件。
+6. 只有新增、删除、修改开发/发布命令，或需同步这些命令给开发人员时，才读取并更新
+   [`docs/develop.md`](../../develop.md) 对应章节；普通实现、测试、审查和验收不读取该文件。
 
 当不同文件对“当前行为”的描述不一致时，按以下顺序处理：
 
@@ -70,8 +67,7 @@ description: 使用 axutils 的影响分析、公共 API 与 feature 守卫检�
 
 ## 3. 当前库基线
 
-以下基线来自当前仓库；版本号、feature、依赖和公开导出发生变化时，以当前文件为准，不能
-把本节的文字当作替代清单。
+本节仅概括当前仓库；版本、feature、依赖和公开导出始终以对应文件为准，不能以本节替代清单。
 
 | 项目 | 当前基线与权威文件 |
 | --- | --- |
@@ -82,16 +78,15 @@ description: 使用 axutils 的影响分析、公共 API 与 feature 守卫检�
 | 公共导出 | crate 根、领域模块和 `utils` 兼容重导出由 `src/lib.rs` 与 `docs/module-map.md` 共同维护 |
 | 工具类 | `*Utils` 入口位于 `src/utils/`；多文件实现位于同名前缀的 `src/<prefix>/` |
 | 使用文档 | 每个公共能力单元对应 `docs/examples/<前缀>.md`，映射表位于 `docs/module-map.md` |
-| 测试 | `src/` 单元测试、`tests/` 集成测试、`tests/fixtures/` feature/API 编译 fixture 共同构成回归面 |
-| 测试边界 | `tests/` 和 fixture 不属于运行时依赖或发布包；删除测试前必须确认对应能力已不再需要并同步清理引用 |
-| 慢速契约 | `tests/feature_matrix.rs` 中的 ignored 测试覆盖公共 API、feature 和依赖边界，必须显式执行 |
-| 真实外部服务 | `tests/email_live.rs`、`tests/redis_live.rs` 等真实测试默认 ignored，只有用户明确授权和受控配置同时满足时才可运行 |
+| 测试 | `src/` 单元测试、`tests/` 集成测试和 `tests/fixtures/` 编译 fixture 共同构成回归面；删除边界见第 4.3 节 |
+| 慢速契约 | `tests/feature_matrix.rs` 的 ignored 测试覆盖 API、feature 和依赖边界；执行范围见第 8.3 节 |
+| 真实外部服务 | `tests/email_live.rs`、`tests/redis_live.rs` 等默认 ignored；运行条件见第 9 节 |
 | 发布白名单 | `Cargo.toml` 的 `package.include` 当前包含 `Cargo.toml`、README、CHANGELOG、LICENSE、`src/**` 和 `docs/examples/**` |
-| docs.rs 文档 | `Cargo.toml` 的 `[package.metadata.docs.rs].features` 启用非 allocator 综合成功组合，使可选公共 API 进入发布文档；互斥的 `mimalloc`、`rpmalloc` 不得加入该组合 |
+| docs.rs 文档 | `[package.metadata.docs.rs].features` 使用非 allocator 综合成功组合；排除规则见第 5.3 节 |
 | 开发者文件 | 规则文件、`docs/develop.md`、`docs/module-map.md`、`docs/skills/**`、测试和本地配置不属于发布运行时内容 |
 | 依赖锁定 | library crate 不把根目录 `Cargo.lock` 作为依赖版本策略提交；依赖下限由 manifest、MSRV 和无锁解析验证 |
 
-当前实现还包含一些必须持续保持的组合语义：
+以下固定组合语义必须持续保持：
 
 - `regex` 提供 `RegUtils`，国际手机号校验还需要独立的 `libphonenumber`；
 - 模板能力需要 `serde` 与 `strfmt` 或 `minijinja` 的显式组合；
@@ -124,7 +119,7 @@ description: 使用 axutils 的影响分析、公共 API 与 feature 守卫检�
 | S：安全/资源 | 密钥、网络、配置、文件、全局状态、重试、解析深度、分配器、unsafe | 敏感信息审查、边界/拒绝服务测试、外部副作用隔离和专门验证 |
 | R：发布 | package 白名单、版本、CHANGELOG、publish dry-run | `cargo package --list`、发布清单、版本一致性和外部操作授权 |
 
-### 4.2 修改前必须形成的最小结论
+### 4.2 修改前的最小结论
 
 在写代码前，至少明确并记录：
 
@@ -134,8 +129,8 @@ description: 使用 axutils 的影响分析、公共 API 与 feature 守卫检�
 - 要修改或新增的测试、fixture、API doc、`docs/examples/`、module map、README 和 CHANGELOG；
 - 最小验证命令、预期成功/预期失败结果，以及无法执行时的替代证据。
 
-问题定位必须先收集调用链、错误日志、输入/状态和实际运行路径，确认根因和影响范围后再
-修改。不能用试错式改动、顺手重构或扩大错误处理范围代替定位。
+问题定位必须先收集调用链、错误日志、输入/状态和实际路径，确认根因及影响范围后再修改；
+不得以试错、顺手重构或扩大错误处理范围代替定位。
 
 ### 4.3 最小变更和范围控制
 
@@ -173,9 +168,15 @@ description: 使用 axutils 的影响分析、公共 API 与 feature 守卫检�
 
 ### 5.3 feature 和可选依赖
 
-- 第三方依赖必须 `optional = true`。对新增或调整的、只由一个第三方 crate 提供的能力，公开 feature 默认必须与直接可选依赖 crate 同名，并通过 `dep:<name>` 显式映射；例如直接依赖 `tower-http` 时使用 `tower-http` feature，而不是为 Axum 的每个包装能力创建 `axum-cors`、`axum-timeout` 一类本项目别名；
-- 依赖 feature 的转发必须在 manifest 中使用 Cargo 的 `package-name/feature-name` 语法，并在文档中列出实际启用的上游子 feature。Cargo feature 属于当前 package 的命名空间，下游启用的是本 crate 的提供方同名 feature，而不是直接操作传递依赖的 feature；例如 `tower-http = ["dep:tower-http", "tower-http/cors", "tower-http/timeout"]`，下游使用 `features = ["tower-http"]`；
-- 同一个第三方 crate 提供的多个 middleware 可以归入该提供方同名 feature；只有确有必要让用户独立选择上游能力时，才增加与提供方和上游 feature 明确对应的映射，并记录命名与依赖边界。不得为了表达 Axum 包装层而发明 `axum-*` feature；多个第三方 crate 必须共同组成一个能力时，才可使用语义聚合 feature，并在文档和依赖树中列出全部提供方；
+- 第三方依赖必须 `optional = true`。单一第三方 crate 提供的能力，其公开 feature 默认必须与直接可选
+  依赖同名并通过 `dep:<name>` 映射；同一提供方的多个 middleware 可以共用该 feature。只有用户
+  确需独立选择上游能力时，才增加与提供方和上游 feature 明确对应的映射，并记录命名及依赖边界；
+  不得为 Axum 包装层发明 `axum-*` feature。只有多个第三方 crate 必须共同组成能力时，才可使用
+  语义聚合 feature，并在文档和依赖树中列出全部提供方；
+- 上游 feature 转发必须在 manifest 中使用 Cargo 的 `package-name/feature-name` 语法，文档列出实际启用项。
+  Cargo feature 属于当前 package；下游启用本 crate 的提供方同名 feature，不直接操作传递依赖。
+  例如：`tower-http = ["dep:tower-http", "tower-http/cors", "tower-http/timeout"]`，下游使用
+  `features = ["tower-http"]`；
 - 上述同名 provider 规则同样适用于调度器：直接提供 cron 解析/计算的 `croner` 依赖使用
   `croner = ["dep:croner"]`，不得另建 `scheduler` 别名；`Scheduler` 仍通过源码中的
   `chrono + chrono_tz + tokio + croner` 精确组合守卫表达跨 provider API 前置条件；
@@ -187,12 +188,13 @@ description: 使用 axutils 的影响分析、公共 API 与 feature 守卫检�
   多个能力时使用 `cfg(all(...))`，不能用过宽的模块级守卫掩盖缺失组合；
 - 同时验证 feature 的“应存在”和“不应存在”两侧：单独启用后端不能意外导出基础 API，
   缺少组合 feature 的方法必须得到稳定、可识别的编译诊断；
-- 新增 feature 或修改依赖边界时，必须在 `Cargo.toml`、源码、module map、README、API doc、
-  `docs/examples/`、fixture 和 CHANGELOG（如属用户可见变化）中保持一致；
-- 新增、删除、重命名 feature，或修改 feature 的依赖映射、组合前提、公共导出时，必须检查
-  `[package.metadata.docs.rs].features` 是否需要同步更新。只有 feature 名称集合变化会修改面向开发人员
-  的非 allocator 综合命令时，才读取并同步 `docs/develop.md` 的对应清单。docs.rs 清单必须覆盖应展示的可选公共 API，并排除 `mimalloc`、`rpmalloc`
-  及其他只能作为负向契约或不能共同成功构建的组合；判断无需更新时，验收报告必须记录理由；
+- 新增 feature 或修改依赖边界时，`Cargo.toml`、源码和 fixture 必须一致；文档及 CHANGELOG 同步
+  按第 7.2、7.4 节执行；
+- 新增、删除、重命名 feature，或修改其依赖映射、组合前提、公共导出时，必须检查
+  `[package.metadata.docs.rs].features`。清单必须覆盖应展示的可选公共 API，并排除 `mimalloc`、
+  `rpmalloc` 及其他负向契约或不能共同成功构建的组合；无需更新时，验收报告必须说明理由。
+  只有 feature 名称集合变化会修改面向开发人员的非 allocator 综合命令时，才按第 2 节读取并同步
+  `docs/develop.md` 对应清单；
 - feature 选择不得悄悄改变 TLS、代理、OpenSSL/native-tls、Tokio runtime、全局分配器等
   安全或平台边界，依赖树必须验证实际结果。
 
@@ -206,8 +208,7 @@ description: 使用 axutils 的影响分析、公共 API 与 feature 守卫检�
   `block_on`、关闭、嵌套调用错误和任务生命周期语义；其他普通异步 API 仍不得偷偷创建第二个 runtime。
 - 构造配置、客户端或纯解析对象默认不访问网络；文件、网络、SMTP、Redis、进程级分配器等
   外部副作用必须在 API doc、测试和验收报告中明确；
-- 真实外部服务测试固定为 ignored，并且需要明确的环境变量、被忽略的本地配置和用户授权；
-  默认验证不得连接真实服务、发送邮件、修改远程数据或泄露配置；
+- 真实外部服务测试的 ignored、配置、授权和副作用边界统一按第 9 节执行；
 - 连接、重试、缓存、去重、锁租约、事务、超时和响应/请求大小必须有有限边界，并写出超限
   和失败语义；
 - `mimalloc`/`rpmalloc` 这类进程级能力不得新增运行时切换 API；互斥 feature、下游重复注册
@@ -222,10 +223,9 @@ description: 使用 axutils 的影响分析、公共 API 与 feature 守卫检�
   和标准技术术语保留原文；
 - 新增或修改的封装方法必须有与可见性匹配的注释：公共方法使用 doc comment 说明用途、输入、
   返回值、错误、feature、限制和副作用；私有方法说明职责及非显然的不变量或设计原因；
-- 使用 `Result`/`Option` 表达可失败或可能缺失的结果，错误必须可追踪；不能通过静默吞错、
-  无依据的强制转换、无条件 `unwrap`/`expect` 或日志代替错误语义；
-- `unwrap`、`expect`、`panic!` 只能用于已证明不可达的内部不变量或测试，并在代码/文档中说明
-  理由；不可信输入、配置、网络、文件或用户数据不得触发未记录的 panic；
+- 使用 `Result`/`Option` 表达失败或缺失，错误必须可追踪；不得以静默吞错、无依据强制转换或日志
+  代替错误语义。`unwrap`、`expect`、`panic!` 仅用于已证明不可达的内部不变量或测试，并在代码/
+  文档中说明理由；不可信输入、配置、网络、文件或用户数据不得触发未记录的 panic；
 - `unsafe` 只在确有必要时使用；必须有紧邻的安全不变量说明、最小边界、平台条件和测试，
   并在审查报告中单独列出。
 
@@ -283,12 +283,11 @@ description: 使用 axutils 的影响分析、公共 API 与 feature 守卫检�
   并链接对应的 `docs/examples/<前缀>.md`；README 不复制长期维护的完整 API 说明；
 - 新增、删除、重命名或职责变化的工具类/公共模块必须更新 `docs/module-map.md` 的定位清单、
   导出路径、feature/依赖、职责边界、主要场景和使用示例映射；
-- feature、模块路径、README、API doc、module map 和 fixture 中的守卫必须互相一致；
+- `Cargo.toml`、源码、fixture、README、API doc、`docs/examples/` 和 module map 中的 feature 守卫
+  与模块路径必须互相一致；
 - `docs/examples/` 是随 crate 发布的使用文档，必须纳入 Git；发布前用 `cargo package --list`
   按 module map 的映射逐项确认，不能只检查文件是否在工作区存在；
-- 文档维护只改开发流程、规则或说明时，不因为形式上的文件变化写入 CHANGELOG；
-  只有源码、公共 API、运行时行为、错误/安全边界或直接面向使用者的兼容性变化才进入当前
-  版本的 CHANGELOG。
+- 仅维护开发流程、规则或说明时不写 CHANGELOG；是否记录以第 7.4 节为准。
 
 ### 7.3 文档代码块验证
 
@@ -303,12 +302,11 @@ Rust 代码块时，必须：
    示例必须 `no_run`、只构造对象或明确不会执行外部副作用；
 5. 验证后删除 scratch crate 和本次产生且无用途的构建/日志临时文件。
 
-这里的“本次涉及”以实际修改的文档文件为边界：局部修改 README 时只收集 README，局部修改
-某个 `docs/examples/<name>.md` 时只编译该文件的全部 Rust 代码块。可以运行
-`docs_examples_are_complete` 对全部文档做快速 metadata 双向枚举，但运行 ignored 的
-`compile_docs_examples_offline` 时必须通过 `AXUTILS_DOCS_EXAMPLE_FILTER` 限定受影响文档。只有
-第 8.4 节完整验证的触发条件成立或用户明确要求全量验证时，才不设置过滤器并编译全部
-`docs/examples/`；不能因为 harness 默认支持全量模式就把无关文档纳入局部验证。
+“本次涉及”以修改文件为界：局部修改 README 只收集 README；修改某个
+`docs/examples/<name>.md` 则编译该文件的全部 Rust 代码块。`docs_examples_are_complete` 可以快速
+双向枚举全部文档 metadata；运行 ignored 的 `compile_docs_examples_offline` 时，必须用
+`AXUTILS_DOCS_EXAMPLE_FILTER` 限定受影响文档。只有命中第 8.4 节或用户明确要求全量验证时，才可
+不设过滤器并编译全部 `docs/examples/`；harness 支持全量模式不构成扩大局部验证的理由。
 
 ### 7.4 版本和 CHANGELOG
 
@@ -335,19 +333,18 @@ Rust 代码块时，必须：
 - **依赖边界**：使用 `cargo tree` 或等价结果确认 optional 依赖、弱依赖、TLS/runtime、
   transitive feature 和默认依赖没有越界；
 - **文档测试**：验证本次修改涉及的全部文档 Rust 代码块，而不是只抽查一个示例；
-- **真实服务测试**：只在用户明确授权、环境和被忽略配置满足时运行；默认验收不依赖它们。
+- **真实服务测试**：按第 9 节运行；默认验收不依赖它们。
 
 全局单例、进程 allocator、live service 或时间/环境相关测试必须隔离状态、串行执行或用独立
 进程/临时目录，不能因运行顺序偶然通过。
 
 ### 8.2 按影响范围选择命令
 
-默认执行与变更影响范围一致的最小充分验证，不主动运行完整项目验证清单。先运行直接相关的
-单元/集成测试、受影响 feature、fixture、doctest 和依赖边界检查；普通单 feature/依赖调整也
-默认停留在对应组合、filtered matrix 和依赖树。只有变更实际跨模块或跨多个能力单元、改变默认
-feature、共享/传递依赖、TLS/runtime/allocator 等安全或平台边界，影响范围无法局部证明，涉及
-发布，或者用户明确要求完整验证时，才扩大到第 8.4 节的完整验证。扩大前必须记录触发原因、
-拟增加的验证范围和预计耗时，不能仅因完整清单存在就默认执行。
+先运行与影响范围一致的最小充分验证：直接相关单元/集成测试、受影响 feature、fixture、doctest
+和依赖边界；普通单 feature/依赖调整默认止于对应组合、filtered matrix 和依赖树。只有变更跨模块
+或多个能力单元，涉及高影响 feature/依赖边界、公共安全边界，改变默认 feature、共享/传递依赖或
+TLS/runtime/allocator 等安全/平台边界，无法局部证明影响，涉及发布，或用户明确要求完整验证时，
+才执行第 8.4 节。扩大前必须记录触发原因、增加范围和预计耗时；不得仅因完整清单存在就默认执行。
 
 | 影响范围 | 最小验证 | 需要增加的验证 |
 | --- | --- | --- |
@@ -362,15 +359,15 @@ feature、共享/传递依赖、TLS/runtime/allocator 等安全或平台边界�
 
 ### 8.3 本项目的固定契约验证
 
-`tests/feature_matrix.rs` 中的 ignored 测试是慢速契约的一部分。局部公共 API 变更默认只运行
-与目标模块对应的测试函数，例如：
+`tests/feature_matrix.rs` 的 ignored 测试是慢速契约。局部公共 API 变更默认只运行目标模块对应的
+测试函数，例如：
 
 ```powershell
 cargo test --no-default-features --test feature_matrix <相关测试函数名> -- --ignored --test-threads=1
 ```
 
-只有 feature/依赖变更影响默认能力、共享/传递依赖、安全或平台边界、跨多个能力单元，或者
-跨模块 API/行为、公共安全边界、发布、局部 fixture 无法证明契约、用户明确要求完整验证时，
+只有 feature/依赖变更影响默认能力、共享/传递依赖、安全或平台边界、多个能力单元，或者涉及
+跨模块 API/行为、公共安全边界、发布、局部 fixture 无法证明契约，或用户明确要求完整验证时，
 才运行全部 ignored matrix：
 
 ```powershell
@@ -399,10 +396,8 @@ cargo check --no-default-features --features mimalloc,rpmalloc
 
 ### 8.4 完整验证清单
 
-当变更属于跨模块或跨能力单元、高影响 feature/依赖边界、公共安全边界、发布或局部证据不足时，执行并报告
-本节的完整验证清单；用户明确要求完整验证时同样执行。`docs/develop.md` 只在本次验证命令本身
-需要新增、删除、修改或同步给开发人员时读取，不作为执行完整验证的前置步骤。
-未命中上述条件时，默认停留在第 8.2 节定义的最小充分验证。至少包括：
+命中第 8.2 节的完整验证条件时，执行并报告本清单；否则停留在最小充分验证。
+`docs/develop.md` 仍只按第 2 节的命令变更条件读取，不是完整验证的前置。清单至少包括：
 
 ```powershell
 cargo fmt --all -- --check
@@ -422,9 +417,9 @@ git diff --check
 Redis、转换和编码等组合的 `cargo check/test/doc` 与 `cargo tree`。当前能力的具体组合以
 `Cargo.toml`、目标源码、直接相关测试和 `tests/feature_matrix.rs` 为准。
 
-调度器变更还必须运行 scheduler 集成测试、doctest、clippy 和依赖树检查，
-并通过 ignored feature matrix 验证 `chrono`、`chrono_tz`、`tokio`、`croner` 的全部 16 种组合：
-只有完整组合成功导出调度器 API，其余 15 种组合必须以稳定诊断证明 API 不存在。依赖树还必须确认
+调度器变更还必须运行 scheduler 集成测试、doctest、clippy 和依赖树检查，并通过 ignored
+feature matrix 验证第 3 节规定的全部 16 种组合；除完整组合外，其余 15 种必须由稳定诊断证明
+API 不存在。依赖树还必须确认
 生产 Tokio feature 精确包含 `fs`、`io-util`、`net`、`rt`、`rt-multi-thread`、`signal`、`sync`、
 `time`（及其平台传递 feature），不由本 crate 的 `tokio` feature 启用 `macros`，并记录 Croner
 带入的 `chrono/clock`、`derive_builder` 和 `strum`。
@@ -469,16 +464,9 @@ Redis、转换和编码等组合的 `cargo check/test/doc` 与 `cargo tree`。�
 
 ## 11. Skill 与项目规则的维护
 
-- `AGENTS.md` 必须链接本 Skill，并声明何时先完整读取；
-- 变更工作流中出现可跨任务复用的稳定步骤时，更新本项目级、工具无关的 Skill，不要写入某个
-  Agent 工具的专用调用语法；
-- 当任务涉及 Rust library 实现、公共 API、模块、feature、依赖、测试、API 文档、README、
-  `docs/examples`、发布或“按标准审查/验收”时，触发并完整读取本 Skill；本 Skill 同时提供流程和
-  项目验收标准；
-- 纯翻译、简单措辞调整或与 Rust library 无关的文件操作不自动触发该 Skill，但只要涉及本项目
-  规则、标准、模块定位或验收，就仍必须完整读取本 Skill；
-- 修改本 Skill 时，检查规则文件链接、Skill 触发描述和 module map 引用；只有开发/发布命令也发生
-  变化时才读取并同步 `docs/develop.md`；
-  修改公共实现时，遵循本 Skill 的 CHANGELOG 和版本规则，不因 Skill 本身的维护变更版本；
-- 发现标准与当前实现冲突时，先以源码和可复现证据定位差异，再同步修标准或实现，不能静默
-选择较宽松的解释。
+- `AGENTS.md` 必须链接本 Skill，并与第 1、2 节的完整触发范围、例外和读取要求保持一致；
+- 可跨任务复用的稳定流程只维护在本项目级、工具无关的 Skill，不写入特定 Agent 工具语法；
+- 修改本 Skill 时检查规则链接、触发描述和 module map 引用；`docs/develop.md` 仍按第 2 节处理。
+  Skill、规则或纯文档整理本身不提升版本、不写 CHANGELOG；公共实现变更仍按第 7.4 节处理；
+- 标准与当前实现冲突时，按第 2 节权威顺序，以源码和可复现证据定位后同步修正；不得静默采用
+  较宽松解释。

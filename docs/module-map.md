@@ -117,4 +117,5 @@ Redis 的 r2d2 checkout 只检查本地连接 open 状态，不发送 PING；Mes
 会串行等待连接 timeout；async transaction 没有独立 liveness probe，完整服务端错误保留连接，
 未知失效连接在后续事务的传输错误中被发现并丢弃。
 
-新增、删除或重命名能力单元时，必须同步更新本表与对应文档；文档随 crate 发布。
+新增、删除或重命名能力单元时，必须同步更新本表与对应的 `docs/examples/` 使用文档；使用文档随
+crate 发布，本定位清单不随包发布。
