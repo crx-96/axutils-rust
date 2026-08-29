@@ -1,18 +1,56 @@
 use std::{future::Future, net::SocketAddr, sync::OnceLock};
 
+use axum::Router;
 use tokio::net::TcpListener;
 
 use crate::axum::{
-    AxumError, AxumServeOutcome, AxumServer, AxumShutdownHandle, AxumShutdownReason,
+    AxumApp, AxumError, AxumServeOutcome, AxumServer, AxumShutdownHandle, AxumShutdownReason,
 };
 
 static SERVER: OnceLock<AxumServer> = OnceLock::new();
 
-/// 进程内唯一默认 `AxumServer` 的静态入口。
+/// Axum 空对象工厂与进程内唯一默认 `AxumServer` 的静态入口。
 ///
-/// 初始化只成功一次；成功后不能 reset 或 replace，所有方法和 server clone 共享同一单次状态机。
+/// `create_router`/`create_app` 不读取全局状态；server 初始化只成功一次，成功后不能 reset 或
+/// replace，服务操作和 server clone 共享同一单次状态机。
 pub struct AxumUtils;
 impl AxumUtils {
+    /// 创建一个不含路由、fallback 或已注入 state 的原生 `axum::Router<S>`。
+    ///
+    /// 本方法复用 [`AxumApp::create_router`]，不会读取或修改全局 server，也不会失败、bind、创建
+    /// runtime 或访问网络。泛型 `S` 保留 Router 的 missing-state 类型；调用方负责原生 Router 的
+    /// 路由、layer、state 与资源边界，并满足 Axum 对 state 的 clone、并发与 `'static` 约束。
+    ///
+    /// # Examples
+    /// ```rust,no_run
+    /// # #[cfg(all(feature="axum",feature="tokio"))] {
+    /// let router: axum::Router<String> = axutils::AxumUtils::create_router();
+    /// let _builder = axutils::AxumApp::from_router(router).with_state("axutils".to_owned());
+    /// # }
+    /// ```
+    pub fn create_router<S>() -> Router<S>
+    where
+        S: Clone + Send + Sync + 'static,
+    {
+        AxumApp::<S>::create_router()
+    }
+
+    /// 创建一个不含路由、fallback 或延迟 layer 的 [`AxumApp<()>`]。
+    ///
+    /// 本方法复用 [`AxumApp::new`]，不会读取或修改全局 server，也不会失败、bind、创建 runtime
+    /// 或访问网络。返回的 app 与 `AxumApp::new()` 相同，可继续注册路由并转换为 server builder。
+    ///
+    /// # Examples
+    /// ```rust,no_run
+    /// # #[cfg(all(feature="axum",feature="tokio"))] {
+    /// let app = axutils::AxumUtils::create_app();
+    /// let _builder = app.into_server_builder();
+    /// # }
+    /// ```
+    pub fn create_app() -> AxumApp<()> {
+        AxumApp::new()
+    }
+
     /// 初始化默认服务；并发调用只有一个成功，失败值不占用初始化机会。
     /// # Examples
     /// ```rust,no_run

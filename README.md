@@ -53,7 +53,10 @@ Tokio runtime、不调用 `block_on`，首版不配置 TLS，`fetch_all` 默认�
 Tokio 服务基础通过 `tokio` feature 提供：`TokioUtils` 普通方法使用调用方 runtime，只有显式
 `build_runtime`/`run` 创建 runtime；`tokio + tokio-util` 提供线性化关闭的 `TokioTaskGroup`，并通过 `futures-timer` 保证关闭 grace 在 Tokio time driver 被禁用时仍可用。
 Axum HTTP/1 服务需要 `axum + tokio`，支持 Router/state、单次运行状态机和协作式 graceful
-shutdown；Tower、Tower HTTP、tower_governor middleware 分别由同名 provider feature 提供。
+shutdown；可通过泛型 `AxumApp::<S>::create_router` 或 `AxumUtils::create_router<S>` 创建保留
+missing-state 类型的原生空 Router，
+也可通过 `AxumUtils::create_app` 创建空 `AxumApp`。Tower、Tower HTTP、tower_governor middleware
+分别由同名 provider feature 提供。
 首版不提供 TLS、HTTP/2、强制 drain deadline 或可信代理 CIDR 验证。`tower_governor` 0.8 的
 Axum 集成会启用 Axum default（含 form/json/query/tracing 等）并间接启用 Tokio macros；这是固定上游
 feature 扩张，不表示 axutils 默认安装这些行为。完整 API 与边界见
@@ -72,6 +75,12 @@ provider feature，单独启用会编译 Croner 及其内部 `chrono` 依赖，�
 axutils = { version = "0.1", default-features = false, features = ["axum", "tokio", "tower-http"] }
 axum = { version = "0.8.9", default-features = false }
 tokio = { version = "1.53.1", features = ["macros", "rt-multi-thread"] }
+```
+
+```rust
+let router: axum::Router<String> = axutils::AxumUtils::create_router();
+let builder = axutils::AxumApp::from_router(router).with_state("axutils".to_owned());
+let _server = builder.build().unwrap();
 ```
 
 需要调度器时显式启用全部四项前置 feature；应用自己的 Tokio 依赖负责宏、runtime flavor 和

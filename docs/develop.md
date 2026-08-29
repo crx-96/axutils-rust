@@ -5,6 +5,9 @@
 `docs/examples/` 打入发布包；`docs/develop.md`、`AGENTS.md` 以及 `docs/` 中的计划、
 状态和其他开发资料不随包发布。
 
+本文件是面向开发人员的命令说明，不是 Agent 常规实现、测试、审查或验收的必读上下文；只有
+开发/发布命令发生新增、删除、修改，或需要把命令变化同步给开发人员时，Agent 才读取并更新对应章节。
+
 实现、审查和验收的统一门槛见
 [`review-rust-library-change`](skills/review-rust-library-change/SKILL.md) Skill；本文档保留开发、
 feature 背景和发布操作命令。两者出现冲突时，先按 Skill 的权威来源顺序核对当前源码和
@@ -134,6 +137,14 @@ cargo tree --no-default-features --features logging -e normal,build,features
 # check/test/doc 与 cargo tree；将占位符替换为实际测试函数名。
 cargo test --no-default-features --test feature_matrix <相关测试函数名> -- --ignored --test-threads=1
 
+# 局部修改 docs/examples 时，先做全量 metadata 快速枚举，再只编译本次涉及文档的全部代码块；
+# 将过滤值替换为实际文档路径，验证后清除任务专用环境变量。README 另用 include_str scratch
+# crate 单独验证，不因 README 变更运行全部 docs/examples。
+cargo test --no-default-features --test docs_examples docs_examples_are_complete -- --test-threads=1
+$env:AXUTILS_DOCS_EXAMPLE_FILTER = "docs/examples/axum.md"
+cargo test --no-default-features --test docs_examples compile_docs_examples_offline -- --ignored --test-threads=1
+Remove-Item Env:AXUTILS_DOCS_EXAMPLE_FILTER
+
 # 仅在 review-rust-library-change Skill 的完整验证触发条件成立或用户明确要求完整验证时，
 # 才按下面的固定清单顺序串行执行；日常局部变更默认使用上面的直接相关命令。
 # 完整验证用于覆盖所有已启用模块、feature/API 依赖边界和文档。
@@ -155,7 +166,7 @@ cargo rustdoc --target-dir target/axutils-comprehensive-rustdoc --no-default-fea
 cargo test --target-dir target/axutils-default-doctest --no-default-features --doc
 cargo test --target-dir target/axutils-comprehensive-doctest --no-default-features --features $nonAllocatorFeatures --doc
 
-# 19 份 docs/examples 的 ignored 外部编译 harness，逐块报告编译状态。
+# 19 份 docs/examples 的 ignored 外部编译 harness，逐块报告编译状态；完整验证不设置过滤器。
 cargo test --no-default-features --test docs_examples -- --ignored --test-threads=1
 
 # 两个进程级 allocator 必须分别成功验证；综合组合不能包含它们。

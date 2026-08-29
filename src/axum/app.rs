@@ -46,6 +46,24 @@ impl<S> AxumApp<S>
 where
     S: Clone + Send + Sync + 'static,
 {
+    /// 创建一个不含路由、fallback 或已注入 state 的原生 `axum::Router<S>`。
+    ///
+    /// 返回值等价于 `axum::Router::<S>::new()`，并保留由 `S` 表达的 missing-state 类型，便于
+    /// 调用方从 axutils 的 Axum 工厂入口开始组装原生 Router。该方法不会失败、bind、创建
+    /// runtime 或访问网络；路由数量、注册冲突和后续 layer 资源仍由调用方与 Axum 0.8 负责。
+    /// 仅在 crate 同时启用 `axum` 与 `tokio` feature 时可用；调用方若在签名中使用返回类型，
+    /// 仍需直接依赖兼容版本的 Axum。
+    ///
+    /// # Examples
+    ///
+    /// ```rust,no_run
+    /// let router: axum::Router<String> = axutils::AxumApp::<String>::create_router();
+    /// let _builder = axutils::AxumApp::from_router(router).with_state("axutils".to_owned());
+    /// ```
+    pub fn create_router() -> Router<S> {
+        Router::new()
+    }
+
     /// 从原生 `axum::Router<S>` 创建应用构建器。
     ///
     /// 输入 router 的路由、fallback 和 missing state 类型会原样保留；返回值使用空的延迟 layer
@@ -331,7 +349,7 @@ impl AxumApp<()> {
     /// let _builder = app.into_server_builder();
     /// ```
     pub fn new() -> Self {
-        Self::from_router(Router::new())
+        Self::from_router(Self::create_router())
     }
 }
 impl<G, R> AxumApp<(), G, R>

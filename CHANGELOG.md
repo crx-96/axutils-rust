@@ -3,6 +3,15 @@
 本文件仅记录 `axutils` 各版本的源码、公共 API、运行时行为、错误与安全边界，以及面向使用者的兼容性变化。
 每次修改或增加功能时，先读取 `Cargo.toml` 中的 `[package].version`，再在对应版本条目中补充记录。
 
+## [0.1.2]
+
+### Added
+
+- 为 `axum + tokio` 新增 `AxumApp::<S>::create_router`、泛型
+  `AxumUtils::create_router<S>` 和 `AxumUtils::create_app`，分别创建保留 missing-state 类型的原生空
+  `axum::Router<S>` 与空 `AxumApp<()>`；这些工厂只组装内存对象，不读取全局 server、不 bind、
+  不创建 runtime 或访问网络。
+
 ## [0.1.0]
 
 ### Added

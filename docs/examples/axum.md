@@ -37,8 +37,9 @@ let server = AxumApp::new().route("/health", get(|| async { "ok" }))
 
 ## AxumApp
 
-### new / Default / from_router
-创建空 Router 或包装调用方 Router；只组装内存状态，不 bind。
+### create_router / new / Default / from_router
+创建保留 missing-state 泛型的原生空 Router、空 AxumApp 或包装调用方 Router；只组装内存状态，
+不 bind。
 
 ### route / route_service / nest / merge / fallback
 保持 Axum 0.8 的注册、嵌套、合并和 fallback 语义。单 route middleware 应先在 MethodRouter/子 Router 上使用原生 layer。
@@ -239,6 +240,17 @@ deadline。当前源码未标记 `#[non_exhaustive]`，因此现有两个变体�
 ## 逐项 API 签名与示例
 
 以下小节补齐上文概览中合并展示的方法；均要求 `axum + tokio`，额外 feature 单独标明。
+
+### `AxumApp::create_router`
+该方法定义在 `AxumApp<S>` 上，签名为 `pub fn create_router() -> axum::Router<S>`，其中
+`S: Clone + Send + Sync + 'static`；要求 `axum + tokio` feature。无输入，返回等价于
+`axum::Router::<S>::new()` 的原生空 Router，并保留 `S` 表达的 missing-state 类型；不返回错误、
+不 bind、不创建 runtime、不访问网络。路由注册、冲突、layer、state 和资源边界仍由调用方与
+Axum 0.8 负责。返回类型来自调用方需要直接依赖的兼容 Axum 版本。
+```rust
+let router: axum::Router<String> = axutils::AxumApp::<String>::create_router();
+let _builder = axutils::AxumApp::from_router(router).with_state("axutils".to_owned());
+```
 
 ### `AxumApp::new`
 签名：`pub fn new() -> AxumApp<()>`；要求 `axum + tokio` feature。无输入，返回空 Router
@@ -490,6 +502,26 @@ Tokio runtime。输入 listener 与宿主关闭 future，输出实际地址/首�
 原因的借用，生命周期受 outcome 约束；不访问网络、不返回错误、不产生副作用。
 ```rust,no_run
 # async fn demo(server:axutils::AxumServer,listener:tokio::net::TcpListener)->Result<(),axutils::AxumError>{let out=server.serve_with_shutdown(listener,async{axutils::AxumShutdownReason::Programmatic}).await?;let _=out.reason();Ok(())}
+```
+
+### `AxumUtils::create_router`
+签名：`pub fn create_router<S>() -> axum::Router<S>`，其中
+`S: Clone + Send + Sync + 'static`；要求 `axum + tokio` feature。无输入，复用
+`AxumApp::<S>::create_router` 返回保留 missing-state 类型的原生空 Router；不读取或修改全局
+server，不返回错误、不 bind、不创建 runtime、不访问网络。调用方负责后续路由、layer、state 和
+资源边界，并直接依赖兼容的 Axum。
+```rust
+let router: axum::Router<String> = axutils::AxumUtils::create_router();
+let _builder = axutils::AxumApp::from_router(router).with_state("axutils".to_owned());
+```
+
+### `AxumUtils::create_app`
+签名：`pub fn create_app() -> AxumApp<()>`；要求 `axum + tokio` feature。无输入，复用
+`AxumApp::new` 返回独立的空应用构建器；不读取或修改全局 server，不返回错误、不 bind、不创建
+runtime、不访问网络。返回值可继续注册路由并转换为 `AxumServerBuilder`。
+```rust
+let app = axutils::AxumUtils::create_app();
+let _builder = app.into_server_builder();
 ```
 
 ### `AxumUtils::init`

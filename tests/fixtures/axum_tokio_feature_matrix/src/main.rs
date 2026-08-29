@@ -24,6 +24,14 @@ fn main() {
     #[cfg(feature = "core")]
     {
         let _ = core_builder().build();
+        let _: axum::Router = axutils::AxumApp::create_router();
+        let _: axum::Router<String> = axutils::AxumApp::<String>::create_router();
+        let _: axum::Router = axutils::AxumUtils::create_router();
+        let _: axum::Router<String> = axutils::AxumUtils::create_router();
+        let _: axutils::AxumApp = axutils::AxumUtils::create_app();
+        let _: axum::Router = axutils::utils::AxumUtils::create_router();
+        let _: axum::Router<String> = axutils::utils::AxumUtils::create_router();
+        let _: axutils::AxumApp = axutils::utils::axum_utils::AxumUtils::create_app();
         let _ = std::any::type_name::<axutils::AxumApp>();
         let _ = std::any::type_name::<axutils::AxumServerBuilder>();
         let _ = std::any::type_name::<axutils::AxumServer>();

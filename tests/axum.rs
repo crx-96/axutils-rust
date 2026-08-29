@@ -19,6 +19,32 @@ fn server() -> axutils::AxumServer {
         .expect("build server")
 }
 
+#[test]
+fn factories_create_empty_router_and_app() {
+    let router: Router = AxumApp::create_router();
+    assert!(!router.has_routes());
+
+    let router: Router = axutils::AxumUtils::create_router();
+    assert!(!router.has_routes());
+
+    let router: Router<String> = AxumApp::<String>::create_router();
+    assert!(!router.has_routes());
+    assert!(AxumApp::from_router(router)
+        .with_state("app-state".to_owned())
+        .build()
+        .is_ok());
+
+    let router: Router<String> = axutils::AxumUtils::create_router();
+    assert!(!router.has_routes());
+    assert!(AxumApp::from_router(router)
+        .with_state("utils-state".to_owned())
+        .build()
+        .is_ok());
+
+    let app: AxumApp = axutils::AxumUtils::create_app();
+    assert!(app.into_server_builder().build().is_ok());
+}
+
 #[tokio::test]
 async fn loopback_serves_and_preserves_custom_shutdown_reason() {
     let server = server();

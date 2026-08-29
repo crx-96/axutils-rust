@@ -2,8 +2,8 @@
 
 //! Markdown 示例的离线编译闭环。
 //!
-//! 该测试默认只做枚举和 metadata 双向校验；完整编译是 ignored 测试，固定使用
-//! `cargo test --no-default-features --test docs_examples -- --ignored --test-threads=1`。
+//! 该测试默认只做枚举和 metadata 双向校验；编译是 ignored 测试。局部验证通过
+//! `AXUTILS_DOCS_EXAMPLE_FILTER` 选择受影响文档，完整验证才不设置过滤器。
 //! 每个 Rust fence 都在独立的临时 crate 中检查，所有临时 crate 共用本测试专属的
 //! `CARGO_TARGET_DIR`，并且由本测试串行执行，避免并发 rustdoc/cargo 产物相互污染。
 
@@ -5799,7 +5799,7 @@ const BLOCK_METADATA: &[BlockMetadata] = &[
     BlockMetadata {
         key: "docs/examples/axum.md#6",
         axutils_features: F_AXUM_BASE,
-        direct_dependencies: &[],
+        direct_dependencies: &[DEP_AXUM],
         mode: CompileMode::Compiled,
         exclusion_reason: None,
     },
@@ -5813,7 +5813,7 @@ const BLOCK_METADATA: &[BlockMetadata] = &[
     BlockMetadata {
         key: "docs/examples/axum.md#8",
         axutils_features: F_AXUM_BASE,
-        direct_dependencies: &[DEP_AXUM],
+        direct_dependencies: &[],
         mode: CompileMode::Compiled,
         exclusion_reason: None,
     },
@@ -5827,14 +5827,14 @@ const BLOCK_METADATA: &[BlockMetadata] = &[
     BlockMetadata {
         key: "docs/examples/axum.md#10",
         axutils_features: F_AXUM_BASE,
-        direct_dependencies: &[DEP_AXUM, DEP_TOWER],
+        direct_dependencies: &[DEP_AXUM],
         mode: CompileMode::Compiled,
         exclusion_reason: None,
     },
     BlockMetadata {
         key: "docs/examples/axum.md#11",
         axutils_features: F_AXUM_BASE,
-        direct_dependencies: &[DEP_AXUM],
+        direct_dependencies: &[DEP_AXUM, DEP_TOWER],
         mode: CompileMode::Compiled,
         exclusion_reason: None,
     },
@@ -5848,21 +5848,21 @@ const BLOCK_METADATA: &[BlockMetadata] = &[
     BlockMetadata {
         key: "docs/examples/axum.md#13",
         axutils_features: F_AXUM_BASE,
-        direct_dependencies: &[],
+        direct_dependencies: &[DEP_AXUM],
         mode: CompileMode::Compiled,
         exclusion_reason: None,
     },
     BlockMetadata {
         key: "docs/examples/axum.md#14",
         axutils_features: F_AXUM_BASE,
-        direct_dependencies: &[DEP_AXUM],
+        direct_dependencies: &[],
         mode: CompileMode::Compiled,
         exclusion_reason: None,
     },
     BlockMetadata {
         key: "docs/examples/axum.md#15",
         axutils_features: F_AXUM_BASE,
-        direct_dependencies: &[],
+        direct_dependencies: &[DEP_AXUM],
         mode: CompileMode::Compiled,
         exclusion_reason: None,
     },
@@ -5938,7 +5938,7 @@ const BLOCK_METADATA: &[BlockMetadata] = &[
     },
     BlockMetadata {
         key: "docs/examples/axum.md#26",
-        axutils_features: F_AXUM_HTTP,
+        axutils_features: F_AXUM_BASE,
         direct_dependencies: &[],
         mode: CompileMode::Compiled,
         exclusion_reason: None,
@@ -5952,7 +5952,7 @@ const BLOCK_METADATA: &[BlockMetadata] = &[
     },
     BlockMetadata {
         key: "docs/examples/axum.md#28",
-        axutils_features: F_AXUM_GOVERNOR,
+        axutils_features: F_AXUM_HTTP,
         direct_dependencies: &[],
         mode: CompileMode::Compiled,
         exclusion_reason: None,
@@ -5966,7 +5966,7 @@ const BLOCK_METADATA: &[BlockMetadata] = &[
     },
     BlockMetadata {
         key: "docs/examples/axum.md#30",
-        axutils_features: F_AXUM_BASE,
+        axutils_features: F_AXUM_GOVERNOR,
         direct_dependencies: &[],
         mode: CompileMode::Compiled,
         exclusion_reason: None,
@@ -5982,13 +5982,13 @@ const BLOCK_METADATA: &[BlockMetadata] = &[
         key: "docs/examples/axum.md#32",
         axutils_features: F_AXUM_BASE,
         direct_dependencies: &[],
-        mode: CompileMode::NoRun,
+        mode: CompileMode::Compiled,
         exclusion_reason: None,
     },
     BlockMetadata {
         key: "docs/examples/axum.md#33",
         axutils_features: F_AXUM_BASE,
-        direct_dependencies: &[DEP_TOKIO],
+        direct_dependencies: &[],
         mode: CompileMode::NoRun,
         exclusion_reason: None,
     },
@@ -6016,14 +6016,14 @@ const BLOCK_METADATA: &[BlockMetadata] = &[
     BlockMetadata {
         key: "docs/examples/axum.md#37",
         axutils_features: F_AXUM_BASE,
-        direct_dependencies: &[],
+        direct_dependencies: &[DEP_TOKIO],
         mode: CompileMode::NoRun,
         exclusion_reason: None,
     },
     BlockMetadata {
         key: "docs/examples/axum.md#38",
         axutils_features: F_AXUM_BASE,
-        direct_dependencies: &[],
+        direct_dependencies: &[DEP_AXUM],
         mode: CompileMode::Compiled,
         exclusion_reason: None,
     },
@@ -6031,7 +6031,7 @@ const BLOCK_METADATA: &[BlockMetadata] = &[
         key: "docs/examples/axum.md#39",
         axutils_features: F_AXUM_BASE,
         direct_dependencies: &[],
-        mode: CompileMode::NoRun,
+        mode: CompileMode::Compiled,
         exclusion_reason: None,
     },
     BlockMetadata {
@@ -6045,67 +6045,88 @@ const BLOCK_METADATA: &[BlockMetadata] = &[
         key: "docs/examples/axum.md#41",
         axutils_features: F_AXUM_BASE,
         direct_dependencies: &[],
-        mode: CompileMode::NoRun,
+        mode: CompileMode::Compiled,
         exclusion_reason: None,
     },
     BlockMetadata {
         key: "docs/examples/axum.md#42",
         axutils_features: F_AXUM_BASE,
-        direct_dependencies: &[DEP_TOKIO],
+        direct_dependencies: &[],
         mode: CompileMode::NoRun,
         exclusion_reason: None,
     },
     BlockMetadata {
         key: "docs/examples/axum.md#43",
         axutils_features: F_AXUM_BASE,
-        direct_dependencies: &[DEP_TOKIO],
+        direct_dependencies: &[],
         mode: CompileMode::NoRun,
         exclusion_reason: None,
     },
     BlockMetadata {
         key: "docs/examples/axum.md#44",
-        axutils_features: F_AXUM_TOWER,
-        direct_dependencies: &[DEP_TOWER],
-        mode: CompileMode::Compiled,
+        axutils_features: F_AXUM_BASE,
+        direct_dependencies: &[],
+        mode: CompileMode::NoRun,
         exclusion_reason: None,
     },
     BlockMetadata {
         key: "docs/examples/axum.md#45",
-        axutils_features: F_AXUM_TOWER,
-        direct_dependencies: &[DEP_TOWER],
-        mode: CompileMode::Compiled,
+        axutils_features: F_AXUM_BASE,
+        direct_dependencies: &[DEP_TOKIO],
+        mode: CompileMode::NoRun,
         exclusion_reason: None,
     },
     BlockMetadata {
         key: "docs/examples/axum.md#46",
-        axutils_features: F_AXUM_TOWER,
-        direct_dependencies: &[],
-        mode: CompileMode::Compiled,
+        axutils_features: F_AXUM_BASE,
+        direct_dependencies: &[DEP_TOKIO],
+        mode: CompileMode::NoRun,
         exclusion_reason: None,
     },
     BlockMetadata {
         key: "docs/examples/axum.md#47",
-        axutils_features: F_AXUM_HTTP,
-        direct_dependencies: &[],
+        axutils_features: F_AXUM_TOWER,
+        direct_dependencies: &[DEP_TOWER],
         mode: CompileMode::Compiled,
         exclusion_reason: None,
     },
     BlockMetadata {
         key: "docs/examples/axum.md#48",
-        axutils_features: F_AXUM_HTTP,
-        direct_dependencies: &[],
+        axutils_features: F_AXUM_TOWER,
+        direct_dependencies: &[DEP_TOWER],
         mode: CompileMode::Compiled,
         exclusion_reason: None,
     },
     BlockMetadata {
         key: "docs/examples/axum.md#49",
-        axutils_features: F_AXUM_HTTP,
+        axutils_features: F_AXUM_TOWER,
         direct_dependencies: &[],
         mode: CompileMode::Compiled,
         exclusion_reason: None,
     },
     BlockMetadata {
         key: "docs/examples/axum.md#50",
+        axutils_features: F_AXUM_HTTP,
+        direct_dependencies: &[],
+        mode: CompileMode::Compiled,
+        exclusion_reason: None,
+    },
+    BlockMetadata {
+        key: "docs/examples/axum.md#51",
+        axutils_features: F_AXUM_HTTP,
+        direct_dependencies: &[],
+        mode: CompileMode::Compiled,
+        exclusion_reason: None,
+    },
+    BlockMetadata {
+        key: "docs/examples/axum.md#52",
+        axutils_features: F_AXUM_HTTP,
+        direct_dependencies: &[],
+        mode: CompileMode::Compiled,
+        exclusion_reason: None,
+    },
+    BlockMetadata {
+        key: "docs/examples/axum.md#53",
         axutils_features: F_AXUM_TRACE,
         direct_dependencies: &[],
         mode: CompileMode::Compiled,
@@ -6876,7 +6897,7 @@ fn docs_examples_are_complete() {
 }
 
 #[test]
-#[ignore = "逐块派生临时 crate 并 cargo check --offline；需显式运行"]
+#[ignore = "逐块派生临时 crate 并 cargo check --offline；局部验证用 AXUTILS_DOCS_EXAMPLE_FILTER 按文档过滤"]
 fn compile_docs_examples_offline() {
     let documents =
         load_documents().unwrap_or_else(|error| panic!("failed to enumerate docs: {error}"));

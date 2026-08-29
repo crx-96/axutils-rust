@@ -11,8 +11,9 @@ description: 使用 axutils 的影响分析、公共 API 与 feature 守卫检�
 
 规则文件负责声明本 Skill 的强制入口；本 Skill 负责定义“什么才算完成”。以后涉及项目实现的
 修改、审查或验收，必须完整读取本 Skill，再按影响范围执行对应检查。精确的工具类归属、公共
-导出清单和能力边界仍以 [`docs/module-map.md`](../../module-map.md) 为准，精确的开发与发布
-操作命令仍参考 [`docs/develop.md`](../../develop.md)。
+导出清单和能力边界仍以 [`docs/module-map.md`](../../module-map.md) 为准。面向开发人员的命令说明
+维护在 [`docs/develop.md`](../../develop.md)，但它不是 Agent 常规实现、测试或验收的必读上下文；
+只有任务新增、删除或修改开发/发布命令，或者需要同步开发人员操作说明时才读取并更新。
 
 ## 1. 适用范围、术语和证据要求
 
@@ -53,7 +54,8 @@ description: 使用 axutils 的影响分析、公共 API 与 feature 守卫检�
    `dev-dependencies`，尤其确认当前 `version` 与 `rust-version`；
 5. 读取目标源码、crate 根导出、调用方、已有测试、fixture、对应 `docs/examples/`、README
    相关段落和当前 `CHANGELOG.md` 条目；
-6. 需要开发或发布命令时，再读取 [`docs/develop.md`](../../develop.md) 的对应章节。
+6. 仅当任务新增、删除或修改开发/发布命令，或需要同步开发人员操作说明时，读取
+   [`docs/develop.md`](../../develop.md) 的对应章节；普通实现、测试、审查和验收不读取该文件。
 
 当不同文件对“当前行为”的描述不一致时，按以下顺序处理：
 
@@ -188,8 +190,8 @@ description: 使用 axutils 的影响分析、公共 API 与 feature 守卫检�
 - 新增 feature 或修改依赖边界时，必须在 `Cargo.toml`、源码、module map、README、API doc、
   `docs/examples/`、fixture 和 CHANGELOG（如属用户可见变化）中保持一致；
 - 新增、删除、重命名 feature，或修改 feature 的依赖映射、组合前提、公共导出时，必须检查
-  `[package.metadata.docs.rs].features` 是否需要同步更新，并与 `docs/develop.md` 的非 allocator 综合
-  成功组合机械比较。docs.rs 清单必须覆盖应展示的可选公共 API，并排除 `mimalloc`、`rpmalloc`
+  `[package.metadata.docs.rs].features` 是否需要同步更新。只有 feature 名称集合变化会修改面向开发人员
+  的非 allocator 综合命令时，才读取并同步 `docs/develop.md` 的对应清单。docs.rs 清单必须覆盖应展示的可选公共 API，并排除 `mimalloc`、`rpmalloc`
   及其他只能作为负向契约或不能共同成功构建的组合；判断无需更新时，验收报告必须记录理由；
 - feature 选择不得悄悄改变 TLS、代理、OpenSSL/native-tls、Tokio runtime、全局分配器等
   安全或平台边界，依赖树必须验证实际结果。
@@ -301,6 +303,13 @@ Rust 代码块时，必须：
    示例必须 `no_run`、只构造对象或明确不会执行外部副作用；
 5. 验证后删除 scratch crate 和本次产生且无用途的构建/日志临时文件。
 
+这里的“本次涉及”以实际修改的文档文件为边界：局部修改 README 时只收集 README，局部修改
+某个 `docs/examples/<name>.md` 时只编译该文件的全部 Rust 代码块。可以运行
+`docs_examples_are_complete` 对全部文档做快速 metadata 双向枚举，但运行 ignored 的
+`compile_docs_examples_offline` 时必须通过 `AXUTILS_DOCS_EXAMPLE_FILTER` 限定受影响文档。只有
+第 8.4 节完整验证的触发条件成立或用户明确要求全量验证时，才不设置过滤器并编译全部
+`docs/examples/`；不能因为 harness 默认支持全量模式就把无关文档纳入局部验证。
+
 ### 7.4 版本和 CHANGELOG
 
 - 每次源码、公共 API、运行时行为、错误或安全边界变更前，先读取 `Cargo.toml` 的
@@ -343,7 +352,7 @@ feature、共享/传递依赖、TLS/runtime/allocator 等安全或平台边界�
 | 影响范围 | 最小验证 | 需要增加的验证 |
 | --- | --- | --- |
 | 仅私有局部实现 | `cargo fmt --all -- --check`；直接相关单元/集成测试；`git diff --check` | 触及资源、安全、并发或跨平台时增加相应边界和 feature 检查 |
-| 公共行为或错误语义 | 上述检查 + 相关 feature 测试 + API doc/doctest | `docs/examples` 全代码块、CHANGELOG 判断、公开路径和回归测试 |
+| 公共行为或错误语义 | 上述检查 + 相关 feature 测试 + API doc/doctest | 本次涉及的 `docs/examples/<name>.md` 全部代码块、CHANGELOG 判断、公开路径和回归测试 |
 | 公共导出、签名或模块 | 相关单元/集成测试 + API doc/doctest + 对应正负 fixture | 对应的 filtered ignored matrix、受影响文档 feature 和兼容性审查；不因仅新增方法默认运行完整矩阵 |
 | feature、依赖、Cargo 配置、TLS/runtime 或 MSRV | 相关组合的 `check/test/doc`、正负 fixture、filtered ignored matrix 和依赖树 | 默认能力隔离、fresh-resolution、传递 feature 和平台前提；命中高影响条件或局部证据不足时才扩大完整矩阵 |
 | 跨模块、公共安全边界或发布 | 完整项目验证清单 | `cargo package --list`、必要的 publish dry-run；外部发布仍需明确授权 |
@@ -391,7 +400,8 @@ cargo check --no-default-features --features mimalloc,rpmalloc
 ### 8.4 完整验证清单
 
 当变更属于跨模块或跨能力单元、高影响 feature/依赖边界、公共安全边界、发布或局部证据不足时，执行并报告
-[`docs/develop.md`](../../develop.md) 的“本地开发”和“发布步骤”清单；用户明确要求完整验证时同样执行。
+本节的完整验证清单；用户明确要求完整验证时同样执行。`docs/develop.md` 只在本次验证命令本身
+需要新增、删除、修改或同步给开发人员时读取，不作为执行完整验证的前置步骤。
 未命中上述条件时，默认停留在第 8.2 节定义的最小充分验证。至少包括：
 
 ```powershell
@@ -409,10 +419,10 @@ git diff --check
 ```
 
 再按变更涉及的能力补充 `lettre`、`tokio`、`serde`、模板、日期、配置、crypto、JWT、HTTP、
-Redis、转换和编码等组合的 `cargo check/test/doc` 与 `cargo tree`。完整命令和当前能力的
-具体组合以 `docs/develop.md`、`Cargo.toml` 和 `tests/feature_matrix.rs` 为准。
+Redis、转换和编码等组合的 `cargo check/test/doc` 与 `cargo tree`。当前能力的具体组合以
+`Cargo.toml`、目标源码、直接相关测试和 `tests/feature_matrix.rs` 为准。
 
-调度器变更还必须运行 `docs/develop.md` 中的 scheduler 集成测试、doctest、clippy 和依赖树命令，
+调度器变更还必须运行 scheduler 集成测试、doctest、clippy 和依赖树检查，
 并通过 ignored feature matrix 验证 `chrono`、`chrono_tz`、`tokio`、`croner` 的全部 16 种组合：
 只有完整组合成功导出调度器 API，其余 15 种组合必须以稳定诊断证明 API 不存在。依赖树还必须确认
 生产 Tokio feature 精确包含 `fs`、`io-util`、`net`、`rt`、`rt-multi-thread`、`signal`、`sync`、
@@ -467,7 +477,8 @@ Redis、转换和编码等组合的 `cargo check/test/doc` 与 `cargo tree`。�
   项目验收标准；
 - 纯翻译、简单措辞调整或与 Rust library 无关的文件操作不自动触发该 Skill，但只要涉及本项目
   规则、标准、模块定位或验收，就仍必须完整读取本 Skill；
-- 修改本 Skill 时，检查规则文件链接、Skill 触发描述、`docs/develop.md` 命令和 module map 引用；
+- 修改本 Skill 时，检查规则文件链接、Skill 触发描述和 module map 引用；只有开发/发布命令也发生
+  变化时才读取并同步 `docs/develop.md`；
   修改公共实现时，遵循本 Skill 的 CHANGELOG 和版本规则，不因 Skill 本身的维护变更版本；
 - 发现标准与当前实现冲突时，先以源码和可复现证据定位差异，再同步修标准或实现，不能静默
 选择较宽松的解释。
