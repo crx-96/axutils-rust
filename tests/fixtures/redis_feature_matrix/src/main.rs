@@ -150,6 +150,10 @@ async fn compile_async_api() {
 
     use axutils::redis::RedisAsyncLockGuard as ModuleRedisAsyncLockGuard;
 
+    let _ = RedisUtils::init_async;
+    let _ = axutils::utils::RedisUtils::init_async;
+    let _ = axutils::utils::redis_utils::RedisUtils::init_async;
+
     let config = RedisConfig::single("redis://127.0.0.1:6379/0").expect("fixture config");
     let client = RedisClient::new(config).expect("fixture client");
 
@@ -334,6 +338,11 @@ fn main() {
     let _ = axutils::config::ConfigLoader::new;
 }
 
+#[cfg(feature = "negative-redis-utils-init-async")]
+fn main() {
+    let _ = axutils::RedisUtils::init_async;
+}
+
 #[cfg(not(any(
     feature = "none",
     feature = "tokio-only",
@@ -351,6 +360,7 @@ fn main() {
     feature = "negative-redis-async",
     feature = "negative-redis-async-lock",
     feature = "negative-redis-utils-async",
+    feature = "negative-redis-utils-init-async",
     feature = "negative-redis-config"
 )))]
 fn main() {}

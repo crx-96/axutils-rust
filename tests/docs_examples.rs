@@ -3836,6 +3836,13 @@ const BLOCK_METADATA: &[BlockMetadata] = &[
         exclusion_reason: None,
     },
     BlockMetadata {
+        key: "docs/examples/redis.md#231",
+        axutils_features: &["redis", "tokio"],
+        direct_dependencies: &[],
+        mode: CompileMode::NoRun,
+        exclusion_reason: None,
+    },
+    BlockMetadata {
         key: "docs/examples/http.md#1",
         axutils_features: &[],
         direct_dependencies: &[],

@@ -20,11 +20,12 @@ axutils = { version = "0.1", features = ["redis", "tokio"] }
 tokio = { version = "1.53.1", features = ["macros", "rt-multi-thread"] }
 ```
 
-第一阶段只接受 `redis://` endpoint，不启用 TLS，也不接受 `rediss://`。配置、客户端和
-`RedisUtils::init` 只做本地构造，不发送 PING 或建立网络连接；同步 r2d2 checkout 只检查
-连接的本地 open 状态，不为每次 checkout 发送 PING。第一次命令调用才可能建立连接并返回
-传输错误。同步命令会阻塞当前线程，Tokio 任务应使用异步方法；库不会创建
-runtime、调用 `block_on` 或把同步调用转移到线程池。
+第一阶段只接受 `redis://` endpoint，不启用 TLS，也不接受 `rediss://`。配置和
+`RedisClient::new` 只做本地惰性构造；普通首次命令才可能建立连接并返回传输错误。
+`RedisUtils::init` 是例外：它会同步 checkout 连接、执行 `PING` 并要求 `PONG`，验证成功后才写入
+全局单例。`redis,tokio` 下的 `RedisUtils::init_async` 则在调用方 runtime 中验证异步连接。同步 r2d2
+checkout 不为每次 checkout 发送 PING。同步命令会阻塞当前线程，Tokio 任务应使用异步方法；库不会
+创建 runtime、调用 `block_on` 或把同步调用转移到线程池。
 
 ## 公共导出路径
 
@@ -1995,9 +1996,13 @@ let _ = RedisTransaction::persist::<&str>;
 
 ## `RedisUtils`
 
-`RedisUtils` 使用 `OnceLock<RedisClient>`。`init` 只有在客户端本地构造成功后才占用单例；
-竞争初始化时仅一个调用成功，之后返回 `AlreadyInitialized`。未初始化调用返回
-`NotInitialized`。没有 `client()`、配置/凭据 getter、reset 或 replace 公共 API。
+`RedisUtils` 使用由 `init` 与 `init_async` 共用的 `OnceLock<RedisClient>`。两入口会按配置已有的连接、
+checkout 和响应超时创建客户端、执行 `PING`；只有收到 `PONG` 后才占用单例，合计仅一个调用成功。
+连接、认证、命令、超时、`init_async` 的 `RuntimeRequired` 或 await 取消都不会占位，随后可使用相同或
+新配置重试；取消返回后也可能已有并发调用成功。非 `PONG` 返回
+`RedisError::Transport(RedisTransportErrorKind::Protocol)`。已有全局客户端时直接返回 `AlreadyInitialized`，
+不访问新目标；并发调用可以各自验证，但仅一个调用能写入单例。未初始化调用返回 `NotInitialized`。没有
+`client()`、配置/凭据 getter、reset 或 replace 公共 API。
 `set_nx_with_expiry` 和 `set_bytes_nx_with_expiry` 只是通用条件写入，不会自动释放；
 `delete`/`pexpire` 也不校验锁 token。需要租约语义时使用下方的 `try_lock` 转发。
 
@@ -2005,6 +2010,9 @@ let _ = RedisTransaction::persist::<&str>;
 
 签名：`pub fn init(config: RedisConfig) -> Result<(), RedisError>`。
 调用示例：`RedisUtils::init(RedisConfig::single("redis://127.0.0.1:6379/0")?)?`。
+这是同步网络操作，宜在应用启动且进入 Tokio runtime 前调用；它会预热同步连接池，但 async backend
+仍保持惰性。异步应用请使用文末的 `RedisUtils::init_async`。Cluster 仅按当前后端的 `PING` 路由验证，
+不承诺之后持续可用。
 
 ```rust,no_run
 use axutils::{RedisConfig, RedisUtils};
@@ -2016,7 +2024,8 @@ RedisUtils::init(config)?;
 
 ### `RedisUtils::is_initialized`
 
-签名：`pub fn is_initialized() -> bool`。调用示例：`RedisUtils::is_initialized()`。
+签名：`pub fn is_initialized() -> bool`。调用示例：`RedisUtils::is_initialized()`。它只表示全局
+客户端曾成功完成初始化，不访问网络，也不是持续健康检查。
 
 ```rust
 use axutils::RedisUtils;
@@ -3324,3 +3333,28 @@ let _ = RedisUtils::transaction_async::<fn(&mut RedisTransaction) -> Result<(), 
   原生 counter 或单独设计脚本/CAS API。
 - 真实凭据只从调用方自己的安全配置注入；示例中的 `example.com`、loopback 和占位值不
   能替代生产密钥管理。
+
+## `RedisUtils::init_async`
+
+签名：`pub async fn init_async(config: RedisConfig) -> Result<(), RedisError>`；要求同时启用
+`redis,tokio`，并由调用方提供 Tokio runtime。它创建客户端后以异步 backend 执行 `PING`，只有收到
+`PONG` 后才写入与 `init` 共用的 `OnceLock`；两入口合计只会成功一次。该方法预热异步连接，
+不预热同步池；同步 `init` 则相反。
+
+已有全局客户端时优先返回 `AlreadyInitialized`，不访问传入的新目标。连接、认证、命令、超时、
+`RuntimeRequired`、await 取消和非 `PONG` 的 `RedisError::Transport(RedisTransportErrorKind::Protocol)`
+都不会保存本次客户端，之后可以重试；其他并发调用仍可能成功初始化。它不创建 runtime，不能
+reset/replace 全局客户端；`is_initialized()` 仅表示曾成功初始化，不是持续健康检查。Cluster 仅验证
+当前后端 `PING` 的路由结果，不承诺后续持续可用。
+
+```rust,no_run
+# #[cfg(all(feature = "redis", feature = "tokio"))]
+# async fn example() -> Result<(), axutils::RedisError> {
+use axutils::{RedisConfig, RedisUtils};
+
+let config = RedisConfig::single("redis://127.0.0.1:6379/0")?;
+RedisUtils::init_async(config).await?;
+# Ok(())
+# }
+# fn main() {}
+```

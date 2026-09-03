@@ -1,6 +1,10 @@
 #![cfg(feature = "redis")]
 
-use axutils::{RedisConfig, RedisError, RedisUtils};
+use axutils::{RedisConfig, RedisError, RedisTransportErrorKind, RedisUtils};
+
+#[path = "support/redis_server.rs"]
+mod redis_server;
+use redis_server::{test_config, RedisTestServer};
 
 #[test]
 fn global_entry_reports_state_without_exposing_a_client() {
@@ -14,11 +18,72 @@ fn global_entry_reports_state_without_exposing_a_client() {
         Err(RedisError::InvalidConfig { field: "scheme" })
     ));
 
+    // 每个失败分支都不得占用全局状态；服务只响应受控测试请求。
+    for (reply, expected) in [
+        (None, RedisTransportErrorKind::Network),
+        (
+            Some(&b"-ERR test unavailable\r\n"[..]),
+            RedisTransportErrorKind::Server,
+        ),
+        (
+            Some(&b"+NOT_PONG\r\n"[..]),
+            RedisTransportErrorKind::Protocol,
+        ),
+        (Some(&b""[..]), RedisTransportErrorKind::Timeout),
+    ] {
+        let server = RedisTestServer::start(move |command| {
+            if command[0] == "PING" {
+                reply
+            } else {
+                Some(b"+OK\r\n")
+            }
+        });
+        let url = format!("redis://{}/0", server.address);
+        assert_eq!(
+            RedisUtils::init(test_config(&url)),
+            Err(RedisError::Transport(expected))
+        );
+        assert!(!RedisUtils::is_initialized());
+        assert!(server
+            .commands
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|name| name == "PING"));
+    }
+
+    let rejected = RedisTestServer::start(|command| {
+        if command[0] == "AUTH" {
+            Some(b"-WRONGPASS test password rejected\r\n")
+        } else {
+            Some(b"+OK\r\n")
+        }
+    });
+    let url = format!("redis://:test-password@{}/0", rejected.address);
+    assert_eq!(
+        RedisUtils::init(test_config(&url)),
+        Err(RedisError::Transport(
+            RedisTransportErrorKind::Authentication
+        ))
+    );
+    assert!(!RedisUtils::is_initialized());
+    drop(rejected);
+
+    let server = RedisTestServer::start(|command| {
+        Some(if command[0] == "PING" {
+            b"+PONG\r\n"
+        } else {
+            b"+OK\r\n"
+        })
+    });
+    let url = format!("redis://{}/0", server.address);
+    let barrier = std::sync::Barrier::new(8);
     let results = std::thread::scope(|scope| {
         let handles = (0..8)
             .map(|_| {
                 scope.spawn(|| {
-                    RedisUtils::init(RedisConfig::single("redis://127.0.0.1:6379/0").unwrap())
+                    barrier.wait();
+                    RedisUtils::init(test_config(&url))
                 })
             })
             .collect::<Vec<_>>();
@@ -40,9 +105,18 @@ fn global_entry_reports_state_without_exposing_a_client() {
         7
     );
     assert!(RedisUtils::is_initialized());
+    assert!(server
+        .commands
+        .lock()
+        .unwrap()
+        .iter()
+        .any(|name| name == "PING"));
+    let unused = RedisTestServer::start(|_| panic!("重复初始化不应连接新目标"));
     assert!(matches!(
-        RedisUtils::init(RedisConfig::single("redis://127.0.0.1:6380/0").unwrap()),
+        RedisUtils::init(test_config(&format!("redis://{}/0", unused.address))),
         Err(RedisError::AlreadyInitialized)
     ));
+    assert!(unused.commands.lock().unwrap().is_empty());
+    assert_eq!(RedisUtils::ping().unwrap(), "PONG");
     assert_eq!(RedisUtils::get_bytes(""), Err(RedisError::InvalidKey));
 }

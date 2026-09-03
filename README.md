@@ -38,8 +38,9 @@ HTTP 还需要同时启用 `tokio`，且必须运行在调用方提供的 Tokio 
 Redis 能力通过独立的 `redis` feature 提供；它使用惰性连接池、受限 MessagePack 编解码和
 raw 字节 API，支持单机/Cluster 普通命令、批量操作、TTL、counter、list/set、单机原子事务、
 单 Redis 拓扑的带 TTL 单键租约锁和一次初始化的 `RedisUtils`。异步方法还需要同时启用
-`tokio`，并由调用方提供 runtime；第一阶段只接受 `redis://`，不启用 TLS。构造配置、客户端
-或全局入口不会访问网络，锁不是 Redlock 或 fencing token；完整 API 和边界见
+`tokio`，并由调用方提供 runtime；第一阶段只接受 `redis://`，不启用 TLS。`RedisConfig` 和
+`RedisClient::new` 只做本地惰性构造；`RedisUtils::init` 会同步验证 Redis 可用后才占用全局
+单例，异步应用应在调用方 runtime 中 `await RedisUtils::init_async`。锁不是 Redlock 或 fencing token；完整 API 和边界见
 [Redis 使用文档](https://github.com/crx-96/axutils-rust/blob/main/docs/examples/redis.md)。
 
 SQLx 能力通过 `sqlx + tokio` 组合 feature 提供；它使用 SQLx `0.9.0` 的 `AnyPool` 在运行时

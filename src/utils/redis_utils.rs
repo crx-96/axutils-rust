@@ -13,15 +13,23 @@ static REDIS_CLIENT: OnceLock<RedisClient> = OnceLock::new();
 
 /// 单默认 Redis 客户端的进程级便捷入口。
 ///
-/// 必须先成功调用 [`Self::init`]。初始化成功后只能保留第一个客户端，不能 reset、replace
+/// 必须先成功调用初始化方法。初始化成功后只能保留第一个客户端，不能 reset、replace
 /// 或读取连接 URL/凭据；需要多个配置或可控生命周期时，直接持有多个 [`RedisClient`]。
 pub struct RedisUtils;
 
 impl RedisUtils {
     /// 初始化全局 Redis 客户端。
     ///
-    /// 该调用只执行本地配置、客户端和惰性连接池构造，不发送 PING 或建立网络连接；非法
-    /// 配置不会占用初始化机会，成功后再次调用返回 [`RedisError::AlreadyInitialized`]。
+    /// 同步获取连接并发送 `PING`，收到 `PONG` 后才保存全局客户端。连接、认证、超时或
+    /// 命令失败时返回对应错误，非 `PONG` 响应返回
+    /// [`RedisError::Transport`]（[`crate::RedisTransportErrorKind::Protocol`]）；失败不占用
+    /// 初始化机会，可以修正配置或等待服务恢复后重试。
+    ///
+    /// 调用会阻塞当前线程，沿用配置的连接、连接池等待和响应超时，建议在进入 Tokio
+    /// runtime 前执行；异步应用可在 `redis + tokio` 下使用 `init_async`。只预热同步连接，
+    /// 异步连接仍为惰性。Cluster 沿用后端的 `PING` 路由。
+    /// 已初始化时直接返回 [`RedisError::AlreadyInitialized`]，不再连接新目标；并发调用可能
+    /// 各自探测，但只有一个能保存成功。检查成功不保证后续连接持续可用。
     ///
     /// # Examples
     ///
@@ -35,18 +43,75 @@ impl RedisUtils {
     pub fn init(config: RedisConfig) -> Result<(), RedisError> {
         #[cfg(feature = "tracing")]
         let started = std::time::Instant::now();
-        let result = match RedisClient::new(config) {
-            Ok(client) => REDIS_CLIENT
+        let result = (|| {
+            if Self::is_initialized() {
+                return Err(RedisError::AlreadyInitialized);
+            }
+            let client = RedisClient::new(config)?;
+            if client.ping()? != "PONG" {
+                return Err(RedisError::Transport(
+                    crate::redis::RedisTransportErrorKind::Protocol,
+                ));
+            }
+            REDIS_CLIENT
                 .set(client)
-                .map_err(|_| RedisError::AlreadyInitialized),
-            Err(error) => Err(error),
-        };
+                .map_err(|_| RedisError::AlreadyInitialized)
+        })();
+        #[cfg(feature = "tracing")]
+        crate::tracing::redis::record_client_init(&result, started);
+        result
+    }
+
+    /// 异步验证 Redis 可用后初始化全局客户端，需要 `redis + tokio`。
+    ///
+    /// 使用调用方的 Tokio runtime 获取异步连接并发送 `PING`，收到 `PONG` 后才保存客户端；
+    /// 不创建 runtime，不调用 `block_on`，同步连接池仍为惰性。连接和响应沿用配置的超时。
+    /// 与 [`Self::init`] 共用一次初始化状态；已初始化时直接返回
+    /// [`RedisError::AlreadyInitialized`]，并发验证成功的调用中只有一个能保存客户端。
+    ///
+    /// 缺少 runtime 返回 [`RedisError::RuntimeRequired`]；连接、认证、超时或命令失败返回
+    /// 对应错误，非 `PONG` 响应返回 [`RedisError::Transport`]（
+    /// [`crate::RedisTransportErrorKind::Protocol`]）。失败或等待期间取消不会保存本次客户端，
+    /// 可以重试；其他并发调用仍可能成功初始化。检查成功不保证后续持续可用。
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use axutils::{RedisConfig, RedisError, RedisUtils};
+    ///
+    /// # async fn example() -> Result<(), RedisError> {
+    /// let config = RedisConfig::single("redis://127.0.0.1:6379/0")?;
+    /// RedisUtils::init_async(config).await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[cfg(all(feature = "redis", feature = "tokio"))]
+    pub async fn init_async(config: RedisConfig) -> Result<(), RedisError> {
+        #[cfg(feature = "tracing")]
+        let started = std::time::Instant::now();
+        let result = async {
+            if Self::is_initialized() {
+                return Err(RedisError::AlreadyInitialized);
+            }
+            let client = RedisClient::new(config)?;
+            if client.ping_async().await? != "PONG" {
+                return Err(RedisError::Transport(
+                    crate::redis::RedisTransportErrorKind::Protocol,
+                ));
+            }
+            REDIS_CLIENT
+                .set(client)
+                .map_err(|_| RedisError::AlreadyInitialized)
+        }
+        .await;
         #[cfg(feature = "tracing")]
         crate::tracing::redis::record_client_init(&result, started);
         result
     }
 
     /// 返回全局 Redis 客户端是否已经成功初始化。
+    ///
+    /// 只表示曾通过初始化检查，不会重新探测 Redis 当前是否可用。
     ///
     /// # Examples
     ///

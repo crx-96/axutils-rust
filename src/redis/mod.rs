@@ -1,8 +1,10 @@
 //! 基于 `redis-rs` 的有界 Redis 客户端。
 //!
 //! 该模块仅在 `redis` feature 下导出。同步方法使用惰性 `r2d2` 连接池；同时启用
-//! `tokio` feature 时追加带 `_async` 后缀的异步方法。构造客户端或初始化全局入口不会
-//! 访问网络，首次命令才会建立连接并返回传输错误。
+//! `tokio` feature 时追加带 `_async` 后缀的异步方法。`RedisConfig` 与 `RedisClient::new` 只做
+//! 本地惰性构造，普通首次命令才可能建立连接并返回传输错误；`RedisUtils::init` 与
+//! `RedisUtils::init_async` 是例外，它们分别同步或在调用方 Tokio runtime 中执行 `PING` 并要求
+//! `PONG` 后才写入共用的全局单例。
 //!
 //! 值 API 使用受限的 `rmp-serde` MessagePack 编解码；需要缓存原始二进制或与其他协议
 //! 互操作时使用 `*_bytes` API。单键租约锁使用 OS CSPRNG token、TTL 和单 key Lua `EVAL`

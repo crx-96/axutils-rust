@@ -22,6 +22,7 @@ negative-tokio-redis-utils = ["axutils/tokio"]
 negative-redis-async = ["axutils/redis"]
 negative-redis-async-lock = ["axutils/redis"]
 negative-redis-utils-async = ["axutils/redis"]
+negative-redis-utils-init-async = ["axutils/redis"]
 negative-redis-config = ["axutils/redis"]
 
 [dependencies]

@@ -3,6 +3,20 @@
 本文件仅记录 `axutils` 各版本的源码、公共 API、运行时行为、错误与安全边界，以及面向使用者的兼容性变化。
 每次修改或增加功能时，先读取 `Cargo.toml` 中的 `[package].version`，再在对应版本条目中补充记录。
 
+## [0.1.3]
+
+### Added
+
+- 新增 `redis + tokio` 下的 `RedisUtils::init_async`，使用调用方的 runtime 异步验证 `PING`/`PONG`
+  后保存全局客户端；失败或等待期间取消不会占用初始化机会，与同步 `init` 共用一次初始化状态。
+
+### Changed
+
+- `RedisUtils::init` 在保存全局客户端前同步连接 Redis 并发送 `PING`，只有收到 `PONG` 才成功；
+  连接、认证、超时或命令失败会返回错误，异常响应返回 `Transport(Protocol)`，失败不占用
+  初始化机会。调用沿用现有超时配置并阻塞当前线程；已初始化时直接返回 `AlreadyInitialized`，
+  不访问新目标。`RedisClient::new` 仍保持惰性构造，异步连接也仍在首次异步命令时建立。
+
 ## [0.1.2]
 
 ### Added

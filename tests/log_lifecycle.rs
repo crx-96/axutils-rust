@@ -3,6 +3,8 @@
 use std::io::Write;
 use std::sync::{Arc, Mutex};
 
+#[cfg(feature = "redis")]
+use axutils::RedisUtils;
 #[cfg(feature = "aes")]
 use axutils::{AesMode, CryptoUtils};
 #[cfg(feature = "lettre")]
@@ -11,11 +13,13 @@ use axutils::{EmailConfig, EmailSecurity, EmailUtils};
 use axutils::{HttpConfig, HttpUtils};
 #[cfg(feature = "jwt")]
 use axutils::{JwtAlgorithm, JwtConfig, JwtSigningKey, JwtUtils, JwtValidation};
-#[cfg(feature = "redis")]
-use axutils::{RedisConfig, RedisUtils};
 #[cfg(all(feature = "sqlx", feature = "tokio"))]
 use axutils::{SqlxConfig, SqlxUtils};
 use tracing_subscriber::fmt::writer::MakeWriter;
+
+#[cfg(feature = "redis")]
+#[path = "support/redis_server.rs"]
+mod redis_server;
 
 #[derive(Clone)]
 struct Capture(Arc<Mutex<Vec<u8>>>);
@@ -118,12 +122,54 @@ fn captures_http_init_without_base_url() {
 #[cfg(feature = "redis")]
 fn captures_redis_init_without_credentials_or_url() {
     const PASSWORD_SENTINEL: &str = "AXUTILS_REDIS_PASSWORD_SECRET";
-    let url = format!("redis://:{PASSWORD_SENTINEL}@127.0.0.1:6379/0");
+    let rejected = redis_server::RedisTestServer::start(|command| {
+        Some(if command[0] == "AUTH" {
+            b"-WRONGPASS AXUTILS_REDIS_PASSWORD_SECRET\r\n"
+        } else {
+            b"+OK\r\n"
+        })
+    });
+    let rejected_url = format!("redis://:{PASSWORD_SENTINEL}@{}/0", rejected.address);
+    let failure = capture_for(|| {
+        assert_eq!(
+            RedisUtils::init(redis_server::test_config(&rejected_url)),
+            Err(axutils::RedisError::Transport(
+                axutils::RedisTransportErrorKind::Authentication
+            ))
+        );
+    });
+    assert!(!RedisUtils::is_initialized());
+    assert_event_count(&failure, "axutils::redis", "client_init", "error", 1);
+    assert_event_count(&failure, "axutils::redis", "client_init", "success", 0);
+    assert!(has_field(&failure, "error_kind", "authentication"));
+    assert!(!failure.contains(PASSWORD_SENTINEL));
+    assert!(!failure.contains(&rejected_url));
+    drop(rejected);
+
+    let server = redis_server::RedisTestServer::start(|command| {
+        Some(if command[0] == "PING" {
+            b"+PONG\r\n"
+        } else {
+            b"+OK\r\n"
+        })
+    });
+    let url = format!("redis://:{PASSWORD_SENTINEL}@{}/0", server.address);
     let output = capture_for(|| {
-        RedisUtils::init(RedisConfig::single(&url).expect("Redis config"))
-            .expect("Redis utility init");
+        RedisUtils::init(redis_server::test_config(&url)).expect("Redis utility init");
     });
     assert_single_success_event(&output, "axutils::redis", "client_init");
+    assert!(server
+        .commands
+        .lock()
+        .unwrap()
+        .iter()
+        .any(|name| name == "AUTH"));
+    assert!(server
+        .commands
+        .lock()
+        .unwrap()
+        .iter()
+        .any(|name| name == "PING"));
     assert!(!output.contains(PASSWORD_SENTINEL));
     assert!(!output.contains(&url));
 }

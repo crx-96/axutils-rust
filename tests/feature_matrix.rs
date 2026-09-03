@@ -828,6 +828,7 @@ fn verifies_redis_feature_api_matrix_and_dependency_boundaries() {
         ("negative-redis-async", false, "get_async"),
         ("negative-redis-async-lock", false, "redisasynclockguard"),
         ("negative-redis-utils-async", false, "get_async"),
+        ("negative-redis-utils-init-async", false, "init_async"),
         ("negative-redis-config", false, "configloader"),
     ] {
         let output = run_fixture(&fixture_manifest, &target_dir.0, feature);
