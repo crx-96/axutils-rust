@@ -3,27 +3,31 @@
 项目实现、公共 API、feature/依赖、测试、文档和发布的详细设计、工作流与验收要求，统一维护在
 [`review-rust-library-change`](docs/skills/review-rust-library-change/SKILL.md) Skill；本文件不重复其细则。
 
-## 强制入口与文档职责
+## 按需入口与文档职责
 
 [`review-rust-library-change`](docs/skills/review-rust-library-change/SKILL.md) 是项目级、工具无关的
-Rust library 变更工作流与权威审查验收标准，不包含特定 Agent 工具调用语法。对以下任何任务，
-必须在读取适用项目规则后、开始设计、实现、审查或验收前完整读取并使用该 Skill，不得只依据
-本文件摘要：
+Rust library 变更工作流与权威审查验收标准，不包含特定 Agent 工具调用语法。它不是进入仓库后的
+默认前置读物；读取本文件后，应先根据任务实际需要判断是否命中以下条件。命中时，必须在首次进行
+相关设计、实现、审查或验收判断前完整读取并使用该 Skill，不得只依据本文件摘要：
 
-- 修改或审查 `src/`、`Cargo.toml`、公共 API、错误语义、运行时行为或安全边界；
+- 会改变或需要判断 `src/` 中的实现、公共 API、错误语义、运行时行为或安全边界；
 - 新增、删除、重命名或调整工具类、领域模块、公开导出、类型、方法、trait、枚举、常量、类型别名、
-  静态项、宏、feature、依赖、测试、fixture、API doc、README、`docs/examples/`、发布白名单、
-  发布元数据或 CHANGELOG；
-- 对上述内容进行实现就绪性审查、回归排查、发布前检查，或用户要求“按标准审查/验收”。
+  静态项、宏、feature、依赖、发布白名单或发布元数据；
+- 需要用本项目标准判断测试、fixture、API doc、README、`docs/examples/`、module map 或 CHANGELOG
+  是否与库的实现、公共契约、feature/依赖边界或发布内容一致；
+- 对上述库级内容进行实现就绪性审查、回归排查或发布前检查，或用户明确要求按本项目的 Rust library
+  标准审查或验收。
 
-纯翻译、简单措辞调整或与 Rust library 无关的文件操作不自动触发该 Skill；但涉及本项目规则、
-标准、模块定位或验收时，仍必须完整读取。
+不得仅因任务提到“审查”“验收”，或仅因目标位于 `tests/`、README、文档、CHANGELOG、项目规则或
+Skill 中就触发该 Skill。纯翻译、简单措辞或格式调整、规则或 Skill 自身维护、CI/开发工具维护、
+Git/工作区操作、测试基础设施调整及其他不改变也不判断 Rust library 实现或契约的任务无需读取；
+如果执行过程中实际需要作出上述库级判断，则在作出判断前再完整读取。
 
-涉及具体工具类、领域模块、跨模块 API 或新增方法时，在标准文档之后再完整读取
-[`docs/module-map.md`](docs/module-map.md)。[`docs/develop.md`](docs/develop.md) 只说明开发/发布命令，
-不是 Agent 常规实现、测试或验收的必读上下文；只有任务新增、删除、修改这些命令，或需向开发人员
-同步命令变化时，才读取并更新对应章节。源码、规则、标准或文档描述不一致时，按 Skill 规定的
-权威来源顺序收集证据并处理，不得静默采用较宽松解释。
+任务需要确定具体工具类、领域模块、跨模块 API 或新增方法的归属与边界时，再完整读取
+[`docs/module-map.md`](docs/module-map.md)，无需仅因已读取上述 Skill 而预读。只有任务新增、删除、
+修改开发/发布命令，或需向开发人员同步命令变化时，才读取并更新 [`docs/develop.md`](docs/develop.md)
+对应章节。任务已命中上述 Skill 且源码、规则、标准或文档描述不一致时，按 Skill 规定的权威来源
+顺序收集证据并处理，不得静默采用较宽松解释。
 
 ## 项目定位与仓库边界
 
