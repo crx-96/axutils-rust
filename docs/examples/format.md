@@ -1,287 +1,71 @@
-# FormatUtils 使用文档
+# 格式化与脱敏
 
-> `FormatUtils::seconds_to_human`、`mask` 和 `mask_email` 默认可用；运行时模板需要 `serde` 与至少一个模板后端
-> (`strfmt` 或 `minijinja`)。两个后端同时启用时，通过 `TemplateEngine` 显式选择语法。
+`FormatUtils` 是无状态工具，从 `axutils::utils::FormatUtils` 导入。持续时间格式化、位置脱敏和
+邮箱本地部分脱敏默认可用；模板渲染使用显式引擎。
 
-## 导出内容
+## 启用模板
 
-公开模块路径：`axutils::format_utils` 和 `axutils::utils::format_utils`。
-
-`FormatUtils` 可从以下路径导入：
-
-- 推荐：`axutils::FormatUtils`；
-- `axutils::format_utils::FormatUtils`；
-- `axutils::utils::FormatUtils`；
-- `axutils::utils::format_utils::FormatUtils`。
-
-它是无字段工具结构体，无 `new` 方法，实现 `Debug`、`Clone`、`Copy`、`Default`。
-
-`TemplateEngine` 只在 `serde` 且至少启用一个模板后端时导出，支持同样的四类路径：
-
-- `axutils::TemplateEngine`；
-- `axutils::format_utils::TemplateEngine`；
-- `axutils::utils::TemplateEngine`；
-- `axutils::utils::format_utils::TemplateEngine`。
-
-它实现 `Debug`、`Clone`、`Copy`、`PartialEq`、`Eq`，不实现 `Default`，并标记为
-`#[non_exhaustive]`。变体按 feature 存在：
-
-- `TemplateEngine::Strfmt`：需要 `serde` + `strfmt`，使用扁平 `{name}` 语法；
-- `TemplateEngine::MiniJinja`：需要 `serde` + `minijinja`，使用 `{{ name }}` 语法并支持
-  嵌套字段、数组、条件和循环。
-
-本模块没有公共自由函数、trait、类型别名、常量、静态项或宏。
-
-## 安装与启用
-
-持续时间格式化与字符串脱敏无需额外 feature：
+模板能力使用语义 feature，而不是 provider feature：
 
 ```toml
 [dependencies]
-axutils = "0.1"
-```
-
-启用 `strfmt`：
-
-```toml
-[dependencies]
-axutils = { version = "0.1", features = ["serde", "strfmt"] }
+axutils = { version = "1.0", features = ["template-minijinja"] }
 serde = { version = "1", features = ["derive"] }
 ```
 
-启用 `minijinja`：
+| feature | `TemplateEngine` 变体与语法 |
+| --- | --- |
+| `template-strfmt` | `Strfmt`，扁平变量，如 `{name}` |
+| `template-minijinja` | `MiniJinja`，如 `{{ name }}`，支持嵌套、条件和循环 |
 
-```toml
-[dependencies]
-axutils = { version = "0.1", features = ["serde", "minijinja"] }
-serde = { version = "1", features = ["derive"] }
-```
+两个 feature 可以同时启用；调用处必须显式传入 `TemplateEngine`。
 
-后端 feature 不会自动启用 `serde`；两个后端都启用时使用
-`features = ["serde", "strfmt", "minijinja"]`，并在调用时显式传入引擎。
+## 持续时间与脱敏
 
-## 函数与方法详解
-
-### `FormatUtils::mask(value: &str, ranges: &[(usize, usize)], replacement: Option<&str>) -> Option<String>`
-
-- **feature**：默认可用。
-- **参数**：`value` 是待处理字符串；`ranges` 是按 Unicode 标量值计数的零基、左闭右开字符
-  范围；`replacement` 是每段共同使用的替换串，`None` 表示 `"****"`。
-- **返回值**：成功返回拥有的脱敏字符串；任一范围无效或结果内存预留失败时返回 `None`。
-
-范围必须按升序排列、互不重叠、至少包含一个字符且不越界；相邻范围允许存在。空范围列表
-返回输入的拥有副本，显式传入空替换串会删除选中的段：
+`seconds_to_human` 以天为最大单位。`mask` 的范围是零基、左闭右开的 Unicode 字符位置，必须按
+升序且不重叠；错误范围或分配失败返回 `None`。`mask_email` 不验证邮件真实性，只安全地拆分本地
+部分和域名。
 
 ```rust
-use axutils::FormatUtils;
+use axutils::utils::FormatUtils;
 
+assert_eq!(FormatUtils::seconds_to_human(90_061), "1天1小时1分钟1秒");
 assert_eq!(
-    FormatUtils::mask("13812345678", &[(3, 7)], None),
-    Some("138****5678".to_owned())
+    FormatUtils::mask("甲乙丙丁戊", &[(1, 3)], Some("#")),
+    Some("甲#丁戊".to_owned()),
 );
 assert_eq!(
-    FormatUtils::mask("甲乙丙丁戊己", &[(1, 3), (4, 6)], Some("#")),
-    Some("甲#丁#".to_owned())
+    FormatUtils::mask_email("alice@example.com", None),
+    Some("ali****@example.com".to_owned()),
 );
 assert_eq!(FormatUtils::mask("abc", &[(2, 1)], None), None);
 ```
 
-该方法按字符边界处理，不会在多字节 UTF-8 字符中间切片。时间复杂度为 `O(n + r)`，并为字符
-边界及结果分配与输入/输出相称的内存；调用方应限制不可信输入、范围数量和替换串长度。它只
-替换返回值中的指定内容，不识别字段语义，也不清除输入或其他副本。
+位置型脱敏不会清除输入或其余副本，也不理解字段语义。对不可信输入，调用方应限制文本长度、范围
+数量和 replacement 长度。
 
-### `FormatUtils::mask_email(email: &str, start: Option<usize>) -> Option<String>`
+## 模板
 
-- **feature**：默认可用。
-- **参数**：`email` 是待脱敏的邮箱字符串；`start` 是一基的脱敏起始位置，`None` 默认表示第
-  4 个字符。
-- **返回值**：输入恰好包含一个 `@` 且两侧非空时，返回脱敏后的拥有字符串；结构无法安全
-  拆分或结果内存预留失败时返回 `None`。
-
-本地部分从指定位置开始统一替换为 `"****"`；如果本地部分字符数小于指定位置，则从第 1 个
-字符开始全部替换。位置 `0` 无效并返回 `None`，域名始终保持不变：
+渲染成功可返回空字符串；模板解析、上下文序列化或渲染失败时，返回 `default` 的拥有副本，未提供
+默认值时返回 `None`。不要把不可信模板当成安全策略：调用方应限制模板长度、渲染频率和上下文规模。
 
 ```rust
-use axutils::FormatUtils;
+use axutils::utils::{FormatUtils, TemplateEngine};
 
-assert_eq!(
-    FormatUtils::mask_email("alice@example.com", None),
-    Some("ali****@example.com".to_owned())
-);
-assert_eq!(
-    FormatUtils::mask_email("alice@example.com", Some(2)),
-    Some("a****@example.com".to_owned())
-);
-assert_eq!(
-    FormatUtils::mask_email("李雷@example.com", None),
-    Some("****@example.com".to_owned())
-);
-assert_eq!(FormatUtils::mask_email("invalid", None), None);
-assert_eq!(FormatUtils::mask_email("alice@example.com", Some(0)), None);
-```
-
-该方法只检查一个 `@` 和非空两侧，不是 RFC 邮箱验证器，也不验证域名或邮箱真实性。需要格式
-校验时可另外启用 `regex` feature 并使用 `RegUtils`。
-
-### `FormatUtils::seconds_to_human(seconds: u64) -> String`
-
-- **feature**：默认可用。
-- **参数**：整数秒数，不处理小数秒。
-- **返回值**：按天、小时、分钟、秒拆分后的中文持续时间字符串。
-- **示例**：
-
-```rust
-use axutils::FormatUtils;
-
-assert_eq!(FormatUtils::seconds_to_human(0), "0秒");
-assert_eq!(FormatUtils::seconds_to_human(90), "1分钟30秒");
-assert_eq!(FormatUtils::seconds_to_human(3_600), "1小时0分钟0秒");
-assert_eq!(FormatUtils::seconds_to_human(90_061), "1天1小时1分钟1秒");
-```
-
-从最高的非零单位开始显示到秒；更高位为零时省略，例如 `45` 只显示 `45秒`。方法不处理
-周、月、年或小数秒，且使用整数除法，不会因 `u64::MAX` 溢出：
-
-```rust
-use axutils::FormatUtils;
-
-assert_eq!(FormatUtils::seconds_to_human(45), "45秒");
-assert_eq!(
-    FormatUtils::seconds_to_human(u64::MAX),
-    "213503982334601天7小时0分钟15秒"
-);
-```
-
-**注意**：返回字符串会分配与输出长度相称的内存；调用方应在展示或日志场景中自行控制输入
-范围和调用频率。
-
-### `FormatUtils::template<T: Serialize>(template: &str, context: &T, default: Option<&str>, engine: TemplateEngine) -> Option<String>`
-
-- **feature**：`serde` + `strfmt` 或 `serde` + `minijinja`；`TemplateEngine` 的对应变体还
-  必须存在。
-- **参数**：`template` 是运行时模板；`context` 是可序列化上下文；`default` 是失败时复制
-  成拥有字符串的回退值；`engine` 显式选择后端。
-- **返回值**：渲染成功返回 `Some(String)`，即使结果为空字符串也是 `Some(String::new())`；
-  模板解析、上下文序列化或渲染失败时返回 `default.map(str::to_owned)`，未提供回退则为
-  `None`。
-
-`strfmt` 只把上下文序列化为顶层对象，使用 `{name}`；顶层标量或序列化失败会走回退，嵌套
-值会按 JSON 字符串表示参与替换：
-
-```rust
-# #[cfg(all(feature = "serde", feature = "strfmt"))]
-# fn main() {
-use axutils::{FormatUtils, TemplateEngine};
-use serde::Serialize;
-
-#[derive(Serialize)]
-struct Greeting<'a> {
-    name: &'a str,
-}
-
-let context = Greeting { name: "小王" };
-assert_eq!(
-    FormatUtils::template("你好，{name}", &context, None, TemplateEngine::Strfmt),
-    Some("你好，小王".to_owned())
-);
-assert_eq!(
-    FormatUtils::template("{missing}", &context, Some("匿名用户"), TemplateEngine::Strfmt),
-    Some("匿名用户".to_owned())
-);
-# }
-# #[cfg(not(all(feature = "serde", feature = "strfmt")))]
-# fn main() {}
-```
-
-`minijinja` 使用 `{{ name }}`，严格处理未定义变量，支持嵌套字段、数组、条件和循环，并
-关闭自动 HTML 转义：
-
-```rust
-# #[cfg(all(feature = "serde", feature = "minijinja"))]
-# fn main() {
-use axutils::{FormatUtils, TemplateEngine};
-use serde::Serialize;
-
-#[derive(Serialize)]
-struct Profile<'a> {
-    city: &'a str,
-}
-#[derive(Serialize)]
-struct User<'a> {
-    name: &'a str,
-    profile: Profile<'a>,
-    tags: [&'a str; 2],
-}
-
-let user = User {
-    name: "小王",
-    profile: Profile { city: "杭州" },
-    tags: ["Rust", "模板"],
-};
-assert_eq!(
-    FormatUtils::template(
-        "你好，{{ name }}（{{ profile.city }}）{% for tag in tags %}[{{ tag }}]{% endfor %}",
-        &user,
-        None,
-        TemplateEngine::MiniJinja,
-    ),
-    Some("你好，小王（杭州）[Rust][模板]".to_owned())
-);
-assert_eq!(
-    FormatUtils::template("{{ missing }}", &user, Some("匿名用户"), TemplateEngine::MiniJinja),
-    Some("匿名用户".to_owned())
-);
-# }
-# #[cfg(not(all(feature = "serde", feature = "minijinja")))]
-# fn main() {}
-```
-
-空输出属于成功，不会被回退值替换；上下文值也不会被再次当作模板解析：
-
-```rust
-# #[cfg(all(feature = "serde", feature = "minijinja"))]
-# fn main() {
-use axutils::{FormatUtils, TemplateEngine};
-use serde::Serialize;
-
-#[derive(Serialize)]
+#[derive(serde::Serialize)]
 struct Context<'a> {
-    value: &'a str,
+    name: &'a str,
 }
 
-let context = Context { value: "{{ secret }}" };
-assert_eq!(
-    FormatUtils::template(
-        "{% if false %}ignored{% endif %}",
-        &context,
-        Some("fallback"),
-        TemplateEngine::MiniJinja,
-    ),
-    Some(String::new())
+let context = Context { name: "小王" };
+let rendered = FormatUtils::template(
+    "你好，{{ name }}",
+    &context,
+    Some("匿名用户"),
+    TemplateEngine::MiniJinja,
 );
-assert_eq!(
-    FormatUtils::template("{{ value }}", &context, None, TemplateEngine::MiniJinja),
-    Some("{{ secret }}".to_owned())
-);
-# }
-# #[cfg(not(all(feature = "serde", feature = "minijinja")))]
-# fn main() {}
+assert_eq!(rendered, Some("你好，小王".to_owned()));
 ```
 
-**注意**：这是运行时模板 API，调用方必须限制模板长度、调用频率和上下文数据规模。MiniJinja
-关闭自动转义，HTML 安全与输出编码由调用方负责；模板错误不会把模板或上下文写入返回错误，
-只返回回退值或 `None`。当 `TemplateEngine` 标记为 `#[non_exhaustive]` 时，跨版本匹配应保留
-`_` 通配分支。
-
-## 使用场景与限制
-
-`seconds_to_human` 适合人类可读的简单持续时间展示；`mask`/`mask_email` 适合展示、日志写入前
-对字符串副本做位置型遮盖；`template` 适合受控模板和小型上下文。本模块不提供模板缓存、沙箱、
-国际化时间单位、HTML 清理、自动转义、模板文件读取、邮箱真实性验证或内存秘密擦除。对不可信
-输入、模板和上下文，调用方需要自行限制资源并决定是否进行输出净化。
-
-## 更多信息
-
-- [工具类定位文档](../module-map.md)
-- [README 简短示例](../../README.md)
-- [docs.rs API 文档](https://docs.rs/axutils/)
+MiniJinja 采用严格未定义变量处理，变量值不会再次作为模板执行。`Strfmt` 只处理顶层变量；嵌套
+数据会按 JSON 值文本处理。

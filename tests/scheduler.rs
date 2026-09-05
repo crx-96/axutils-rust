@@ -1,9 +1,4 @@
-#![cfg(all(
-    feature = "chrono",
-    feature = "chrono_tz",
-    feature = "tokio",
-    feature = "croner"
-))]
+#![cfg(feature = "scheduler")]
 
 use std::{
     error::Error,
@@ -14,7 +9,12 @@ use std::{
     time::Duration,
 };
 
-use axutils::{Scheduler, SchedulerConfig, SchedulerError, TaskId, TaskSchedule};
+use axutils::scheduler::{Scheduler, SchedulerConfig, SchedulerError, TaskId, TaskSchedule};
+use tokio::{
+    runtime::Builder as RuntimeBuilder,
+    sync::{Barrier, Notify},
+    task as tokio_task, time as tokio_time,
+};
 
 fn assert_send_sync<T: Send + Sync>() {}
 fn assert_copy_hash<T: Copy + std::hash::Hash>() {}
@@ -143,14 +143,12 @@ fn runtime_and_time_driver_are_required_without_consuming_capacity() {
         Err(SchedulerError::RuntimeRequired)
     );
 
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .build()
-        .unwrap();
+    let runtime = RuntimeBuilder::new_current_thread().build().unwrap();
     let result = runtime
         .block_on(async { scheduler.register(TaskSchedule::once(Duration::ZERO), || async {}) });
     assert_eq!(result, Err(SchedulerError::RuntimeRequired));
 
-    let runtime = tokio::runtime::Builder::new_current_thread()
+    let runtime = RuntimeBuilder::new_current_thread()
         .enable_time()
         .build()
         .unwrap();
@@ -166,7 +164,7 @@ fn runtime_and_time_driver_are_required_without_consuming_capacity() {
 fn dropping_runtime_before_first_poll_releases_capacity() {
     let scheduler = Scheduler::new(SchedulerConfig::new(1).unwrap()).unwrap();
     {
-        let runtime = tokio::runtime::Builder::new_current_thread()
+        let runtime = RuntimeBuilder::new_current_thread()
             .enable_time()
             .build()
             .unwrap();
@@ -176,7 +174,7 @@ fn dropping_runtime_before_first_poll_releases_capacity() {
             .unwrap();
     }
 
-    let runtime = tokio::runtime::Builder::new_current_thread()
+    let runtime = RuntimeBuilder::new_current_thread()
         .enable_time()
         .build()
         .unwrap();
@@ -211,27 +209,27 @@ async fn once_interval_capacity_cancel_and_shutdown_work() {
             }
         })
         .unwrap();
-    tokio::task::yield_now().await;
+    tokio_task::yield_now().await;
     assert_eq!(
         scheduler.register(TaskSchedule::once(Duration::ZERO), || async {}),
         Err(SchedulerError::TaskLimitExceeded)
     );
 
-    tokio::time::advance(Duration::from_secs(1)).await;
-    tokio::task::yield_now().await;
+    tokio_time::advance(Duration::from_secs(1)).await;
+    tokio_task::yield_now().await;
     assert_eq!(interval_count.load(Ordering::SeqCst), 0);
-    tokio::time::advance(Duration::from_secs(1)).await;
-    tokio::task::yield_now().await;
+    tokio_time::advance(Duration::from_secs(1)).await;
+    tokio_task::yield_now().await;
     assert_eq!(interval_count.load(Ordering::SeqCst), 1);
-    tokio::time::advance(Duration::from_secs(3)).await;
-    tokio::task::yield_now().await;
+    tokio_time::advance(Duration::from_secs(3)).await;
+    tokio_task::yield_now().await;
     assert_eq!(once_count.load(Ordering::SeqCst), 1);
     assert!(!scheduler.cancel(once).unwrap());
     assert!(scheduler.cancel(interval).unwrap());
     assert!(!scheduler.cancel(interval).unwrap());
     let cancelled_count = interval_count.load(Ordering::SeqCst);
-    tokio::time::advance(Duration::from_secs(10)).await;
-    tokio::task::yield_now().await;
+    tokio_time::advance(Duration::from_secs(10)).await;
+    tokio_task::yield_now().await;
     assert_eq!(interval_count.load(Ordering::SeqCst), cancelled_count);
 
     let replacement = scheduler
@@ -265,16 +263,16 @@ async fn slow_interval_callback_does_not_overlap() {
                 let current = running.fetch_add(1, Ordering::SeqCst) + 1;
                 max_running.fetch_max(current, Ordering::SeqCst);
                 calls.fetch_add(1, Ordering::SeqCst);
-                tokio::time::sleep(Duration::from_secs(3)).await;
+                tokio_time::sleep(Duration::from_secs(3)).await;
                 running.fetch_sub(1, Ordering::SeqCst);
             }
         })
         .unwrap();
-    tokio::task::yield_now().await;
-    tokio::time::advance(Duration::from_secs(10)).await;
-    tokio::task::yield_now().await;
-    tokio::time::advance(Duration::from_secs(3)).await;
-    tokio::task::yield_now().await;
+    tokio_task::yield_now().await;
+    tokio_time::advance(Duration::from_secs(10)).await;
+    tokio_task::yield_now().await;
+    tokio_time::advance(Duration::from_secs(3)).await;
+    tokio_task::yield_now().await;
     assert_eq!(max_running.load(Ordering::SeqCst), 1);
     assert!(calls.load(Ordering::SeqCst) <= 2);
     assert!(scheduler.cancel(id).unwrap());
@@ -283,7 +281,7 @@ async fn slow_interval_callback_does_not_overlap() {
 #[tokio::test]
 async fn cron_task_runs_and_completion_releases_capacity() {
     let scheduler = Scheduler::new(SchedulerConfig::new(1).unwrap()).unwrap();
-    let notify = Arc::new(tokio::sync::Notify::new());
+    let notify = Arc::new(Notify::new());
     let calls = Arc::new(AtomicUsize::new(0));
     let callback_notify = Arc::clone(&notify);
     let callback_calls = Arc::clone(&calls);
@@ -297,7 +295,7 @@ async fn cron_task_runs_and_completion_releases_capacity() {
             }
         })
         .unwrap();
-    tokio::time::timeout(Duration::from_secs(4), async {
+    tokio_time::timeout(Duration::from_secs(4), async {
         while calls.load(Ordering::SeqCst) < 2 {
             notify.notified().await;
         }
@@ -307,7 +305,7 @@ async fn cron_task_runs_and_completion_releases_capacity() {
     scheduler.shutdown().unwrap();
 
     let once_scheduler = Scheduler::new(SchedulerConfig::new(1).unwrap()).unwrap();
-    let done = Arc::new(tokio::sync::Notify::new());
+    let done = Arc::new(Notify::new());
     let callback_done = Arc::clone(&done);
     let first = once_scheduler
         .register(TaskSchedule::once(Duration::ZERO), move || {
@@ -316,7 +314,7 @@ async fn cron_task_runs_and_completion_releases_capacity() {
         })
         .unwrap();
     done.notified().await;
-    tokio::task::yield_now().await;
+    tokio_task::yield_now().await;
     let second = once_scheduler
         .register(TaskSchedule::once(Duration::from_secs(60)), || async {})
         .unwrap();
@@ -335,7 +333,7 @@ async fn cancel_aborts_at_await_boundary_and_races_with_shutdown() {
     }
 
     let scheduler = Scheduler::new(SchedulerConfig::default()).unwrap();
-    let started = Arc::new(tokio::sync::Notify::new());
+    let started = Arc::new(Notify::new());
     let dropped = Arc::new(AtomicBool::new(false));
     let callback_started = Arc::clone(&started);
     let callback_dropped = Arc::clone(&dropped);
@@ -352,9 +350,9 @@ async fn cancel_aborts_at_await_boundary_and_races_with_shutdown() {
         .unwrap();
     started.notified().await;
     assert!(scheduler.cancel(task).unwrap());
-    tokio::time::timeout(Duration::from_secs(1), async {
+    tokio_time::timeout(Duration::from_secs(1), async {
         while !dropped.load(Ordering::SeqCst) {
-            tokio::task::yield_now().await;
+            tokio_task::yield_now().await;
         }
     })
     .await
@@ -362,7 +360,7 @@ async fn cancel_aborts_at_await_boundary_and_races_with_shutdown() {
 
     for _ in 0..32 {
         let scheduler = Arc::new(Scheduler::new(SchedulerConfig::new(1).unwrap()).unwrap());
-        let barrier = Arc::new(tokio::sync::Barrier::new(3));
+        let barrier = Arc::new(Barrier::new(3));
         let register_scheduler = Arc::clone(&scheduler);
         let register_barrier = Arc::clone(&barrier);
         let register = tokio::spawn(async move {
@@ -393,7 +391,7 @@ async fn cancel_aborts_at_await_boundary_and_races_with_shutdown() {
 #[tokio::test]
 async fn callback_panic_releases_capacity() {
     let scheduler = Scheduler::new(SchedulerConfig::new(1).unwrap()).unwrap();
-    let started = Arc::new(tokio::sync::Notify::new());
+    let started = Arc::new(Notify::new());
     let callback_started = Arc::clone(&started);
     scheduler
         .register(TaskSchedule::once(Duration::ZERO), move || {
@@ -405,11 +403,11 @@ async fn callback_panic_releases_capacity() {
         })
         .unwrap();
     started.notified().await;
-    let replacement = tokio::time::timeout(Duration::from_secs(1), async {
+    let replacement = tokio_time::timeout(Duration::from_secs(1), async {
         loop {
             match scheduler.register(TaskSchedule::once(Duration::from_secs(60)), || async {}) {
                 Ok(task_id) => break task_id,
-                Err(SchedulerError::TaskLimitExceeded) => tokio::task::yield_now().await,
+                Err(SchedulerError::TaskLimitExceeded) => tokio_task::yield_now().await,
                 Err(error) => panic!("unexpected scheduler error: {error}"),
             }
         }
@@ -423,7 +421,7 @@ async fn callback_panic_releases_capacity() {
 async fn callback_can_reenter_shutdown_and_send_non_sync_closure_is_accepted() {
     let scheduler = Arc::new(Scheduler::new(SchedulerConfig::new(2).unwrap()).unwrap());
     let weak = Arc::downgrade(&scheduler);
-    let stopped = Arc::new(tokio::sync::Notify::new());
+    let stopped = Arc::new(Notify::new());
     let callback_stopped = Arc::clone(&stopped);
     scheduler
         .register(TaskSchedule::once(Duration::ZERO), move || {
@@ -435,7 +433,7 @@ async fn callback_can_reenter_shutdown_and_send_non_sync_closure_is_accepted() {
             }
         })
         .unwrap();
-    tokio::time::timeout(Duration::from_secs(1), stopped.notified())
+    tokio_time::timeout(Duration::from_secs(1), stopped.notified())
         .await
         .unwrap();
     assert_eq!(
@@ -456,14 +454,14 @@ async fn callback_can_reenter_shutdown_and_send_non_sync_closure_is_accepted() {
 
 #[test]
 fn multi_thread_runtime_drives_tasks() {
-    let runtime = tokio::runtime::Builder::new_multi_thread()
+    let runtime = RuntimeBuilder::new_multi_thread()
         .worker_threads(2)
         .enable_time()
         .build()
         .unwrap();
     runtime.block_on(async {
         let scheduler = Scheduler::new(SchedulerConfig::default()).unwrap();
-        let done = Arc::new(tokio::sync::Notify::new());
+        let done = Arc::new(Notify::new());
         let callback_done = Arc::clone(&done);
         scheduler
             .register(TaskSchedule::once(Duration::ZERO), move || {
@@ -471,7 +469,7 @@ fn multi_thread_runtime_drives_tasks() {
                 async move { done.notify_one() }
             })
             .unwrap();
-        tokio::time::timeout(Duration::from_secs(1), done.notified())
+        tokio_time::timeout(Duration::from_secs(1), done.notified())
             .await
             .unwrap();
     });

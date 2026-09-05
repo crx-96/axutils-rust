@@ -1,6 +1,9 @@
 #![cfg(all(feature = "base64", feature = "md5", feature = "aes"))]
 
-use axutils::{AesCipher, AesKeyBits, AesMode, Base64Alphabet, Base64Options, CryptoUtils};
+use axutils::{
+    crypto::{AesCipher, AesKeyBits, AesMode, Base64Alphabet, Base64Options},
+    utils::CryptoUtils,
+};
 
 fn hex_bytes(hex: &str) -> Vec<u8> {
     assert!(hex.len().is_multiple_of(2));

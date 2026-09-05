@@ -1,6 +1,7 @@
-#![cfg(all(feature = "redis", feature = "tokio"))]
+#![cfg(feature = "redis-cluster-async")]
 
-use axutils::{RedisConfig, RedisUtils};
+use axutils::redis::RedisConfig;
+use axutils::utils::RedisUtils;
 use std::time::Duration;
 
 #[path = "support/redis_server.rs"]
@@ -38,5 +39,8 @@ async fn async_cluster_init_checks_connectivity_before_installing_the_global_cli
         assert!(commands.iter().any(|name| name == "CLUSTER"));
         assert!(commands.iter().any(|name| name == "PING"));
     }
-    assert_eq!(RedisUtils::ping_async().await.unwrap(), "PONG");
+    assert_eq!(
+        RedisUtils::client().unwrap().ping_async().await.unwrap(),
+        "PONG"
+    );
 }

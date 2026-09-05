@@ -23,7 +23,7 @@ pub enum EmailSecurity {
 /// 已校验的 SMTP 账号和发件人配置。
 ///
 /// 使用 [`EmailConfig::new`] 创建后，可选地通过 builder 方法设置显示名和命令超时。字段
-/// 私有且不会实现 `Clone`；配置被 [`crate::EmailClient::new`] 消费后，调用方不能再读取密码。
+/// 私有且不会实现 `Clone`；配置被 [`crate::email::EmailClient::new`] 消费后，调用方不能再读取密码。
 /// `host` 仅接受 ASCII DNS 主机名，不接受 SMTP URL、端口、路径或 IP 字面量。
 pub struct EmailConfig {
     pub(crate) host: String,
@@ -45,16 +45,16 @@ impl EmailConfig {
     ///
     /// # Errors
     ///
-    /// 返回 [`EmailError::InvalidConfig`](crate::EmailError::InvalidConfig) 并指出固定字段名，
+    /// 返回 [`EmailError::InvalidConfig`](crate::email::EmailError::InvalidConfig) 并指出固定字段名，
     /// 如果主机名、端口、用户名、密码或发件地址为空、超出上限或格式非法；主机名、用户名
     /// 和发件地址中的控制字符也会被拒绝。
     ///
     /// # Examples
     ///
     /// ```
-    /// use axutils::{EmailConfig, EmailSecurity};
+    /// use axutils::email::{EmailConfig, EmailError, EmailSecurity};
     ///
-    /// # fn main() -> Result<(), axutils::EmailError> {
+    /// # fn main() -> Result<(), EmailError> {
     /// let config = EmailConfig::new(
     ///     "smtp.example.com",
     ///     465,
@@ -119,14 +119,14 @@ impl EmailConfig {
     /// # Errors
     ///
     /// 如果显示名为空、超出 512 字节、包含首尾空白或控制字符，返回字段为 `from_name` 的
-    /// [`EmailError::InvalidConfig`](crate::EmailError::InvalidConfig)。
+    /// [`EmailError::InvalidConfig`](crate::email::EmailError::InvalidConfig)。
     ///
     /// # Examples
     ///
     /// ```
-    /// use axutils::{EmailConfig, EmailSecurity};
+    /// use axutils::email::{EmailConfig, EmailError, EmailSecurity};
     ///
-    /// # fn main() -> Result<(), axutils::EmailError> {
+    /// # fn main() -> Result<(), EmailError> {
     /// let config = EmailConfig::new(
     ///     "smtp.example.com",
     ///     465,
@@ -162,15 +162,15 @@ impl EmailConfig {
     /// # Errors
     ///
     /// 如果超时小于 1 秒或大于 5 分钟，返回字段为 `timeout` 的
-    /// [`EmailError::InvalidConfig`](crate::EmailError::InvalidConfig)。
+    /// [`EmailError::InvalidConfig`](crate::email::EmailError::InvalidConfig)。
     ///
     /// # Examples
     ///
     /// ```
+    /// use axutils::email::{EmailConfig, EmailError, EmailSecurity};
     /// use std::time::Duration;
-    /// use axutils::{EmailConfig, EmailSecurity};
     ///
-    /// # fn main() -> Result<(), axutils::EmailError> {
+    /// # fn main() -> Result<(), EmailError> {
     /// let config = EmailConfig::new(
     ///     "smtp.example.com",
     ///     587,

@@ -3,9 +3,10 @@
 use std::sync::{Arc, Barrier};
 use std::thread;
 
-use axutils::{
-    JwtAlgorithm, JwtConfig, JwtError, JwtSigningKey, JwtUtils, JwtValidation, JwtVerificationKey,
+use axutils::jwt::{
+    JwtAlgorithm, JwtConfig, JwtError, JwtSigningKey, JwtValidation, JwtVerificationKey,
 };
+use axutils::utils::JwtUtils;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -28,14 +29,14 @@ fn config(secret: &[u8]) -> JwtConfig {
 fn global_jwt_initializes_once_and_is_deprecated_by_no_reset_semantics() {
     assert!(!JwtUtils::is_initialized());
     assert!(matches!(
-        JwtUtils::encode(&Claims {
+        JwtUtils::codec().and_then(|codec| codec.encode(&Claims {
             exp: 2_000_000_000,
             sub: "before-init".to_owned(),
-        }),
+        })),
         Err(JwtError::NotInitialized)
     ));
     assert!(matches!(
-        JwtUtils::decode::<Claims>("not-a-token"),
+        JwtUtils::codec().and_then(|codec| codec.decode::<Claims>("not-a-token")),
         Err(JwtError::NotInitialized)
     ));
 
@@ -78,11 +79,12 @@ fn global_jwt_initializes_once_and_is_deprecated_by_no_reset_semantics() {
         exp: 2_000_000_000,
         sub: "global-round-trip".to_owned(),
     };
-    let token = JwtUtils::encode(&claims).unwrap();
-    assert_eq!(JwtUtils::decode::<Claims>(&token).unwrap(), claims);
+    let codec = JwtUtils::codec().unwrap();
+    let token = codec.encode(&claims).unwrap();
+    assert_eq!(codec.decode::<Claims>(&token).unwrap(), claims);
 
     let sentinel_token = "SENTINEL_JWT_TOKEN_VALUE";
-    let error = JwtUtils::decode::<Claims>(sentinel_token).unwrap_err();
+    let error = codec.decode::<Claims>(sentinel_token).unwrap_err();
     assert!(!error.to_string().contains(sentinel_token));
     assert!(!format!("{error:?}").contains(sentinel_token));
     assert!(std::error::Error::source(&error).is_none());

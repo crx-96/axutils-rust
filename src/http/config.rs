@@ -6,7 +6,7 @@ use std::time::Duration;
 use url::Url;
 
 use super::headers::HttpHeaders;
-use super::request::validate_absolute_url;
+use super::request;
 use super::retry::RetryPolicy;
 use super::HttpError;
 
@@ -51,7 +51,7 @@ impl DeduplicationPolicy {
     /// # Examples
     ///
     /// ```
-    /// use axutils::DeduplicationPolicy;
+    /// use axutils::http::DeduplicationPolicy;
     ///
     /// let policy = DeduplicationPolicy::disabled();
     /// assert!(!policy.is_enabled());
@@ -68,7 +68,7 @@ impl DeduplicationPolicy {
     /// # Examples
     ///
     /// ```
-    /// use axutils::DeduplicationPolicy;
+    /// use axutils::http::DeduplicationPolicy;
     ///
     /// let policy = DeduplicationPolicy::in_flight(16).unwrap();
     /// assert_eq!(policy.max_inflight_keys(), 16);
@@ -87,7 +87,7 @@ impl DeduplicationPolicy {
     /// # Examples
     ///
     /// ```
-    /// use axutils::DeduplicationPolicy;
+    /// use axutils::http::DeduplicationPolicy;
     /// use std::time::Duration;
     ///
     /// let policy = DeduplicationPolicy::with_completed_ttl(
@@ -135,7 +135,7 @@ impl DeduplicationPolicy {
     /// # Examples
     ///
     /// ```
-    /// use axutils::{DeduplicationMode, DeduplicationPolicy};
+    /// use axutils::http::{DeduplicationMode, DeduplicationPolicy};
     ///
     /// let policy = DeduplicationPolicy::disabled();
     /// assert_eq!(policy.mode(), DeduplicationMode::Disabled);
@@ -149,7 +149,7 @@ impl DeduplicationPolicy {
     /// # Examples
     ///
     /// ```
-    /// use axutils::DeduplicationPolicy;
+    /// use axutils::http::DeduplicationPolicy;
     /// use std::time::Duration;
     ///
     /// let policy = DeduplicationPolicy::with_completed_ttl(
@@ -170,7 +170,7 @@ impl DeduplicationPolicy {
     /// # Examples
     ///
     /// ```
-    /// use axutils::DeduplicationPolicy;
+    /// use axutils::http::DeduplicationPolicy;
     ///
     /// let policy = DeduplicationPolicy::in_flight(16).unwrap();
     /// assert_eq!(policy.max_inflight_keys(), 16);
@@ -184,7 +184,7 @@ impl DeduplicationPolicy {
     /// # Examples
     ///
     /// ```
-    /// use axutils::DeduplicationPolicy;
+    /// use axutils::http::DeduplicationPolicy;
     /// use std::time::Duration;
     ///
     /// let policy = DeduplicationPolicy::with_completed_ttl(
@@ -205,7 +205,7 @@ impl DeduplicationPolicy {
     /// # Examples
     ///
     /// ```
-    /// use axutils::DeduplicationPolicy;
+    /// use axutils::http::DeduplicationPolicy;
     /// use std::time::Duration;
     ///
     /// let policy = DeduplicationPolicy::with_completed_ttl(
@@ -226,7 +226,7 @@ impl DeduplicationPolicy {
     /// # Examples
     ///
     /// ```
-    /// use axutils::DeduplicationPolicy;
+    /// use axutils::http::DeduplicationPolicy;
     ///
     /// assert!(DeduplicationPolicy::in_flight(16).unwrap().is_enabled());
     /// assert!(!DeduplicationPolicy::disabled().is_enabled());
@@ -240,7 +240,7 @@ impl DeduplicationPolicy {
     /// # Examples
     ///
     /// ```
-    /// use axutils::DeduplicationPolicy;
+    /// use axutils::http::DeduplicationPolicy;
     /// use std::time::Duration;
     ///
     /// let policy = DeduplicationPolicy::with_completed_ttl(
@@ -405,7 +405,7 @@ impl HttpConfigBuilder {
     /// 但相对 URL 会在执行时返回 [`HttpError::InvalidUrl`]。
     pub fn base_url(mut self, value: impl AsRef<str>) -> Result<Self, HttpError> {
         let url = Url::parse(value.as_ref()).map_err(|_| HttpError::InvalidUrl)?;
-        validate_absolute_url(&url)?;
+        request::validate_absolute_url(&url)?;
         self.base_url = Some(url);
         Ok(self)
     }

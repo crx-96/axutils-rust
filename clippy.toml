@@ -1,0 +1,3 @@
+# 长路径只允许出现在 `use` 声明中；调用点应通过有意义的模块名或别名保留来源。
+absolute-paths-max-segments = 2
+absolute-paths-allowed-crates = ["std", "core", "alloc"]

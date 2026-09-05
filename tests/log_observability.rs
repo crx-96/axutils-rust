@@ -5,24 +5,32 @@ use std::io::Write;
 use std::io::{ErrorKind, Read};
 #[cfg(feature = "http")]
 use std::net::{TcpListener, TcpStream};
-#[cfg(feature = "serde")]
+#[cfg(feature = "config")]
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 #[cfg(feature = "http")]
 use std::thread;
-#[cfg(any(feature = "http", all(feature = "sqlx", feature = "tokio")))]
+#[cfg(any(feature = "http", feature = "sqlx", feature = "sqlx-sqlite"))]
 use std::time::Duration;
 #[cfg(feature = "http")]
 use std::time::Instant;
 
-#[cfg(all(feature = "sqlx", feature = "tokio"))]
-use axutils::SqlxError;
-#[cfg(feature = "serde")]
-use axutils::{ConfigFormat, ConfigLoader};
+#[cfg(feature = "config")]
+use axutils::config::{ConfigFormat, ConfigLoader};
 #[cfg(feature = "http")]
-use axutils::{
+use axutils::http::{
     HttpClient, HttpConfig, HttpError, HttpMethod, HttpRequest, HttpTransportErrorKind, RetryPolicy,
 };
+#[cfg(any(feature = "sqlx", feature = "sqlx-sqlite"))]
+use axutils::sqlx::{SqlxClient, SqlxConfig, SqlxError};
+#[cfg(any(
+    feature = "config-async",
+    feature = "http-async",
+    feature = "sqlx",
+    feature = "sqlx-sqlite"
+))]
+use tokio::runtime::Builder as RuntimeBuilder;
+use tracing::{subscriber, Level};
 use tracing_subscriber::fmt::writer::MakeWriter;
 
 #[cfg(feature = "http")]
@@ -31,11 +39,11 @@ const HTTP_SENTINEL: &str = "AXUTILS_HTTP_URL_SECRET";
 const HTTP_HEADER_SENTINEL: &str = "AXUTILS_HTTP_HEADER_SECRET";
 #[cfg(feature = "http")]
 const HTTP_BODY_SENTINEL: &str = "AXUTILS_HTTP_BODY_SECRET";
-#[cfg(all(feature = "sqlx", feature = "tokio"))]
+#[cfg(any(feature = "sqlx", feature = "sqlx-sqlite"))]
 const SQL_SENTINEL: &str = "AXUTILS_SQL_BIND_SECRET";
-#[cfg(all(feature = "sqlx", feature = "tokio"))]
+#[cfg(any(feature = "sqlx", feature = "sqlx-sqlite"))]
 const SQL_TEXT_SENTINEL: &str = "AXUTILS_SQL_TEXT_SECRET";
-#[cfg(feature = "serde")]
+#[cfg(feature = "config")]
 const CONFIG_SENTINEL: &str = "AXUTILS_CONFIG_PATH_SECRET";
 
 #[derive(Clone)]
@@ -69,11 +77,11 @@ fn tracing_minimal_feature_exercises_the_capture_harness() {
     let subscriber = tracing_subscriber::fmt()
         .with_ansi(false)
         .with_target(true)
-        .with_max_level(tracing::Level::DEBUG)
+        .with_max_level(Level::DEBUG)
         .with_writer(Capture(Arc::clone(&capture)))
         .finish();
 
-    tracing::subscriber::with_default(subscriber, || {
+    subscriber::with_default(subscriber, || {
         tracing::debug!(
             target: "axutils::observability_test",
             operation = "capture_harness",
@@ -102,11 +110,11 @@ fn captures_sync_http_events_without_sensitive_context() {
     let subscriber = tracing_subscriber::fmt()
         .with_ansi(false)
         .with_target(true)
-        .with_max_level(tracing::Level::DEBUG)
+        .with_max_level(Level::DEBUG)
         .with_writer(Capture(Arc::clone(&capture)))
         .finish();
 
-    tracing::subscriber::with_default(subscriber, || {
+    subscriber::with_default(subscriber, || {
         let client = HttpClient::new(HttpConfig::default()).expect("HTTP client");
         let request = HttpRequest::new(HttpMethod::Get, format!("{url}/{HTTP_SENTINEL}"))
             .expect("HTTP request")
@@ -144,20 +152,20 @@ fn captures_sync_http_events_without_sensitive_context() {
 }
 
 #[test]
-#[cfg(feature = "serde")]
+#[cfg(feature = "config")]
 fn captures_sync_config_events_without_sensitive_context() {
     let capture = Arc::new(Mutex::new(Vec::new()));
     let subscriber = tracing_subscriber::fmt()
         .with_ansi(false)
         .with_target(true)
-        .with_max_level(tracing::Level::DEBUG)
+        .with_max_level(Level::DEBUG)
         .with_writer(Capture(Arc::clone(&capture)))
         .finish();
     let config_path = unique_config_path("sync");
     std::fs::write(&config_path, format!(r#"{{"value":"{CONFIG_SENTINEL}"}}"#))
         .expect("write config");
 
-    tracing::subscriber::with_default(subscriber, || {
+    subscriber::with_default(subscriber, || {
         let value = ConfigLoader::new()
             .load_value(&config_path)
             .expect("config value");
@@ -216,17 +224,17 @@ fn captures_sync_config_events_without_sensitive_context() {
 }
 
 #[test]
-#[cfg(feature = "serde")]
+#[cfg(feature = "config")]
 fn info_filter_hides_success_events_but_keeps_failures() {
     let capture = Arc::new(Mutex::new(Vec::new()));
     let subscriber = tracing_subscriber::fmt()
         .with_ansi(false)
         .with_target(true)
-        .with_max_level(tracing::Level::INFO)
+        .with_max_level(Level::INFO)
         .with_writer(Capture(Arc::clone(&capture)))
         .finish();
 
-    tracing::subscriber::with_default(subscriber, || {
+    subscriber::with_default(subscriber, || {
         ConfigLoader::new()
             .parse_value("{}", ConfigFormat::Json)
             .expect("valid JSON");
@@ -243,22 +251,22 @@ fn info_filter_hides_success_events_but_keeps_failures() {
 }
 
 #[test]
-#[cfg(all(feature = "http", feature = "tokio"))]
+#[cfg(feature = "http-async")]
 fn captures_async_http_events_without_sensitive_context() {
     let (url, server) = spawn_http_server();
     let capture = Arc::new(Mutex::new(Vec::new()));
     let subscriber = tracing_subscriber::fmt()
         .with_ansi(false)
         .with_target(true)
-        .with_max_level(tracing::Level::DEBUG)
+        .with_max_level(Level::DEBUG)
         .with_writer(Capture(Arc::clone(&capture)))
         .finish();
 
-    let runtime = tokio::runtime::Builder::new_current_thread()
+    let runtime = RuntimeBuilder::new_current_thread()
         .enable_all()
         .build()
         .expect("test runtime");
-    tracing::subscriber::with_default(subscriber, || {
+    subscriber::with_default(subscriber, || {
         runtime.block_on(async {
             let client = HttpClient::new(HttpConfig::default()).expect("HTTP client");
             let request = HttpRequest::new(HttpMethod::Get, format!("{url}/{HTTP_SENTINEL}"))
@@ -295,32 +303,32 @@ fn captures_async_http_events_without_sensitive_context() {
 }
 
 #[test]
-#[cfg(all(feature = "sqlx", feature = "tokio"))]
+#[cfg(any(feature = "sqlx", feature = "sqlx-sqlite"))]
 fn captures_sqlx_events_and_exact_row_counts_without_sensitive_context() {
     let capture = Arc::new(Mutex::new(Vec::new()));
     let subscriber = tracing_subscriber::fmt()
         .with_ansi(false)
         .with_target(true)
-        .with_max_level(tracing::Level::DEBUG)
+        .with_max_level(Level::DEBUG)
         .with_writer(Capture(Arc::clone(&capture)))
         .finish();
-    let runtime = tokio::runtime::Builder::new_current_thread()
+    let runtime = RuntimeBuilder::new_current_thread()
         .enable_all()
         .build()
         .expect("test runtime");
 
-    tracing::subscriber::with_default(subscriber, || {
+    subscriber::with_default(subscriber, || {
         runtime.block_on(async {
-            let sqlx = axutils::SqlxClient::connect(
-                axutils::SqlxConfig::new("sqlite::memory:")
+            let sqlx = SqlxClient::connect(
+                SqlxConfig::new("sqlite::memory:")
                     .expect("SQLite config")
                     .with_max_rows(1)
                     .expect("row limit"),
             )
             .await
             .expect("SQLite client");
-            let timeout_client = axutils::SqlxClient::connect(
-                axutils::SqlxConfig::new("sqlite::memory:")
+            let timeout_client = SqlxClient::connect(
+                SqlxConfig::new("sqlite::memory:")
                     .expect("timeout SQLite config")
                     .with_acquire_timeout(Duration::from_millis(10))
                     .expect("timeout acquire limit"),
@@ -421,24 +429,24 @@ fn captures_sqlx_events_and_exact_row_counts_without_sensitive_context() {
 }
 
 #[test]
-#[cfg(all(feature = "serde", feature = "tokio"))]
+#[cfg(feature = "config-async")]
 fn captures_async_config_events_without_sensitive_context() {
     let capture = Arc::new(Mutex::new(Vec::new()));
     let subscriber = tracing_subscriber::fmt()
         .with_ansi(false)
         .with_target(true)
-        .with_max_level(tracing::Level::DEBUG)
+        .with_max_level(Level::DEBUG)
         .with_writer(Capture(Arc::clone(&capture)))
         .finish();
     let config_path = unique_config_path("async");
     std::fs::write(&config_path, format!(r#"{{"value":"{CONFIG_SENTINEL}"}}"#))
         .expect("write config");
-    let runtime = tokio::runtime::Builder::new_current_thread()
+    let runtime = RuntimeBuilder::new_current_thread()
         .enable_all()
         .build()
         .expect("test runtime");
 
-    tracing::subscriber::with_default(subscriber, || {
+    subscriber::with_default(subscriber, || {
         runtime.block_on(async {
             let value = ConfigLoader::new()
                 .load_value_async(&config_path)
@@ -482,11 +490,11 @@ fn captures_http_retry_and_timeout_failure_events() {
     let subscriber = tracing_subscriber::fmt()
         .with_ansi(false)
         .with_target(true)
-        .with_max_level(tracing::Level::DEBUG)
+        .with_max_level(Level::DEBUG)
         .with_writer(Capture(Arc::clone(&capture)))
         .finish();
 
-    tracing::subscriber::with_default(subscriber, || {
+    subscriber::with_default(subscriber, || {
         let retry_policy = RetryPolicy::new()
             .with_max_retries(2)
             .expect("two total attempts")
@@ -750,7 +758,7 @@ fn read_request(stream: &mut TcpStream) {
     }
 }
 
-#[cfg(feature = "serde")]
+#[cfg(feature = "config")]
 fn unique_config_path(suffix: &str) -> PathBuf {
     std::env::temp_dir().join(format!(
         "axutils-log-observability-{suffix}-{}-{CONFIG_SENTINEL}.json",

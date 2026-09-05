@@ -1,19 +1,16 @@
-#[cfg(any(feature = "itoa", feature = "ryu", feature = "zmij", feature = "uuid"))]
-use axutils::ConvertUtils;
+#[cfg(any(feature = "ryu", feature = "zmij"))]
+use axutils::convert::FloatFormat;
+use axutils::utils::ConvertUtils;
 
 #[test]
-fn convert_utils_is_available_through_all_public_paths() {
-    let _: axutils::ConvertUtils = axutils::ConvertUtils;
-    let _: axutils::convert::ConvertUtils = axutils::convert::ConvertUtils;
-    let _: axutils::utils::ConvertUtils = axutils::utils::ConvertUtils;
-    let _: axutils::utils::convert_utils::ConvertUtils =
-        axutils::utils::convert_utils::ConvertUtils;
+fn convert_utils_is_available_from_the_utils_module() {
+    let _: ConvertUtils = ConvertUtils;
 }
 
 #[cfg(feature = "itoa")]
 #[test]
-fn integer_conversion_covers_root_and_convert_paths() {
-    use axutils::{IntegerBuffer, IntegerValue};
+fn integer_conversion_uses_convert_domain_types() {
+    use axutils::convert::{IntegerBuffer, IntegerValue};
 
     macro_rules! assert_round_trip {
         ($($type:ty => [$($value:expr),+ $(,)?]),+ $(,)?) => {
@@ -53,14 +50,14 @@ fn integer_conversion_covers_root_and_convert_paths() {
     ConvertUtils::append_integer(&mut output, u64::MAX);
     assert_eq!(output, format!("prefix:{}", u64::MAX));
 
-    let mut root_buffer = axutils::IntegerBuffer::new();
-    let mut module_buffer = axutils::convert::IntegerBuffer::new();
+    let mut first_buffer = IntegerBuffer::new();
+    let mut second_buffer = IntegerBuffer::new();
     assert_eq!(
-        <i32 as axutils::IntegerValue>::format_into(1, &mut root_buffer),
+        <i32 as IntegerValue>::format_into(1, &mut first_buffer),
         "1"
     );
     assert_eq!(
-        <i32 as axutils::convert::IntegerValue>::format_into(2, &mut module_buffer),
+        <i32 as IntegerValue>::format_into(2, &mut second_buffer),
         "2"
     );
     let _ = <u8 as IntegerValue>::format_into;
@@ -73,19 +70,19 @@ fn integer_conversion_covers_root_and_convert_paths() {
 
 #[cfg(any(feature = "ryu", feature = "zmij"))]
 #[allow(clippy::vec_init_then_push)]
-fn float_formats() -> Vec<axutils::FloatFormat> {
+fn float_formats() -> Vec<FloatFormat> {
     let mut formats = Vec::new();
     #[cfg(feature = "ryu")]
-    formats.push(axutils::FloatFormat::Ryu);
+    formats.push(FloatFormat::Ryu);
     #[cfg(feature = "zmij")]
-    formats.push(axutils::FloatFormat::Zmij);
+    formats.push(FloatFormat::Zmij);
     formats
 }
 
 #[cfg(any(feature = "ryu", feature = "zmij"))]
 #[test]
 fn float_conversion_uses_one_common_api_for_each_enabled_backend() {
-    use axutils::{FloatBuffer, FloatValue};
+    use axutils::convert::{FloatBuffer, FloatValue};
 
     for format in float_formats() {
         for value in [0.0_f64, -0.0, 1.25, -123.5, 1.0e-30, 1.0e30] {
@@ -129,11 +126,11 @@ fn float_conversion_uses_one_common_api_for_each_enabled_backend() {
     let text = ConvertUtils::float_to_string(1.25_f64, {
         #[cfg(feature = "ryu")]
         {
-            axutils::FloatFormat::Ryu
+            FloatFormat::Ryu
         }
         #[cfg(all(not(feature = "ryu"), feature = "zmij"))]
         {
-            axutils::FloatFormat::Zmij
+            FloatFormat::Zmij
         }
     });
     assert_eq!(text, "1.25");
@@ -152,8 +149,8 @@ fn float_conversion_uses_one_common_api_for_each_enabled_backend() {
 
 #[cfg(feature = "uuid")]
 #[test]
-fn uuid_conversion_uses_root_and_convert_paths_and_documented_input_forms() {
-    use axutils::UuidBuffer;
+fn uuid_conversion_uses_convert_domain_types_and_documented_input_forms() {
+    use axutils::convert::UuidBuffer;
 
     const CANONICAL: &str = "550e8400-e29b-41d4-a716-446655440000";
     let uuid = ConvertUtils::string_to_uuid(CANONICAL).unwrap();
@@ -185,6 +182,5 @@ fn uuid_conversion_uses_root_and_convert_paths_and_documented_input_forms() {
         assert!(ConvertUtils::string_to_uuid(input).is_err());
     }
 
-    let _: axutils::UuidBuffer = axutils::UuidBuffer::new();
-    let _: axutils::convert::UuidBuffer = axutils::convert::UuidBuffer::new();
+    let _: UuidBuffer = UuidBuffer::new();
 }

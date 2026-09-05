@@ -8,7 +8,9 @@ use std::fmt;
 /// # Examples
 ///
 /// ```
-/// let error = axutils::JwtError::NotInitialized;
+/// use axutils::jwt::JwtError;
+///
+/// let error = JwtError::NotInitialized;
 /// assert_eq!(error.to_string(), "JWT utility is not initialized");
 /// ```
 #[non_exhaustive]
@@ -19,7 +21,9 @@ pub enum JwtError {
     /// # Examples
     ///
     /// ```
-    /// let error = axutils::JwtError::InvalidConfig { field: "keys" };
+    /// use axutils::jwt::JwtError;
+    ///
+    /// let error = JwtError::InvalidConfig { field: "keys" };
     /// assert!(error.to_string().contains("keys"));
     /// ```
     InvalidConfig {
@@ -34,7 +38,9 @@ pub enum JwtError {
     /// # Examples
     ///
     /// ```
-    /// let _error = axutils::JwtError::InvalidKey { kind: "rsa_pem" };
+    /// use axutils::jwt::JwtError;
+    ///
+    /// let _error = JwtError::InvalidKey { kind: "rsa_pem" };
     /// ```
     InvalidKey {
         /// key 错误的固定分类，例如算法、角色或参数类别；不包含 key、密码或 PEM 文本。
@@ -47,7 +53,9 @@ pub enum JwtError {
     /// # Examples
     ///
     /// ```
-    /// let _error = axutils::JwtError::UnsupportedKeyFormat { kind: "verification_key" };
+    /// use axutils::jwt::JwtError;
+    ///
+    /// let _error = JwtError::UnsupportedKeyFormat { kind: "verification_key" };
     /// ```
     UnsupportedKeyFormat {
         /// 当前后端不支持或无法解析的 key 格式固定分类；不包含 key 材料或第三方错误文本。
@@ -60,7 +68,9 @@ pub enum JwtError {
     /// # Examples
     ///
     /// ```
-    /// let _error = axutils::JwtError::MissingSigningKey;
+    /// use axutils::jwt::JwtError;
+    ///
+    /// let _error = JwtError::MissingSigningKey;
     /// ```
     MissingSigningKey,
     /// 配置没有验证 key。
@@ -68,7 +78,9 @@ pub enum JwtError {
     /// # Examples
     ///
     /// ```
-    /// let _error = axutils::JwtError::MissingVerificationKey;
+    /// use axutils::jwt::JwtError;
+    ///
+    /// let _error = JwtError::MissingVerificationKey;
     /// ```
     MissingVerificationKey,
     /// 全局入口尚未初始化。
@@ -76,7 +88,9 @@ pub enum JwtError {
     /// # Examples
     ///
     /// ```
-    /// let _error = axutils::JwtError::NotInitialized;
+    /// use axutils::jwt::JwtError;
+    ///
+    /// let _error = JwtError::NotInitialized;
     /// ```
     NotInitialized,
     /// 全局入口已经成功初始化，不能替换。
@@ -84,7 +98,9 @@ pub enum JwtError {
     /// # Examples
     ///
     /// ```
-    /// let _error = axutils::JwtError::AlreadyInitialized;
+    /// use axutils::jwt::JwtError;
+    ///
+    /// let _error = JwtError::AlreadyInitialized;
     /// ```
     AlreadyInitialized,
     /// token 超过固定 UTF-8 字节上限。
@@ -92,7 +108,9 @@ pub enum JwtError {
     /// # Examples
     ///
     /// ```
-    /// let _error = axutils::JwtError::TokenTooLarge {
+    /// use axutils::jwt::JwtError;
+    ///
+    /// let _error = JwtError::TokenTooLarge {
     ///     length: 65 * 1024,
     ///     limit: 64 * 1024,
     /// };
@@ -108,7 +126,9 @@ pub enum JwtError {
     /// # Examples
     ///
     /// ```
-    /// let _error = axutils::JwtError::ClaimsTooLarge {
+    /// use axutils::jwt::JwtError;
+    ///
+    /// let _error = JwtError::ClaimsTooLarge {
     ///     length: 33 * 1024,
     ///     limit: 32 * 1024,
     /// };
@@ -124,7 +144,9 @@ pub enum JwtError {
     /// # Examples
     ///
     /// ```
-    /// let _error = axutils::JwtError::InvalidHeader { field: "alg" };
+    /// use axutils::jwt::JwtError;
+    ///
+    /// let _error = JwtError::InvalidHeader { field: "alg" };
     /// ```
     InvalidHeader {
         /// Header 结构中无效部分的固定分类，例如 `"segments"`、`"alg"`、`"json"` 或
@@ -138,7 +160,9 @@ pub enum JwtError {
     /// # Examples
     ///
     /// ```
-    /// let _error = axutils::JwtError::InvalidClaim { claim: "exp" };
+    /// use axutils::jwt::JwtError;
+    ///
+    /// let _error = JwtError::InvalidClaim { claim: "exp" };
     /// ```
     InvalidClaim {
         /// 无效标准 claim 的名称，例如 `"exp"`、`"nbf"`、`"aud"`、`"iss"` 或 `"sub"`；
@@ -152,7 +176,9 @@ pub enum JwtError {
     /// # Examples
     ///
     /// ```
-    /// let _error = axutils::JwtError::MissingRequiredClaim { claim: "sub" };
+    /// use axutils::jwt::JwtError;
+    ///
+    /// let _error = JwtError::MissingRequiredClaim { claim: "sub" };
     /// ```
     MissingRequiredClaim {
         /// token 缺失的标准 claim 名称；只提供固定名称，不包含 token 或其他 claims。
@@ -165,7 +191,9 @@ pub enum JwtError {
     /// # Examples
     ///
     /// ```
-    /// let _error = axutils::JwtError::InvalidToken { segment: "signature" };
+    /// use axutils::jwt::JwtError;
+    ///
+    /// let _error = JwtError::InvalidToken { segment: "signature" };
     /// ```
     InvalidToken {
         /// token 处理阶段的固定分类，例如 `"claims"`、`"signature"`、`"token"` 或

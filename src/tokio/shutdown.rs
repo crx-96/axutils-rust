@@ -6,14 +6,17 @@ use std::{
 };
 
 use super::TokioError;
+use tokio::signal;
 
 /// 跨平台 OS shutdown 原因。
 ///
 /// # Examples
 /// ```rust
+/// # use axutils::tokio::*;
+/// # use axutils::tokio::*;
 /// # #[cfg(feature="tokio")] {
-/// let reason = axutils::TokioShutdownReason::CtrlC;
-/// assert_eq!(reason, axutils::TokioShutdownReason::CtrlC);
+/// let reason = TokioShutdownReason::CtrlC;
+/// assert_eq!(reason, TokioShutdownReason::CtrlC);
 /// # }
 /// ```
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -30,8 +33,10 @@ pub enum TokioShutdownReason {
 ///
 /// # Examples
 /// ```rust,no_run
-/// # async fn example() -> Result<(), axutils::TokioError> {
-/// let _reason = axutils::tokio::wait_for_shutdown().await?;
+/// # use axutils::tokio::*;
+/// # use axutils::tokio::wait_for_shutdown;
+/// # async fn example() -> Result<(), TokioError> {
+/// let _reason = wait_for_shutdown().await?;
 /// # Ok(()) }
 /// ```
 pub async fn wait_for_shutdown() -> Result<TokioShutdownReason, TokioError> {
@@ -39,7 +44,7 @@ pub async fn wait_for_shutdown() -> Result<TokioShutdownReason, TokioError> {
     {
         use ::tokio::signal::unix::{signal, SignalKind};
         let mut term = signal(SignalKind::terminate()).map_err(TokioError::Signal)?;
-        let ctrl_c = ::tokio::signal::ctrl_c();
+        let ctrl_c = signal::ctrl_c();
         let mut ctrl_c = pin!(ctrl_c);
         poll_fn(|cx| {
             if let Poll::Ready(result) = ctrl_c.as_mut().poll(cx) {
@@ -58,9 +63,7 @@ pub async fn wait_for_shutdown() -> Result<TokioShutdownReason, TokioError> {
     }
     #[cfg(not(unix))]
     {
-        ::tokio::signal::ctrl_c()
-            .await
-            .map_err(TokioError::Signal)?;
+        signal::ctrl_c().await.map_err(TokioError::Signal)?;
         Ok(TokioShutdownReason::CtrlC)
     }
 }

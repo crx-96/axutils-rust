@@ -7,55 +7,56 @@
 //! 深度不超过加载器的嵌套深度上限。
 
 use serde::de::DeserializeOwned;
-
-use super::{
-    error::ConfigError,
-    value::{classify_marker, ErrorMarker},
-    ConfigValue,
+use serde_saphyr::{
+    self as yaml, budget::BudgetBreach, options::DuplicateKeyPolicy, Budget, Error as YamlError,
+    Options,
 };
+
+use super::value as config_value;
+use super::{error::ConfigError, value::ErrorMarker, ConfigValue};
 
 const MAX_ALIAS_REPLAYED_EVENTS: usize = 1_000_000;
 const MAX_ALIAS_EXPANSIONS_PER_ANCHOR: usize = 10_000;
 
 pub(crate) fn parse_value(text: &str, max_depth: usize) -> Result<ConfigValue, ConfigError> {
-    serde_saphyr::from_str_with_options::<ConfigValue>(text, build_options(max_depth))
+    yaml::from_str_with_options::<ConfigValue>(text, build_options(max_depth))
         .map_err(|error| map_error(&error, max_depth))
 }
 
 pub(crate) fn parse<T: DeserializeOwned>(text: &str, max_depth: usize) -> Result<T, ConfigError> {
-    serde_saphyr::from_str_with_options::<T>(text, build_options(max_depth))
+    yaml::from_str_with_options::<T>(text, build_options(max_depth))
         .map_err(|error| map_error(&error, max_depth))
 }
 
-fn build_options(max_depth: usize) -> serde_saphyr::Options {
-    let mut budget = serde_saphyr::Budget::default();
+fn build_options(max_depth: usize) -> Options {
+    let mut budget = Budget::default();
     budget.max_depth = max_depth;
 
-    let mut options = serde_saphyr::Options::default();
+    let mut options = Options::default();
     options.budget = Some(budget);
-    options.alias_limits = serde_saphyr::alias_limits! {
+    options.alias_limits = yaml::alias_limits! {
         max_total_replayed_events: MAX_ALIAS_REPLAYED_EVENTS,
         max_replay_stack_depth: max_depth,
         max_alias_expansions_per_anchor: MAX_ALIAS_EXPANSIONS_PER_ANCHOR,
     };
-    options.duplicate_keys = serde_saphyr::options::DuplicateKeyPolicy::Error;
+    options.duplicate_keys = DuplicateKeyPolicy::Error;
     options.with_snippet = false;
     options
 }
 
-fn map_error(error: &serde_saphyr::Error, max_depth: usize) -> ConfigError {
-    if let serde_saphyr::Error::DuplicateMappingKey { key: Some(key), .. } = error {
+fn map_error(error: &YamlError, max_depth: usize) -> ConfigError {
+    if let YamlError::DuplicateMappingKey { key: Some(key), .. } = error {
         return ConfigError::DuplicateKey { key: key.clone() };
     }
-    if let serde_saphyr::Error::Budget {
-        breach: serde_saphyr::budget::BudgetBreach::Depth { .. },
+    if let YamlError::Budget {
+        breach: BudgetBreach::Depth { .. },
         ..
     } = error
     {
         return ConfigError::DepthLimitExceeded { limit: max_depth };
     }
 
-    match classify_marker(&error.to_string()) {
+    match config_value::classify_marker(&error.to_string()) {
         ErrorMarker::DepthLimitExceeded => ConfigError::DepthLimitExceeded { limit: max_depth },
         ErrorMarker::DuplicateKey(key) => ConfigError::DuplicateKey {
             key: key.to_owned(),
@@ -80,14 +81,14 @@ fn map_error(error: &serde_saphyr::Error, max_depth: usize) -> ConfigError {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse, parse_value, MAX_ALIAS_EXPANSIONS_PER_ANCHOR};
-    use crate::ConfigError;
+    use super::{self as yaml_config, MAX_ALIAS_EXPANSIONS_PER_ANCHOR};
+    use crate::config::ConfigError;
     use serde::Deserialize;
 
     #[test]
     fn parses_typed_and_untyped_yaml() {
         let text = "server:\n  port: 8080\n  tls: true\n";
-        let value = parse_value(text, 64).expect("parse untyped");
+        let value = yaml_config::parse_value(text, 64).expect("parse untyped");
         assert_eq!(
             value.get("server.port").and_then(|v| v.as_i64()),
             Some(8080)
@@ -102,7 +103,7 @@ mod tests {
         struct Config {
             server: Server,
         }
-        let typed: Config = parse(text, 64).expect("parse typed");
+        let typed: Config = yaml_config::parse(text, 64).expect("parse typed");
         assert_eq!(typed.server.port, 8080);
         assert!(typed.server.tls);
     }
@@ -111,14 +112,14 @@ mod tests {
     fn rejects_invalid_syntax_with_location_and_no_snippet() {
         let secret = "s3cr3t-should-not-leak";
         let text = format!("password: \"{secret}\"\n  bad indent: [\n");
-        let error = parse_value(&text, 64).expect_err("invalid yaml should fail");
+        let error = yaml_config::parse_value(&text, 64).expect_err("invalid yaml should fail");
         assert!(matches!(error, ConfigError::Parse { format: "yaml", .. }));
         assert!(!error.to_string().contains(secret));
     }
 
     #[test]
     fn empty_document_parses_to_empty_table() {
-        let value = parse_value("{}", 64).expect("parse empty mapping");
+        let value = yaml_config::parse_value("{}", 64).expect("parse empty mapping");
         assert_eq!(value.as_table().map(|table| table.len()), Some(0));
     }
 
@@ -128,7 +129,8 @@ mod tests {
         // `.nan` for untyped (typeless) targets rather than silently producing a non-finite
         // `ConfigValue::Float`; this crate keeps that safer default.
         for text in ["a: .inf\n", "a: -.inf\n", "a: .nan\n"] {
-            let error = parse_value(text, 64).expect_err("non-finite float should be rejected");
+            let error = yaml_config::parse_value(text, 64)
+                .expect_err("non-finite float should be rejected");
             assert!(matches!(error, ConfigError::Parse { format: "yaml", .. }));
         }
     }
@@ -136,7 +138,7 @@ mod tests {
     #[test]
     fn rejects_duplicate_keys() {
         let text = "a: 1\na: 2\n";
-        let error = parse_value(text, 64).expect_err("duplicate key should fail");
+        let error = yaml_config::parse_value(text, 64).expect_err("duplicate key should fail");
         assert!(matches!(
             error,
             ConfigError::DuplicateKey { key } if key == "a"
@@ -146,15 +148,16 @@ mod tests {
     #[test]
     fn depth_exactly_at_limit_succeeds_and_one_more_level_fails() {
         let shallow = "a: 1\n";
-        assert!(parse_value(shallow, 1).is_ok());
+        assert!(yaml_config::parse_value(shallow, 1).is_ok());
 
         let nested = "a:\n  b: 1\n";
-        let error = parse_value(nested, 1).expect_err("depth 2 should exceed budget 1");
+        let error =
+            yaml_config::parse_value(nested, 1).expect_err("depth 2 should exceed budget 1");
         assert!(matches!(
             error,
             ConfigError::DepthLimitExceeded { limit: 1 }
         ));
-        assert!(parse_value(nested, 2).is_ok());
+        assert!(yaml_config::parse_value(nested, 2).is_ok());
     }
 
     #[test]
@@ -167,7 +170,7 @@ mod tests {
                      d: &d [*c,*c,*c,*c,*c,*c,*c,*c,*c]\n\
                      e: &e [*d,*d,*d,*d,*d,*d,*d,*d,*d]\n\
                      f: [*e,*e,*e,*e,*e,*e,*e,*e,*e]\n";
-        let result = parse_value(text, 64);
+        let result = yaml_config::parse_value(text, 64);
         assert!(result.is_err(), "alias bomb should be rejected");
     }
 
@@ -175,7 +178,7 @@ mod tests {
     fn rejects_excessive_expansions_of_one_anchor() {
         let aliases = vec!["*base"; MAX_ALIAS_EXPANSIONS_PER_ANCHOR + 1].join(",");
         let text = format!("base: &base value\nitems: [{aliases}]\n");
-        let result = parse_value(&text, 64);
+        let result = yaml_config::parse_value(&text, 64);
         assert!(
             result.is_err(),
             "one anchor should have a finite expansion limit"

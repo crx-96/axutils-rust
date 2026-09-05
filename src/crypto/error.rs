@@ -1,6 +1,6 @@
 //! `CryptoUtils` 统一错误类型；不回显任何明文、密文、密钥、IV 或原始文本内容。
 
-use std::fmt;
+use std::{error::Error as StdError, fmt};
 
 /// `CryptoUtils` 与 `crypto` 模块下全部能力共享的错误类型。
 ///
@@ -21,7 +21,7 @@ pub enum CryptoError {
     },
     /// 字节序列不是目标编码的合法文本（含默认可用的 UTF-8 校验失败）。
     TextDecodeInvalid {
-        /// 目标编码名称，参见 [`TextEncoding::as_str`](crate::TextEncoding::as_str)。
+        /// 目标编码名称，参见 [`TextEncoding::as_str`](crate::crypto::TextEncoding::as_str)。
         encoding: &'static str,
         /// 从 0 开始的失败字节偏移；无法提供可靠偏移时为 `None`。
         position: Option<usize>,
@@ -149,7 +149,7 @@ impl fmt::Display for CryptoError {
     }
 }
 
-impl std::error::Error for CryptoError {}
+impl StdError for CryptoError {}
 
 #[cfg(test)]
 mod tests {

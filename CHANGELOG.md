@@ -3,6 +3,51 @@
 本文件仅记录 `axutils` 各版本的源码、公共 API、运行时行为、错误与安全边界，以及面向使用者的兼容性变化。
 每次修改或增加功能时，先读取 `Cargo.toml` 中的 `[package].version`，再在对应版本条目中补充记录。
 
+## [1.0.0]
+
+### Added
+
+- 新增稳定的领域模块与工具入口：领域 Client、配置、错误和模型使用
+  `axutils::<domain>::Type`，所有 `*Utils` 与工具支持类型使用 `axutils::utils::Type`；新增公开
+  `axutils::jwt::JwtCodec` 实例 API。
+- 为 Email、HTTP、Redis、SQLx、JWT、Scheduler、Axum、Logging 与 Crypto 的状态型 façade
+  增加实例访问器，使初始化后的业务操作通过领域实例完成。
+- 新增能力型 feature：`phone-validation`、`template-strfmt`、`template-minijinja`、
+  `fs-async`、`fs-temp`、`fs-temp-async`、`config` 及 `config-*`、`email-async`、
+  `http-async`、`http-json`、Redis 四层能力、SQLx 三个单 driver 能力、`task-group`、
+  `scheduler` 和三个 `axum-*` 扩展能力。
+- `RedisUtils::init_async` 的启用条件由 `redis + tokio` 调整为单一能力 feature `redis-async`；
+  仍使用调用方的 runtime 异步验证 `PING`/`PONG` 后保存全局客户端，失败或等待期间取消不会占用
+  初始化机会，并与同步 `init` 共用一次初始化状态。
+
+### Changed
+
+- crate 根现在只公开领域模块，不再平铺类型；`utils` 叶实现模块改为私有。
+- 状态型 façade 收缩为初始化、状态查询和实例访问；业务发送、请求、命令、编解码、调度和日志
+  操作改由领域实例或标准 `tracing` 宏承担。Crypto 继续保留无状态 Hex/Base64/MD5 便利方法。
+- `http` 现在只包含同步 `ureq + url`，不会再编译 `reqwest`；异步 HTTP 必须显式启用
+  `http-async`，JSON/query 能力由 `http-json` 独立控制。
+- Redis feature 按同步单机、同步 Cluster、异步单机、异步 Cluster 分层；SQLx 可只启用
+  PostgreSQL、MySQL 或 SQLite driver，`sqlx` 作为三 driver 聚合入口。
+- `tokio` 只开启 Tokio 工具，不再隐式开启其他领域的异步 API；`scheduler` 单 feature 即提供
+  完整调度能力；`axum` 的 Tower、Tower HTTP 与 Governor 能力分别显式启用。
+- `chrono`、`time`、`jiff` 的公共方法始终使用后端后缀，API 名称不再随 feature 集合变化。
+- 所有最终 feature 现在可以共同构建，`cargo check/test/clippy/doc --all-features` 成为成功契约。
+
+### Breaking
+
+- 删除 crate 根的具体类型、错误和 `*Utils` 重导出，以及公开的 `utils::*_utils` 叶模块路径；
+  调用方必须迁移到领域模块或 `axutils::utils` canonical path。
+- 删除 Email、HTTP、Redis、SQLx、JWT、Scheduler、Axum、Logging 与 Crypto 状态型 façade 上的
+  业务方法镜像；调用方先取得实例，再调用领域 API。
+- 删除 provider-only feature：`serde`、`strfmt`、`minijinja`、`libphonenumber`、`lettre`、
+  `serde-saphyr`、`toml`、`rust-ini`、`chrono_tz`、`croner`、`tokio-util`、`tower`、
+  `tower-http`、`tower_governor`、`tempfile` 和 `tempfile-async`。
+- 删除 `mimalloc`、`rpmalloc` feature 及 library 级全局 allocator 注册；最终 binary 应自行选择
+  并声明唯一的 `#[global_allocator]`。
+- 删除仅在启用单个时间后端时存在的无后缀方法；调用方必须使用 `*_chrono`、`*_time` 或
+  `*_jiff` 后缀 API。
+
 ## [0.1.3]
 
 ### Added

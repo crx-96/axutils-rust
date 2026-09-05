@@ -10,18 +10,18 @@ use super::error::ConfigError;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum ConfigFormat {
-    /// JSON；随 `serde` feature 提供，不需要额外的第三方依赖。
+    /// JSON；随 `config` feature 提供。
     Json,
-    /// `.env`（dotenv）；随 `serde` feature 提供，解析器为本 crate 自实现。
+    /// `.env`（dotenv）；随 `config` feature 提供，解析器为本 crate 自实现。
     Env,
-    /// YAML；需要额外启用 `serde-saphyr` feature。
-    #[cfg(feature = "serde-saphyr")]
+    /// YAML；需要额外启用 `config-yaml` feature。
+    #[cfg(feature = "config-yaml")]
     Yaml,
-    /// TOML；需要额外启用 `toml` feature。
-    #[cfg(feature = "toml")]
+    /// TOML；需要额外启用 `config-toml` feature。
+    #[cfg(feature = "config-toml")]
     Toml,
-    /// INI（`.ini`/`.cfg`/`.conf`）；需要额外启用 `rust-ini` feature。
-    #[cfg(feature = "rust-ini")]
+    /// INI（`.ini`/`.cfg`/`.conf`）；需要额外启用 `config-ini` feature。
+    #[cfg(feature = "config-ini")]
     Ini,
 }
 
@@ -41,7 +41,7 @@ impl ConfigFormat {
     /// # Examples
     ///
     /// ```
-    /// use axutils::ConfigFormat;
+    /// use axutils::config::ConfigFormat;
     ///
     /// assert_eq!(ConfigFormat::from_path("app.json").unwrap(), ConfigFormat::Json);
     /// assert_eq!(ConfigFormat::from_path(".env").unwrap(), ConfigFormat::Env);
@@ -66,21 +66,21 @@ impl ConfigFormat {
         match extension.as_deref() {
             Some("json") => Ok(Self::Json),
             Some("env") => Ok(Self::Env),
-            #[cfg(feature = "serde-saphyr")]
+            #[cfg(feature = "config-yaml")]
             Some("yaml" | "yml") => Ok(Self::Yaml),
-            #[cfg(not(feature = "serde-saphyr"))]
+            #[cfg(not(feature = "config-yaml"))]
             Some(extension @ ("yaml" | "yml")) => Err(ConfigError::FormatNotEnabled {
                 extension: extension.to_owned(),
             }),
-            #[cfg(feature = "toml")]
+            #[cfg(feature = "config-toml")]
             Some("toml") => Ok(Self::Toml),
-            #[cfg(not(feature = "toml"))]
+            #[cfg(not(feature = "config-toml"))]
             Some(extension @ "toml") => Err(ConfigError::FormatNotEnabled {
                 extension: extension.to_owned(),
             }),
-            #[cfg(feature = "rust-ini")]
+            #[cfg(feature = "config-ini")]
             Some("ini" | "cfg" | "conf") => Ok(Self::Ini),
-            #[cfg(not(feature = "rust-ini"))]
+            #[cfg(not(feature = "config-ini"))]
             Some(extension @ ("ini" | "cfg" | "conf")) => Err(ConfigError::FormatNotEnabled {
                 extension: extension.to_owned(),
             }),
@@ -93,7 +93,7 @@ impl ConfigFormat {
     /// # Examples
     ///
     /// ```
-    /// use axutils::ConfigFormat;
+    /// use axutils::config::ConfigFormat;
     ///
     /// assert_eq!(ConfigFormat::Json.as_str(), "json");
     /// ```
@@ -101,11 +101,11 @@ impl ConfigFormat {
         match self {
             Self::Json => "json",
             Self::Env => "env",
-            #[cfg(feature = "serde-saphyr")]
+            #[cfg(feature = "config-yaml")]
             Self::Yaml => "yaml",
-            #[cfg(feature = "toml")]
+            #[cfg(feature = "config-toml")]
             Self::Toml => "toml",
-            #[cfg(feature = "rust-ini")]
+            #[cfg(feature = "config-ini")]
             Self::Ini => "ini",
         }
     }
@@ -114,7 +114,7 @@ impl ConfigFormat {
 #[cfg(test)]
 mod tests {
     use super::ConfigFormat;
-    use crate::ConfigError;
+    use crate::config::ConfigError;
 
     #[test]
     fn recognizes_json_and_env_case_insensitively() {
@@ -149,7 +149,7 @@ mod tests {
         ));
     }
 
-    #[cfg(feature = "serde-saphyr")]
+    #[cfg(feature = "config-yaml")]
     #[test]
     fn recognizes_yaml_when_backend_enabled() {
         assert_eq!(
@@ -163,7 +163,7 @@ mod tests {
         assert_eq!(ConfigFormat::Yaml.as_str(), "yaml");
     }
 
-    #[cfg(not(feature = "serde-saphyr"))]
+    #[cfg(not(feature = "config-yaml"))]
     #[test]
     fn reports_yaml_as_not_enabled() {
         assert!(matches!(
@@ -172,7 +172,7 @@ mod tests {
         ));
     }
 
-    #[cfg(feature = "toml")]
+    #[cfg(feature = "config-toml")]
     #[test]
     fn recognizes_toml_when_backend_enabled() {
         assert_eq!(
@@ -182,7 +182,7 @@ mod tests {
         assert_eq!(ConfigFormat::Toml.as_str(), "toml");
     }
 
-    #[cfg(not(feature = "toml"))]
+    #[cfg(not(feature = "config-toml"))]
     #[test]
     fn reports_toml_as_not_enabled() {
         assert!(matches!(
@@ -191,7 +191,7 @@ mod tests {
         ));
     }
 
-    #[cfg(feature = "rust-ini")]
+    #[cfg(feature = "config-ini")]
     #[test]
     fn recognizes_ini_variants_when_backend_enabled() {
         for name in ["app.ini", "app.CFG", "app.conf"] {
@@ -200,7 +200,7 @@ mod tests {
         assert_eq!(ConfigFormat::Ini.as_str(), "ini");
     }
 
-    #[cfg(not(feature = "rust-ini"))]
+    #[cfg(not(feature = "config-ini"))]
     #[test]
     fn reports_ini_as_not_enabled() {
         for name in ["app.ini", "app.cfg", "app.conf"] {

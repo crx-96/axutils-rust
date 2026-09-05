@@ -8,9 +8,11 @@ use std::{error::Error, fmt};
 /// # Examples
 ///
 /// ```rust
-/// # #[cfg(all(feature="chrono",feature="chrono_tz",feature="tokio",feature="croner"))] {
-/// let error = axutils::SchedulerConfig::new(0).unwrap_err();
-/// assert!(matches!(error, axutils::SchedulerError::InvalidConfig { .. }));
+/// # use axutils::scheduler::*;
+/// # use axutils::scheduler::*;
+/// # #[cfg(feature="scheduler")] {
+/// let error = SchedulerConfig::new(0).unwrap_err();
+/// assert!(matches!(error, SchedulerError::InvalidConfig { .. }));
 /// # }
 /// ```
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

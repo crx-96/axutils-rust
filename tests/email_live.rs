@@ -1,4 +1,4 @@
-#![cfg(feature = "lettre")]
+#![cfg(feature = "email")]
 
 use std::{
     env, fs,
@@ -6,7 +6,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use axutils::{EmailClient, EmailConfig, EmailMessage, EmailSecurity};
+use axutils::email::{EmailClient, EmailConfig, EmailMessage, EmailSecurity};
 
 const LIVE_TEST_ENV: &str = "AXUTILS_EMAIL_LIVE_TEST";
 
@@ -66,7 +66,7 @@ fn sends_email_with_sync_client_live() {
     }
 }
 
-#[cfg(all(feature = "lettre", feature = "tokio"))]
+#[cfg(feature = "email-async")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "requires config/email-test.toml and explicit AXUTILS_EMAIL_LIVE_TEST=1"]
 async fn sends_email_with_async_client_live() {
@@ -185,7 +185,7 @@ fn parse_line(line: &str) -> Option<(String, String)> {
 #[cfg(test)]
 mod tests {
     use super::{parse_line, parse_live_config, parse_security, LiveConfig, LiveConfigError};
-    use axutils::EmailSecurity;
+    use axutils::email::EmailSecurity;
 
     const VALID_CONFIG: &str = r#"
 smtp_host = "smtp.example.invalid"

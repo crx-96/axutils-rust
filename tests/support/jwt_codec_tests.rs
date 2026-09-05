@@ -1,3 +1,4 @@
+use jsonwebtoken::{DecodingKey, EncodingKey};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Deserialize, Serialize, PartialEq)]
@@ -12,7 +13,7 @@ fn algorithm_codec(algorithm: JwtAlgorithm) -> JwtCodec {
         algorithm,
         JwtAlgorithm::Hs256 | JwtAlgorithm::Hs384 | JwtAlgorithm::Hs512
     ) {
-        return JwtCodec::from_config(
+        return JwtCodec::new(
             JwtConfig::new(
                 algorithm,
                 Some(JwtSigningKey::from_hmac_secret([0x11; 64]).unwrap()),
@@ -46,7 +47,7 @@ fn algorithm_codec(algorithm: JwtAlgorithm) -> JwtCodec {
         ),
         _ => unreachable!(),
     };
-    JwtCodec::from_config(
+    JwtCodec::new(
         JwtConfig::new(
             algorithm,
             Some(signing),
@@ -145,10 +146,7 @@ fn every_supported_algorithm_round_trips_with_public_key_verification() {
             sub: "algorithm-test".to_owned(),
         };
         let token = codec.encode(&claims).unwrap();
-        assert_eq!(
-            codec.decode_at::<Claims>(&token, 1_900_000_000).unwrap(),
-            claims
-        );
+        assert_eq!(codec.decode::<Claims>(&token).unwrap(), claims);
         let tampered_algorithm = if algorithm == JwtAlgorithm::Hs256 {
             "HS512"
         } else {
@@ -159,7 +157,7 @@ fn every_supported_algorithm_round_trips_with_public_key_verification() {
             &format!(r#"{{"typ":"JWT","alg":"{tampered_algorithm}"}}"#),
         );
         assert!(matches!(
-            codec.decode_at::<Claims>(&tampered_header, 1_900_000_000),
+            codec.decode::<Claims>(&tampered_header),
             Err(JwtError::InvalidHeader { field: "alg" })
         ));
     }
@@ -169,11 +167,11 @@ fn every_supported_algorithm_round_trips_with_public_key_verification() {
 fn der_key_constructors_round_trip_each_asymmetric_family() {
     let rsa_private_pem = fixture("rsa_private.pem");
     let rsa_public_pem = fixture("rsa_public.pem");
-    let rsa_private = jsonwebtoken::EncodingKey::from_rsa_pem(rsa_private_pem.as_bytes())
+    let rsa_private = EncodingKey::from_rsa_pem(rsa_private_pem.as_bytes())
         .unwrap()
         .as_bytes()
         .to_vec();
-    let rsa_public = jsonwebtoken::DecodingKey::from_rsa_pem(rsa_public_pem.as_bytes())
+    let rsa_public = DecodingKey::from_rsa_pem(rsa_public_pem.as_bytes())
         .unwrap()
         .try_get_as_bytes()
         .unwrap()
@@ -186,7 +184,7 @@ fn der_key_constructors_round_trip_each_asymmetric_family() {
         JwtAlgorithm::Ps384,
         JwtAlgorithm::Ps512,
     ] {
-        let codec = JwtCodec::from_config(
+        let codec = JwtCodec::new(
             JwtConfig::new(
                 algorithm,
                 Some(JwtSigningKey::from_rsa_der(&rsa_private).unwrap()),
@@ -200,10 +198,7 @@ fn der_key_constructors_round_trip_each_asymmetric_family() {
             sub: "rsa-der".to_owned(),
         };
         let token = codec.encode(&claims).unwrap();
-        assert_eq!(
-            codec.decode_at::<Claims>(&token, 1_900_000_000).unwrap(),
-            claims
-        );
+        assert_eq!(codec.decode::<Claims>(&token).unwrap(), claims);
     }
 
     let ec_families = [
@@ -213,16 +208,16 @@ fn der_key_constructors_round_trip_each_asymmetric_family() {
     for (algorithm, private_name, public_name) in ec_families {
         let private_pem = fixture(private_name);
         let public_pem = fixture(public_name);
-        let private = jsonwebtoken::EncodingKey::from_ec_pem(private_pem.as_bytes())
+        let private = EncodingKey::from_ec_pem(private_pem.as_bytes())
             .unwrap()
             .as_bytes()
             .to_vec();
-        let public = jsonwebtoken::DecodingKey::from_ec_pem(public_pem.as_bytes())
+        let public = DecodingKey::from_ec_pem(public_pem.as_bytes())
             .unwrap()
             .try_get_as_bytes()
             .unwrap()
             .to_vec();
-        let codec = JwtCodec::from_config(
+        let codec = JwtCodec::new(
             JwtConfig::new(
                 algorithm,
                 Some(JwtSigningKey::from_ec_der(&private).unwrap()),
@@ -236,24 +231,21 @@ fn der_key_constructors_round_trip_each_asymmetric_family() {
             sub: "ec-der".to_owned(),
         };
         let token = codec.encode(&claims).unwrap();
-        assert_eq!(
-            codec.decode_at::<Claims>(&token, 1_900_000_000).unwrap(),
-            claims
-        );
+        assert_eq!(codec.decode::<Claims>(&token).unwrap(), claims);
     }
 
     let ed_private_pem = fixture("ed25519_private.pem");
     let ed_public_pem = fixture("ed25519_public.pem");
-    let ed_private = jsonwebtoken::EncodingKey::from_ed_pem(ed_private_pem.as_bytes())
+    let ed_private = EncodingKey::from_ed_pem(ed_private_pem.as_bytes())
         .unwrap()
         .as_bytes()
         .to_vec();
-    let ed_public = jsonwebtoken::DecodingKey::from_ed_pem(ed_public_pem.as_bytes())
+    let ed_public = DecodingKey::from_ed_pem(ed_public_pem.as_bytes())
         .unwrap()
         .try_get_as_bytes()
         .unwrap()
         .to_vec();
-    let codec = JwtCodec::from_config(
+    let codec = JwtCodec::new(
         JwtConfig::new(
             JwtAlgorithm::Ed25519,
             Some(JwtSigningKey::from_ed_der(&ed_private).unwrap()),
@@ -267,10 +259,7 @@ fn der_key_constructors_round_trip_each_asymmetric_family() {
         sub: "ed-der".to_owned(),
     };
     let token = codec.encode(&claims).unwrap();
-    assert_eq!(
-        codec.decode_at::<Claims>(&token, 1_900_000_000).unwrap(),
-        claims
-    );
+    assert_eq!(codec.decode::<Claims>(&token).unwrap(), claims);
 }
 
 #[test]
@@ -292,7 +281,7 @@ fn config_rejects_cross_curve_ecdsa_keys_before_initialization() {
 #[test]
 fn config_rejects_rsa_public_der_as_a_signing_key() {
     let public_pem = fixture("rsa_public.pem");
-    let backend = jsonwebtoken::DecodingKey::from_rsa_pem(public_pem.as_bytes()).unwrap();
+    let backend = DecodingKey::from_rsa_pem(public_pem.as_bytes()).unwrap();
     let public_der = backend.try_get_as_bytes().unwrap().to_vec();
     let signing = JwtSigningKey::from_rsa_der(public_der).unwrap();
     assert!(matches!(

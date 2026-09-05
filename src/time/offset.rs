@@ -34,7 +34,7 @@ impl TimeZoneOffset {
     /// # Examples
     ///
     /// ```
-    /// use axutils::TimeZoneOffset;
+    /// use axutils::time::TimeZoneOffset;
     ///
     /// assert_eq!(TimeZoneOffset::UTC.as_seconds(), 0);
     /// ```
@@ -45,7 +45,7 @@ impl TimeZoneOffset {
     /// # Examples
     ///
     /// ```
-    /// use axutils::TimeZoneOffset;
+    /// use axutils::time::TimeZoneOffset;
     ///
     /// assert_eq!(TimeZoneOffset::DEFAULT.as_seconds(), 28_800);
     /// ```
@@ -56,7 +56,7 @@ impl TimeZoneOffset {
     /// # Examples
     ///
     /// ```
-    /// use axutils::TimeZoneOffset;
+    /// use axutils::time::TimeZoneOffset;
     ///
     /// assert_eq!(TimeZoneOffset::from_hours(8).unwrap().as_seconds(), 28_800);
     /// ```
@@ -72,7 +72,7 @@ impl TimeZoneOffset {
     /// # Examples
     ///
     /// ```
-    /// use axutils::TimeZoneOffset;
+    /// use axutils::time::TimeZoneOffset;
     ///
     /// assert_eq!(TimeZoneOffset::from_seconds(-19_815).unwrap().as_seconds(), -19_815);
     /// ```
@@ -88,7 +88,7 @@ impl TimeZoneOffset {
     /// # Examples
     ///
     /// ```
-    /// use axutils::TimeZoneOffset;
+    /// use axutils::time::TimeZoneOffset;
     ///
     /// assert_eq!(TimeZoneOffset::UTC.as_seconds(), 0);
     /// ```

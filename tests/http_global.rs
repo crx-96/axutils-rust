@@ -2,15 +2,15 @@
 
 use std::thread;
 
-use axutils::{HttpConfig, HttpError, HttpMethod, HttpRequest, HttpUtils};
+use axutils::http::{HttpConfig, HttpError, HttpMethod, HttpRequest};
+use axutils::utils::HttpUtils;
 
 #[test]
 fn global_http_entry_initializes_once_without_network_side_effects() {
     assert!(!HttpUtils::is_initialized());
     assert!(matches!(
-        HttpUtils::execute(
-            HttpRequest::new(HttpMethod::Get, "https://example.com/").expect("request")
-        ),
+        HttpUtils::client().and_then(|client| client
+            .execute(HttpRequest::new(HttpMethod::Get, "https://example.com/").expect("request"))),
         Err(HttpError::NotInitialized)
     ));
 

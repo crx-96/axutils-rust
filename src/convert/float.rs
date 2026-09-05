@@ -1,6 +1,11 @@
 use std::{num::ParseFloatError, str::FromStr};
 
-use super::ConvertUtils;
+#[cfg(feature = "ryu")]
+use ryu::Buffer as RyuBuffer;
+#[cfg(feature = "zmij")]
+use zmij::Buffer as ZmijBuffer;
+
+use super::facade::ConvertUtils;
 
 mod sealed {
     pub trait FloatSealed {}
@@ -14,7 +19,7 @@ mod sealed {
 /// # Examples
 ///
 /// ```
-/// use axutils::FloatFormat;
+/// use axutils::convert::FloatFormat;
 ///
 /// #[cfg(feature = "ryu")]
 /// let format = FloatFormat::Ryu;
@@ -33,7 +38,7 @@ pub enum FloatFormat {
     /// ```
     /// # #[cfg(feature = "ryu")]
     /// {
-    ///     use axutils::FloatFormat;
+    ///     use axutils::convert::FloatFormat;
     ///     assert_eq!(FloatFormat::Ryu, FloatFormat::Ryu);
     /// }
     /// ```
@@ -46,7 +51,7 @@ pub enum FloatFormat {
     /// ```
     /// # #[cfg(feature = "zmij")]
     /// {
-    ///     use axutils::FloatFormat;
+    ///     use axutils::convert::FloatFormat;
     ///     assert_eq!(FloatFormat::Zmij, FloatFormat::Zmij);
     /// }
     /// ```
@@ -56,9 +61,9 @@ pub enum FloatFormat {
 
 enum FloatBackend {
     #[cfg(feature = "ryu")]
-    Ryu(::ryu::Buffer),
+    Ryu(RyuBuffer),
     #[cfg(feature = "zmij")]
-    Zmij(::zmij::Buffer),
+    Zmij(ZmijBuffer),
 }
 
 /// 调用方持有的浮点格式化 buffer。
@@ -70,7 +75,7 @@ enum FloatBackend {
 /// # Examples
 ///
 /// ```
-/// use axutils::{ConvertUtils, FloatBuffer, FloatFormat};
+/// use axutils::{convert::{FloatBuffer, FloatFormat}, utils::ConvertUtils};
 ///
 /// #[cfg(feature = "ryu")]
 /// let mut buffer = FloatBuffer::new(FloatFormat::Ryu);
@@ -89,7 +94,7 @@ impl FloatBuffer {
     /// # Examples
     ///
     /// ```
-    /// use axutils::{ConvertUtils, FloatBuffer, FloatFormat};
+    /// use axutils::{convert::{FloatBuffer, FloatFormat}, utils::ConvertUtils};
     ///
     /// #[cfg(feature = "ryu")]
     /// let mut buffer = FloatBuffer::new(FloatFormat::Ryu);
@@ -103,9 +108,9 @@ impl FloatBuffer {
     pub fn new(format: FloatFormat) -> Self {
         let backend = match format {
             #[cfg(feature = "ryu")]
-            FloatFormat::Ryu => FloatBackend::Ryu(::ryu::Buffer::new()),
+            FloatFormat::Ryu => FloatBackend::Ryu(RyuBuffer::new()),
             #[cfg(feature = "zmij")]
-            FloatFormat::Zmij => FloatBackend::Zmij(::zmij::Buffer::new()),
+            FloatFormat::Zmij => FloatBackend::Zmij(ZmijBuffer::new()),
             _ => unreachable!("FloatFormat has no matching enabled backend"),
         };
         Self { backend }
@@ -120,7 +125,7 @@ impl FloatBuffer {
 /// # Examples
 ///
 /// ```
-/// use axutils::{FloatBuffer, FloatFormat, FloatValue};
+/// use axutils::convert::{FloatBuffer, FloatFormat, FloatValue};
 ///
 /// #[cfg(feature = "ryu")]
 /// let mut buffer = FloatBuffer::new(FloatFormat::Ryu);
@@ -140,7 +145,7 @@ pub trait FloatValue: sealed::FloatSealed + FromStr<Err = ParseFloatError> {
     /// # Examples
     ///
     /// ```
-    /// use axutils::{FloatBuffer, FloatFormat, FloatValue};
+    /// use axutils::convert::{FloatBuffer, FloatFormat, FloatValue};
     ///
     /// #[cfg(feature = "ryu")]
     /// let mut buffer = FloatBuffer::new(FloatFormat::Ryu);
@@ -187,7 +192,7 @@ impl ConvertUtils {
     /// # Examples
     ///
     /// ```
-    /// use axutils::{ConvertUtils, FloatBuffer, FloatFormat};
+    /// use axutils::{convert::{FloatBuffer, FloatFormat}, utils::ConvertUtils};
     ///
     /// #[cfg(feature = "ryu")]
     /// let mut buffer = FloatBuffer::new(FloatFormat::Ryu);
@@ -213,7 +218,7 @@ impl ConvertUtils {
     /// # Examples
     ///
     /// ```
-    /// use axutils::{ConvertUtils, FloatFormat};
+    /// use axutils::{convert::FloatFormat, utils::ConvertUtils};
     ///
     /// let mut output = String::from("value=");
     /// #[cfg(feature = "ryu")]
@@ -239,7 +244,7 @@ impl ConvertUtils {
     /// # Examples
     ///
     /// ```
-    /// use axutils::{ConvertUtils, FloatFormat};
+    /// use axutils::{convert::FloatFormat, utils::ConvertUtils};
     ///
     /// #[cfg(feature = "ryu")]
     /// let text = ConvertUtils::float_to_string(1.5_f64, FloatFormat::Ryu);
@@ -270,7 +275,7 @@ impl ConvertUtils {
     /// # Examples
     ///
     /// ```
-    /// use axutils::ConvertUtils;
+    /// use axutils::utils::ConvertUtils;
     ///
     /// let value: f64 = ConvertUtils::string_to_float("-1.25e2").unwrap();
     /// assert_eq!(value, -125.0);

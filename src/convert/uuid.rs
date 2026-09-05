@@ -1,4 +1,6 @@
-use super::ConvertUtils;
+use uuid::{Error as UuidError, Uuid};
+
+use super::facade::ConvertUtils;
 
 /// 调用方持有的 UUID 标准小写连字符格式 buffer。
 ///
@@ -8,7 +10,7 @@ use super::ConvertUtils;
 /// # Examples
 ///
 /// ```
-/// use axutils::{ConvertUtils, UuidBuffer};
+/// use axutils::{convert::UuidBuffer, utils::ConvertUtils};
 /// use uuid::Uuid;
 ///
 /// let uuid = Uuid::try_parse("550e8400-e29b-41d4-a716-446655440000").unwrap();
@@ -28,7 +30,7 @@ impl UuidBuffer {
     /// # Examples
     ///
     /// ```
-    /// use axutils::{ConvertUtils, UuidBuffer};
+    /// use axutils::{convert::UuidBuffer, utils::ConvertUtils};
     /// use uuid::Uuid;
     ///
     /// let uuid = Uuid::nil();
@@ -47,7 +49,7 @@ impl Default for UuidBuffer {
     /// # Examples
     ///
     /// ```
-    /// use axutils::{ConvertUtils, UuidBuffer};
+    /// use axutils::{convert::UuidBuffer, utils::ConvertUtils};
     /// use uuid::Uuid;
     ///
     /// let mut buffer = UuidBuffer::default();
@@ -68,7 +70,7 @@ impl ConvertUtils {
     /// # Examples
     ///
     /// ```
-    /// use axutils::{ConvertUtils, UuidBuffer};
+    /// use axutils::{convert::UuidBuffer, utils::ConvertUtils};
     /// use uuid::Uuid;
     ///
     /// let uuid = Uuid::nil();
@@ -76,7 +78,7 @@ impl ConvertUtils {
     /// assert_eq!(ConvertUtils::uuid_to_str(&uuid, &mut buffer), "00000000-0000-0000-0000-000000000000");
     /// ```
     #[inline]
-    pub fn uuid_to_str<'a>(uuid: &::uuid::Uuid, buffer: &'a mut UuidBuffer) -> &'a str {
+    pub fn uuid_to_str<'a>(uuid: &Uuid, buffer: &'a mut UuidBuffer) -> &'a str {
         uuid.hyphenated().encode_lower(&mut buffer.bytes)
     }
 
@@ -88,7 +90,7 @@ impl ConvertUtils {
     /// # Examples
     ///
     /// ```
-    /// use axutils::ConvertUtils;
+    /// use axutils::utils::ConvertUtils;
     /// use uuid::Uuid;
     ///
     /// let mut output = String::from("id=");
@@ -96,7 +98,7 @@ impl ConvertUtils {
     /// assert_eq!(output, "id=00000000-0000-0000-0000-000000000000");
     /// ```
     #[inline]
-    pub fn append_uuid(output: &mut String, uuid: &::uuid::Uuid) {
+    pub fn append_uuid(output: &mut String, uuid: &Uuid) {
         let mut buffer = UuidBuffer::new();
         output.push_str(Self::uuid_to_str(uuid, &mut buffer));
     }
@@ -109,7 +111,7 @@ impl ConvertUtils {
     /// # Examples
     ///
     /// ```
-    /// use axutils::ConvertUtils;
+    /// use axutils::utils::ConvertUtils;
     /// use uuid::Uuid;
     ///
     /// assert_eq!(
@@ -118,7 +120,7 @@ impl ConvertUtils {
     /// );
     /// ```
     #[must_use]
-    pub fn uuid_to_string(uuid: &::uuid::Uuid) -> String {
+    pub fn uuid_to_string(uuid: &Uuid) -> String {
         let mut output = String::with_capacity(36);
         Self::append_uuid(&mut output, uuid);
         output
@@ -132,26 +134,26 @@ impl ConvertUtils {
     /// # Errors
     ///
     /// 输入为空、长度不正确、分隔符不正确或包含非法十六进制字符时，返回原生
-    /// [`::uuid::Error`]。
+    /// [`UuidError`]。
     ///
     /// # Examples
     ///
     /// ```
-    /// use axutils::ConvertUtils;
+    /// use axutils::utils::ConvertUtils;
     ///
     /// let uuid = ConvertUtils::string_to_uuid("550e8400-e29b-41d4-a716-446655440000").unwrap();
     /// assert_eq!(ConvertUtils::uuid_to_string(&uuid), "550e8400-e29b-41d4-a716-446655440000");
     /// assert!(ConvertUtils::string_to_uuid("not-a-uuid").is_err());
     /// ```
-    pub fn string_to_uuid(input: &str) -> Result<::uuid::Uuid, ::uuid::Error> {
-        ::uuid::Uuid::try_parse(input)
+    pub fn string_to_uuid(input: &str) -> Result<Uuid, UuidError> {
+        Uuid::try_parse(input)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::{ConvertUtils, UuidBuffer};
-    use ::uuid::Uuid;
+    use uuid::Uuid;
 
     const CANONICAL: &str = "550e8400-e29b-41d4-a716-446655440000";
 

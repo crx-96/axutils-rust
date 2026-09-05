@@ -1,6 +1,8 @@
 use std::{num::ParseIntError, str::FromStr};
 
-use super::ConvertUtils;
+use itoa::Buffer as ItoaBuffer;
+
+use super::facade::ConvertUtils;
 
 mod sealed {
     pub trait IntegerSealed {}
@@ -14,13 +16,13 @@ mod sealed {
 /// # Examples
 ///
 /// ```
-/// use axutils::{ConvertUtils, IntegerBuffer};
+/// use axutils::{convert::IntegerBuffer, utils::ConvertUtils};
 ///
 /// let mut buffer = IntegerBuffer::new();
 /// assert_eq!(ConvertUtils::integer_to_str(42_i32, &mut buffer), "42");
 /// ```
 pub struct IntegerBuffer {
-    inner: ::itoa::Buffer,
+    inner: ItoaBuffer,
 }
 
 impl IntegerBuffer {
@@ -29,7 +31,7 @@ impl IntegerBuffer {
     /// # Examples
     ///
     /// ```
-    /// use axutils::{ConvertUtils, IntegerBuffer};
+    /// use axutils::{convert::IntegerBuffer, utils::ConvertUtils};
     ///
     /// let mut buffer = IntegerBuffer::new();
     /// let text = ConvertUtils::integer_to_str(-7_i64, &mut buffer);
@@ -38,7 +40,7 @@ impl IntegerBuffer {
     #[must_use]
     pub fn new() -> Self {
         Self {
-            inner: ::itoa::Buffer::new(),
+            inner: ItoaBuffer::new(),
         }
     }
 }
@@ -49,7 +51,7 @@ impl Default for IntegerBuffer {
     /// # Examples
     ///
     /// ```
-    /// use axutils::{ConvertUtils, IntegerBuffer};
+    /// use axutils::{convert::IntegerBuffer, utils::ConvertUtils};
     ///
     /// let mut buffer = IntegerBuffer::default();
     /// assert_eq!(ConvertUtils::integer_to_str(0_u8, &mut buffer), "0");
@@ -68,7 +70,7 @@ impl Default for IntegerBuffer {
 /// # Examples
 ///
 /// ```
-/// use axutils::{IntegerBuffer, IntegerValue};
+/// use axutils::convert::{IntegerBuffer, IntegerValue};
 ///
 /// let mut buffer = IntegerBuffer::new();
 /// let text = <i32 as IntegerValue>::format_into(123_i32, &mut buffer);
@@ -85,7 +87,7 @@ pub trait IntegerValue: sealed::IntegerSealed + FromStr<Err = ParseIntError> {
     /// # Examples
     ///
     /// ```
-    /// use axutils::{IntegerBuffer, IntegerValue};
+    /// use axutils::convert::{IntegerBuffer, IntegerValue};
     ///
     /// let mut buffer = IntegerBuffer::new();
     /// assert_eq!(<u128 as IntegerValue>::format_into(123_u128, &mut buffer), "123");
@@ -123,7 +125,7 @@ impl ConvertUtils {
     /// # Examples
     ///
     /// ```
-    /// use axutils::{ConvertUtils, IntegerBuffer};
+    /// use axutils::{convert::IntegerBuffer, utils::ConvertUtils};
     ///
     /// let mut buffer = IntegerBuffer::new();
     /// let text = ConvertUtils::integer_to_str(i128::MIN, &mut buffer);
@@ -146,7 +148,7 @@ impl ConvertUtils {
     /// # Examples
     ///
     /// ```
-    /// use axutils::ConvertUtils;
+    /// use axutils::utils::ConvertUtils;
     ///
     /// let mut output = String::from("id=");
     /// ConvertUtils::append_integer(&mut output, 42_u64);
@@ -169,7 +171,7 @@ impl ConvertUtils {
     /// # Examples
     ///
     /// ```
-    /// use axutils::ConvertUtils;
+    /// use axutils::utils::ConvertUtils;
     ///
     /// let text = ConvertUtils::integer_to_string(-900_i32);
     /// assert_eq!(text, "-900");
@@ -196,7 +198,7 @@ impl ConvertUtils {
     /// # Examples
     ///
     /// ```
-    /// use axutils::ConvertUtils;
+    /// use axutils::utils::ConvertUtils;
     ///
     /// let value: i32 = ConvertUtils::string_to_integer("-42").unwrap();
     /// assert_eq!(value, -42);

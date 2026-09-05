@@ -1,6 +1,11 @@
 //! 文本与字节之间的编码/解码抽象。
 
-use crate::CryptoError;
+use std::str;
+
+#[cfg(feature = "encoding_rs")]
+use encoding_rs::{DecoderResult, EncoderResult, Encoding};
+
+use crate::crypto::CryptoError;
 
 /// 文本编码；`Utf8` 无需任何 feature，其余变体需要启用 `encoding_rs` feature。
 ///
@@ -37,7 +42,7 @@ impl TextEncoding {
     /// # Examples
     ///
     /// ```
-    /// use axutils::TextEncoding;
+    /// use axutils::crypto::TextEncoding;
     ///
     /// assert_eq!(TextEncoding::Utf8.as_str(), "UTF-8");
     /// ```
@@ -70,7 +75,7 @@ impl TextEncoding {
     /// # Examples
     ///
     /// ```
-    /// use axutils::TextEncoding;
+    /// use axutils::crypto::TextEncoding;
     ///
     /// let bytes = TextEncoding::Utf8.encode("hello").unwrap();
     /// assert_eq!(bytes, b"hello");
@@ -101,7 +106,7 @@ impl TextEncoding {
     /// # Examples
     ///
     /// ```
-    /// use axutils::TextEncoding;
+    /// use axutils::crypto::TextEncoding;
     ///
     /// let text = TextEncoding::Utf8.decode(b"hello").unwrap();
     /// assert_eq!(text, "hello");
@@ -110,7 +115,7 @@ impl TextEncoding {
     pub fn decode(&self, bytes: impl AsRef<[u8]>) -> Result<String, CryptoError> {
         let bytes = bytes.as_ref();
         match self {
-            Self::Utf8 => match std::str::from_utf8(bytes) {
+            Self::Utf8 => match str::from_utf8(bytes) {
                 Ok(s) => {
                     let mut out = String::new();
                     out.try_reserve_exact(s.len())
@@ -131,15 +136,15 @@ impl TextEncoding {
     }
 
     #[cfg(feature = "encoding_rs")]
-    fn whatwg(&self) -> &'static ::encoding_rs::Encoding {
+    fn whatwg(&self) -> &'static Encoding {
         match self {
-            Self::Utf8 => ::encoding_rs::UTF_8,
-            Self::Gbk => ::encoding_rs::GBK,
-            Self::Gb18030 => ::encoding_rs::GB18030,
-            Self::Big5 => ::encoding_rs::BIG5,
-            Self::ShiftJis => ::encoding_rs::SHIFT_JIS,
-            Self::EucKr => ::encoding_rs::EUC_KR,
-            Self::Windows1252 => ::encoding_rs::WINDOWS_1252,
+            Self::Utf8 => encoding_rs::UTF_8,
+            Self::Gbk => encoding_rs::GBK,
+            Self::Gb18030 => encoding_rs::GB18030,
+            Self::Big5 => encoding_rs::BIG5,
+            Self::ShiftJis => encoding_rs::SHIFT_JIS,
+            Self::EucKr => encoding_rs::EUC_KR,
+            Self::Windows1252 => encoding_rs::WINDOWS_1252,
         }
     }
 
@@ -161,15 +166,15 @@ impl TextEncoding {
         let (result, read, written) =
             encoder.encode_from_utf8_without_replacement(text, &mut out, true);
         match result {
-            ::encoding_rs::EncoderResult::InputEmpty => {
+            EncoderResult::InputEmpty => {
                 out.truncate(written);
                 Ok(out)
             }
-            ::encoding_rs::EncoderResult::Unmappable(_) => Err(CryptoError::TextEncodeUnmappable {
+            EncoderResult::Unmappable(_) => Err(CryptoError::TextEncodeUnmappable {
                 encoding,
                 position: read,
             }),
-            ::encoding_rs::EncoderResult::OutputFull => Err(CryptoError::OutputTooLarge {
+            EncoderResult::OutputFull => Err(CryptoError::OutputTooLarge {
                 operation: "text_encode_legacy",
             }),
         }
@@ -191,12 +196,12 @@ impl TextEncoding {
             })?;
         let (result, _read) = decoder.decode_to_string_without_replacement(bytes, &mut out, true);
         match result {
-            ::encoding_rs::DecoderResult::InputEmpty => Ok(out),
-            ::encoding_rs::DecoderResult::Malformed(_, _) => Err(CryptoError::TextDecodeInvalid {
+            DecoderResult::InputEmpty => Ok(out),
+            DecoderResult::Malformed(_, _) => Err(CryptoError::TextDecodeInvalid {
                 encoding,
                 position: None,
             }),
-            ::encoding_rs::DecoderResult::OutputFull => Err(CryptoError::OutputTooLarge {
+            DecoderResult::OutputFull => Err(CryptoError::OutputTooLarge {
                 operation: "text_decode_legacy",
             }),
         }
@@ -206,7 +211,7 @@ impl TextEncoding {
 #[cfg(test)]
 mod tests {
     use super::TextEncoding;
-    use crate::CryptoError;
+    use crate::crypto::CryptoError;
 
     #[test]
     fn utf8_roundtrip() {

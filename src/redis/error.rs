@@ -207,6 +207,8 @@ impl std::error::Error for RedisError {}
 
 #[cfg(test)]
 mod tests {
+    use ::redis::{ErrorKind, RedisError as UpstreamRedisError, ServerErrorKind};
+
     use super::{RedisError, RedisTransportErrorKind};
 
     #[test]
@@ -232,8 +234,8 @@ mod tests {
 
     #[test]
     fn maps_cross_slot_from_upstream_error_code() {
-        let upstream = ::redis::RedisError::from((
-            ::redis::ErrorKind::Server(::redis::ServerErrorKind::CrossSlot),
+        let upstream = UpstreamRedisError::from((
+            ErrorKind::Server(ServerErrorKind::CrossSlot),
             "server error",
             "keys do not hash to the same slot".to_owned(),
         ));
@@ -246,8 +248,8 @@ mod tests {
 
     #[test]
     fn maps_cluster_connection_and_resp3_errors_to_stable_transport_kinds() {
-        let cluster = ::redis::RedisError::from((
-            ::redis::ErrorKind::ClusterConnectionNotFound,
+        let cluster = UpstreamRedisError::from((
+            ErrorKind::ClusterConnectionNotFound,
             "cluster connection unavailable",
         ));
         assert_eq!(
@@ -255,10 +257,8 @@ mod tests {
             RedisError::Transport(RedisTransportErrorKind::Connection)
         );
 
-        let resp3 = ::redis::RedisError::from((
-            ::redis::ErrorKind::RESP3NotSupported,
-            "RESP3 is not supported",
-        ));
+        let resp3 =
+            UpstreamRedisError::from((ErrorKind::RESP3NotSupported, "RESP3 is not supported"));
         assert_eq!(
             RedisError::from_upstream(&resp3),
             RedisError::Transport(RedisTransportErrorKind::Protocol)

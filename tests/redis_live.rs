@@ -2,7 +2,10 @@
 
 use std::{collections::HashMap, fs, path::PathBuf, time::Duration};
 
-use axutils::{RedisClient, RedisConfig, RedisError, RedisUtils};
+use axutils::redis::{RedisClient, RedisConfig, RedisError};
+use axutils::utils::RedisUtils;
+#[cfg(feature = "redis-async")]
+use tokio::time as tokio_time;
 
 struct LiveConfig {
     redis_url: String,
@@ -262,7 +265,7 @@ fn exercises_sync_single_key_lock_ownership_and_ttl() {
 
 #[test]
 #[ignore = "requires config/redis-test.toml and explicit AXUTILS_REDIS_LIVE_TEST=1"]
-fn exercises_redis_utils_lock_forwarding_lifetime() {
+fn exercises_redis_utils_client_access_lock_lifetime() {
     let config = load_live_config();
     RedisUtils::init(
         RedisConfig::single(config.redis_url)
@@ -279,7 +282,9 @@ fn exercises_redis_utils_lock_forwarding_lifetime() {
             .as_nanos()
     );
 
-    let mut lock = RedisUtils::try_lock(&key, Duration::from_secs(1))
+    let mut lock = RedisUtils::client()
+        .expect("RedisUtils client should be initialized")
+        .try_lock(&key, Duration::from_secs(1))
         .expect("RedisUtils lock acquisition")
         .expect("RedisUtils lock should be available");
     assert!(lock
@@ -288,7 +293,7 @@ fn exercises_redis_utils_lock_forwarding_lifetime() {
     assert!(lock.release().expect("RedisUtils release"));
 }
 
-#[cfg(all(feature = "redis", feature = "tokio"))]
+#[cfg(feature = "redis-async")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "requires config/redis-test.toml and explicit AXUTILS_REDIS_LIVE_TEST=1"]
 async fn exercises_async_redis_api_against_local_service() {
@@ -309,7 +314,7 @@ async fn exercises_async_redis_api_against_local_service() {
     client.delete_async(&key).await.expect("async cleanup");
 }
 
-#[cfg(all(feature = "redis", feature = "tokio"))]
+#[cfg(feature = "redis-async")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "requires config/redis-test.toml and explicit AXUTILS_REDIS_LIVE_TEST=1"]
 async fn exercises_async_single_key_lock_and_ttl_fallback() {
@@ -362,7 +367,7 @@ async fn exercises_async_single_key_lock_and_ttl_fallback() {
         .await
         .expect("async Drop busy attempt")
         .is_none());
-    tokio::time::sleep(Duration::from_millis(180)).await;
+    tokio_time::sleep(Duration::from_millis(180)).await;
     let mut after_ttl = other
         .try_lock_async(&key, Duration::from_secs(1))
         .await

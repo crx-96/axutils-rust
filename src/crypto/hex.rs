@@ -1,6 +1,6 @@
 //! 十六进制编解码；不依赖任何第三方 crate，默认可用。
 
-use crate::CryptoError;
+use crate::crypto::CryptoError;
 
 const LOWER: &[u8; 16] = b"0123456789abcdef";
 const UPPER: &[u8; 16] = b"0123456789ABCDEF";
@@ -78,25 +78,26 @@ fn hex_value(b: u8) -> u8 {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super as hex_codec;
+    use crate::crypto::CryptoError;
 
     #[test]
     fn encode_lower_and_upper() {
-        assert_eq!(encode_lower(&[]).unwrap(), "");
-        assert_eq!(encode_lower(&[0x00, 0xff]).unwrap(), "00ff");
-        assert_eq!(encode_upper(&[0x00, 0xff]).unwrap(), "00FF");
+        assert_eq!(hex_codec::encode_lower(&[]).unwrap(), "");
+        assert_eq!(hex_codec::encode_lower(&[0x00, 0xff]).unwrap(), "00ff");
+        assert_eq!(hex_codec::encode_upper(&[0x00, 0xff]).unwrap(), "00FF");
     }
 
     #[test]
     fn decode_accepts_mixed_case() {
-        assert_eq!(decode("00Ff").unwrap(), vec![0x00, 0xff]);
-        assert_eq!(decode("").unwrap(), Vec::<u8>::new());
+        assert_eq!(hex_codec::decode("00Ff").unwrap(), vec![0x00, 0xff]);
+        assert_eq!(hex_codec::decode("").unwrap(), Vec::<u8>::new());
     }
 
     #[test]
     fn decode_rejects_odd_length() {
         assert_eq!(
-            decode("abc").unwrap_err(),
+            hex_codec::decode("abc").unwrap_err(),
             CryptoError::OddHexLength { length: 3 }
         );
     }
@@ -104,22 +105,22 @@ mod tests {
     #[test]
     fn decode_rejects_invalid_char() {
         assert_eq!(
-            decode("zz").unwrap_err(),
+            hex_codec::decode("zz").unwrap_err(),
             CryptoError::InvalidHex { position: 0 }
         );
     }
 
     #[test]
     fn decode_rejects_whitespace_and_0x_prefix() {
-        assert!(decode("0x0f").is_err());
-        assert!(decode("0f 0f").is_err());
-        assert!(decode(" 0f").is_err());
+        assert!(hex_codec::decode("0x0f").is_err());
+        assert!(hex_codec::decode("0f 0f").is_err());
+        assert!(hex_codec::decode(" 0f").is_err());
     }
 
     #[test]
     fn roundtrip_all_bytes() {
         let input: Vec<u8> = (0u8..=255).collect();
-        let encoded = encode_lower(&input).unwrap();
-        assert_eq!(decode(&encoded).unwrap(), input);
+        let encoded = hex_codec::encode_lower(&input).unwrap();
+        assert_eq!(hex_codec::decode(&encoded).unwrap(), input);
     }
 }

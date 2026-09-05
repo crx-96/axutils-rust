@@ -1,14 +1,15 @@
 //! 统一的配置文件读取能力。
 //!
 //! 支持 JSON、YAML、TOML、INI 和 `.env`（dotenv）五种常用配置格式；JSON 与 `.env` 随
-//! `serde` feature 直接可用，YAML/TOML/INI 分别需要额外启用 `serde-saphyr`/`toml`/`rust-ini`
-//! feature。每种格式都提供无类型（[`ConfigValue`]）与有类型（`serde::Deserialize`）两条
+//! `config` feature 直接可用，YAML/TOML/INI 分别需要额外启用
+//! `config-yaml`/`config-toml`/`config-ini`。每种格式都提供无类型（[`ConfigValue`]）与有类型
+//! （`serde::Deserialize`）两条
 //! 读取路径共享同一套文件大小上限与错误语义；JSON/TOML/YAML/INI 的无类型路径以及 YAML/INI
 //! 的有类型路径使用本加载器的嵌套深度上限；JSON 无类型路径关闭后端较小的默认递归限制后
 //! 使用本加载器的 1..=256 深度预算，JSON/TOML 有类型路径使用各自后端的递归保护。
 //! YAML 别名回放还固定了有限预算：总回放事件最多 1,000,000 次、单个 anchor 最多展开 10,000
 //! 次，回放栈深度不超过配置的嵌套深度上限。
-//! 同时启用 `tokio` feature 后，`ConfigLoader` 还提供异步文件读取入口；该入口只异步化文件
+//! 启用 `config-async` feature 后，`ConfigLoader` 还提供异步文件读取入口；该入口只异步化文件
 //! I/O，不创建 Tokio runtime，也不把解析阶段自动移到其他线程。
 //!
 //! 本模块只负责“把一个配置文件安全地读成数据”：不做多文件合并、层叠覆盖、热重载、写回
@@ -17,16 +18,19 @@
 mod de;
 mod env;
 mod error;
+pub(crate) mod facade;
 mod format;
 mod json;
+mod load;
+mod parse;
 mod source;
 mod value;
 
-#[cfg(feature = "rust-ini")]
+#[cfg(feature = "config-ini")]
 mod ini;
-#[cfg(feature = "toml")]
+#[cfg(feature = "config-toml")]
 mod toml;
-#[cfg(feature = "serde-saphyr")]
+#[cfg(feature = "config-yaml")]
 mod yaml;
 
 pub use error::ConfigError;
@@ -50,10 +54,10 @@ const MAX_MAX_DEPTH: usize = 256;
 /// 所有方法都是纯函数式的构建者（consuming builder），不持有文件句柄或缓存；同一个
 /// `ConfigLoader` 可以安全地重复用于多次读取。
 pub struct ConfigLoader {
-    format_override: Option<ConfigFormat>,
-    max_bytes: usize,
-    max_depth: usize,
-    env_substitution: bool,
+    pub(super) format_override: Option<ConfigFormat>,
+    pub(super) max_bytes: usize,
+    pub(super) max_depth: usize,
+    pub(super) env_substitution: bool,
 }
 
 impl Default for ConfigLoader {
@@ -69,7 +73,7 @@ impl ConfigLoader {
     /// # Examples
     ///
     /// ```
-    /// use axutils::ConfigLoader;
+    /// use axutils::config::ConfigLoader;
     ///
     /// let loader = ConfigLoader::new();
     /// let _ = loader;
@@ -90,7 +94,7 @@ impl ConfigLoader {
     /// # Examples
     ///
     /// ```
-    /// use axutils::{ConfigFormat, ConfigLoader};
+    /// use axutils::config::{ConfigFormat, ConfigLoader};
     ///
     /// let loader = ConfigLoader::new().with_format(ConfigFormat::Json);
     /// let _ = loader;
@@ -111,7 +115,7 @@ impl ConfigLoader {
     /// # Examples
     ///
     /// ```
-    /// use axutils::ConfigLoader;
+    /// use axutils::config::ConfigLoader;
     ///
     /// let loader = ConfigLoader::new().with_max_bytes(64 * 1024).unwrap();
     /// let _ = loader;
@@ -135,7 +139,7 @@ impl ConfigLoader {
     /// # Examples
     ///
     /// ```
-    /// use axutils::ConfigLoader;
+    /// use axutils::config::ConfigLoader;
     ///
     /// let loader = ConfigLoader::new().with_max_depth(8).unwrap();
     /// let _ = loader;
@@ -157,7 +161,7 @@ impl ConfigLoader {
     /// # Examples
     ///
     /// ```
-    /// use axutils::{ConfigFormat, ConfigLoader};
+    /// use axutils::config::{ConfigFormat, ConfigLoader};
     ///
     /// let loader = ConfigLoader::new().with_env_substitution(false);
     /// let error = loader.parse_value("A=\"${UNDEFINED}\"\n", ConfigFormat::Env);
@@ -179,30 +183,27 @@ impl ConfigLoader {
     /// # Examples
     ///
     /// ```
-    /// use std::io::Write;
-    /// use axutils::ConfigLoader;
+    /// use std::{env, fs::{self, File}, io::Write, process};
+    /// use axutils::config::ConfigLoader;
     ///
-    /// let mut path = std::env::temp_dir();
-    /// path.push(format!("axutils-config-loader-doctest-{}.json", std::process::id()));
-    /// std::fs::File::create(&path)
+    /// let mut path = env::temp_dir();
+    /// path.push(format!("axutils-config-loader-doctest-{}.json", process::id()));
+    /// File::create(&path)
     ///     .unwrap()
     ///     .write_all(br#"{"port": 8080}"#)
     ///     .unwrap();
     ///
     /// let value = ConfigLoader::new().load_value(&path).unwrap();
     /// assert_eq!(value.get("port").and_then(|v| v.as_i64()), Some(8080));
-    /// std::fs::remove_file(&path).ok();
+    /// fs::remove_file(&path).ok();
     /// ```
     pub fn load_value(&self, path: impl AsRef<Path>) -> Result<ConfigValue, ConfigError> {
-        let path = path.as_ref();
-        let format = self.resolve_format(path)?;
-        let text = source::read_bounded(path, self.max_bytes)?;
-        self.parse_value(&text, format)
+        load::load_value(self, path.as_ref())
     }
 
     /// 在 Tokio runtime 中异步读取配置文件，解析为无类型的 [`ConfigValue`]。
     ///
-    /// 该方法仅在同时启用 `serde` 与 `tokio` feature 时提供。文件读取使用 Tokio 的普通文件
+    /// 该方法仅在启用 `config-async` feature 时提供。文件读取使用 Tokio 的普通文件
     /// API 和受限的 `take(上限 + 1)`，格式推断、显式格式覆盖、文件大小、UTF-8/BOM、深度、
     /// `.env` 回退和错误语义均沿用 [`load_value`](ConfigLoader::load_value)。crate 不创建
     /// runtime、不调用 `block_on`，解析在当前异步任务中同步执行，较大的配置仍可能占用 Tokio
@@ -219,9 +220,9 @@ impl ConfigLoader {
     /// # Examples
     ///
     /// ```no_run
-    /// use axutils::ConfigLoader;
+    /// use axutils::config::{ConfigError, ConfigLoader};
     ///
-    /// async fn example() -> Result<(), axutils::ConfigError> {
+    /// async fn example() -> Result<(), ConfigError> {
     ///     let value = ConfigLoader::new()
     ///         .load_value_async("app.json")
     ///         .await?;
@@ -229,13 +230,12 @@ impl ConfigLoader {
     ///     Ok(())
     /// }
     /// ```
-    #[cfg(all(feature = "serde", feature = "tokio"))]
+    #[cfg(feature = "config-async")]
     pub async fn load_value_async(
         &self,
         path: impl AsRef<Path>,
     ) -> Result<ConfigValue, ConfigError> {
-        let (format, text) = self.read_file_async(path.as_ref()).await?;
-        self.parse_value(&text, format)
+        load::load_value_async(self, path.as_ref()).await
     }
 
     /// 从磁盘读取配置文件，直接反序列化为调用方类型 `T`。
@@ -249,8 +249,8 @@ impl ConfigLoader {
     /// # Examples
     ///
     /// ```
-    /// use std::io::Write;
-    /// use axutils::ConfigLoader;
+    /// use std::{env, fs::{self, File}, io::Write, process};
+    /// use axutils::config::ConfigLoader;
     /// use serde::Deserialize;
     ///
     /// #[derive(Deserialize)]
@@ -258,27 +258,24 @@ impl ConfigLoader {
     ///     port: u16,
     /// }
     ///
-    /// let mut path = std::env::temp_dir();
-    /// path.push(format!("axutils-config-loader-doctest-load-{}.json", std::process::id()));
-    /// std::fs::File::create(&path)
+    /// let mut path = env::temp_dir();
+    /// path.push(format!("axutils-config-loader-doctest-load-{}.json", process::id()));
+    /// File::create(&path)
     ///     .unwrap()
     ///     .write_all(br#"{"port": 8080}"#)
     ///     .unwrap();
     ///
     /// let config: Config = ConfigLoader::new().load(&path).unwrap();
     /// assert_eq!(config.port, 8080);
-    /// std::fs::remove_file(&path).ok();
+    /// fs::remove_file(&path).ok();
     /// ```
     pub fn load<T: DeserializeOwned>(&self, path: impl AsRef<Path>) -> Result<T, ConfigError> {
-        let path = path.as_ref();
-        let format = self.resolve_format(path)?;
-        let text = source::read_bounded(path, self.max_bytes)?;
-        self.parse(&text, format)
+        load::load(self, path.as_ref())
     }
 
     /// 在 Tokio runtime 中异步读取配置文件，并反序列化为调用方类型 `T`。
     ///
-    /// 该方法仅在同时启用 `serde` 与 `tokio` feature 时提供。文件读取使用 Tokio 的普通文件
+    /// 该方法仅在启用 `config-async` feature 时提供。文件读取使用 Tokio 的普通文件
     /// API 和受限的 `take(上限 + 1)`；格式推断、显式格式覆盖、文件大小、UTF-8/BOM、深度、
     /// `.env` 回退和错误语义均沿用 [`load`](ConfigLoader::load)。crate 不创建 runtime、不调用
     /// `block_on`，解析在当前异步任务中同步执行，较大的配置仍可能占用 Tokio worker；需要隔离
@@ -294,7 +291,7 @@ impl ConfigLoader {
     /// # Examples
     ///
     /// ```no_run
-    /// use axutils::ConfigLoader;
+    /// use axutils::config::{ConfigError, ConfigLoader};
     /// use serde::Deserialize;
     ///
     /// #[derive(Deserialize)]
@@ -302,19 +299,18 @@ impl ConfigLoader {
     ///     port: u16,
     /// }
     ///
-    /// async fn example() -> Result<(), axutils::ConfigError> {
+    /// async fn example() -> Result<(), ConfigError> {
     ///     let config: AppConfig = ConfigLoader::new().load_async("app.json").await?;
     ///     let _ = config;
     ///     Ok(())
     /// }
     /// ```
-    #[cfg(all(feature = "serde", feature = "tokio"))]
+    #[cfg(feature = "config-async")]
     pub async fn load_async<T: DeserializeOwned>(
         &self,
         path: impl AsRef<Path>,
     ) -> Result<T, ConfigError> {
-        let (format, text) = self.read_file_async(path.as_ref()).await?;
-        self.parse(&text, format)
+        load::load_async(self, path.as_ref()).await
     }
 
     /// 把内存中的文本按指定格式解析为无类型的 [`ConfigValue`]。
@@ -328,7 +324,7 @@ impl ConfigLoader {
     /// # Examples
     ///
     /// ```
-    /// use axutils::{ConfigFormat, ConfigLoader};
+    /// use axutils::config::{ConfigFormat, ConfigLoader};
     ///
     /// let value = ConfigLoader::new()
     ///     .parse_value(r#"{"port": 8080}"#, ConfigFormat::Json)
@@ -340,21 +336,7 @@ impl ConfigLoader {
         text: &str,
         format: ConfigFormat,
     ) -> Result<ConfigValue, ConfigError> {
-        #[cfg(feature = "tracing")]
-        let started = std::time::Instant::now();
-        let result = match format {
-            ConfigFormat::Json => json::parse_value(text, self.max_depth),
-            ConfigFormat::Env => env::parse_value(text, self.env_substitution, self.max_bytes),
-            #[cfg(feature = "serde-saphyr")]
-            ConfigFormat::Yaml => yaml::parse_value(text, self.max_depth),
-            #[cfg(feature = "toml")]
-            ConfigFormat::Toml => toml::parse_value(text, self.max_depth),
-            #[cfg(feature = "rust-ini")]
-            ConfigFormat::Ini => ini::parse_value(text, self.max_depth),
-        };
-        #[cfg(feature = "tracing")]
-        crate::tracing::config::record_parse(format, text.len(), &result, started);
-        result
+        parse::parse_value(self, text, format)
     }
 
     /// 把内存中的文本按指定格式直接反序列化为调用方类型 `T`。
@@ -368,7 +350,7 @@ impl ConfigLoader {
     /// # Examples
     ///
     /// ```
-    /// use axutils::{ConfigFormat, ConfigLoader};
+    /// use axutils::config::{ConfigFormat, ConfigLoader};
     /// use serde::Deserialize;
     ///
     /// #[derive(Deserialize)]
@@ -386,147 +368,16 @@ impl ConfigLoader {
         text: &str,
         format: ConfigFormat,
     ) -> Result<T, ConfigError> {
-        #[cfg(feature = "tracing")]
-        let started = std::time::Instant::now();
-        let result = match format {
-            ConfigFormat::Json => json::parse(text),
-            ConfigFormat::Env => env::parse_value(text, self.env_substitution, self.max_bytes)
-                .and_then(|value| de::deserialize(&value)),
-            #[cfg(feature = "serde-saphyr")]
-            ConfigFormat::Yaml => yaml::parse(text, self.max_depth),
-            #[cfg(feature = "toml")]
-            ConfigFormat::Toml => toml::parse(text),
-            #[cfg(feature = "rust-ini")]
-            ConfigFormat::Ini => ini::parse(text, self.max_depth),
-        };
-        #[cfg(feature = "tracing")]
-        crate::tracing::config::record_parse(format, text.len(), &result, started);
-        result
+        parse::parse(self, text, format)
     }
 
-    fn resolve_format(&self, path: &Path) -> Result<ConfigFormat, ConfigError> {
+    pub(super) fn resolve_format(&self, path: &Path) -> Result<ConfigFormat, ConfigError> {
         match self.format_override {
             Some(format) => Ok(format),
             None => ConfigFormat::from_path(path),
         }
     }
-
-    #[cfg(all(feature = "serde", feature = "tokio"))]
-    async fn read_file_async(&self, path: &Path) -> Result<(ConfigFormat, String), ConfigError> {
-        let format = self.resolve_format(path)?;
-        let text = source::read_bounded_async(path, self.max_bytes).await?;
-        Ok((format, text))
-    }
 }
 
 #[cfg(test)]
-mod tests {
-    use super::ConfigLoader;
-    use crate::{ConfigError, ConfigFormat};
-
-    #[test]
-    fn max_bytes_rejects_out_of_range_values() {
-        assert!(matches!(
-            ConfigLoader::new().with_max_bytes(0),
-            Err(ConfigError::InvalidLimit)
-        ));
-        assert!(matches!(
-            ConfigLoader::new().with_max_bytes(16 * 1024 * 1024 + 1),
-            Err(ConfigError::InvalidLimit)
-        ));
-        assert!(ConfigLoader::new().with_max_bytes(1024).is_ok());
-        assert!(ConfigLoader::new().with_max_bytes(16 * 1024 * 1024).is_ok());
-    }
-
-    #[test]
-    fn max_depth_rejects_out_of_range_values() {
-        assert!(matches!(
-            ConfigLoader::new().with_max_depth(0),
-            Err(ConfigError::InvalidLimit)
-        ));
-        assert!(matches!(
-            ConfigLoader::new().with_max_depth(257),
-            Err(ConfigError::InvalidLimit)
-        ));
-        assert!(ConfigLoader::new().with_max_depth(1).is_ok());
-        assert!(ConfigLoader::new().with_max_depth(256).is_ok());
-    }
-
-    #[test]
-    fn parse_value_dispatches_json_and_env() {
-        let loader = ConfigLoader::new();
-        let json = loader
-            .parse_value(r#"{"a": 1}"#, ConfigFormat::Json)
-            .expect("json should parse");
-        assert_eq!(json.get("a").and_then(|v| v.as_i64()), Some(1));
-
-        let env = loader
-            .parse_value("A=1\n", ConfigFormat::Env)
-            .expect("env should parse");
-        assert_eq!(env.get("A").and_then(|v| v.as_str()), Some("1"));
-    }
-
-    #[test]
-    fn parse_dispatches_typed_json() {
-        #[derive(serde::Deserialize)]
-        struct Config {
-            a: i64,
-        }
-        let config: Config = ConfigLoader::new()
-            .parse(r#"{"a": 5}"#, ConfigFormat::Json)
-            .expect("typed json should parse");
-        assert_eq!(config.a, 5);
-    }
-
-    #[test]
-    fn with_format_overrides_extension_inference_for_load() {
-        let path = std::env::temp_dir().join(format!(
-            "axutils-config-loader-test-{}-override.txt",
-            std::process::id()
-        ));
-        std::fs::write(&path, r#"{"a": 42}"#).expect("write temp file");
-
-        let value = ConfigLoader::new()
-            .with_format(ConfigFormat::Json)
-            .load_value(&path)
-            .expect("override should force json parsing");
-        assert_eq!(value.get("a").and_then(|v| v.as_i64()), Some(42));
-
-        let _ = std::fs::remove_file(&path);
-    }
-
-    #[test]
-    fn load_value_reports_unknown_extension_without_override() {
-        let path = std::env::temp_dir().join(format!(
-            "axutils-config-loader-test-{}-noext",
-            std::process::id()
-        ));
-        std::fs::write(&path, "{}").expect("write temp file");
-
-        let result = ConfigLoader::new().load_value(&path);
-        assert!(matches!(result, Err(ConfigError::UnknownExtension)));
-
-        let _ = std::fs::remove_file(&path);
-    }
-
-    #[test]
-    fn load_value_enforces_configured_max_bytes() {
-        let path = std::env::temp_dir().join(format!(
-            "axutils-config-loader-test-{}-too-large.json",
-            std::process::id()
-        ));
-        std::fs::write(&path, format!(r#"{{"a": "{}"}}"#, "x".repeat(2048)))
-            .expect("write temp file");
-
-        let result = ConfigLoader::new()
-            .with_max_bytes(1024)
-            .expect("valid limit")
-            .load_value(&path);
-        assert!(matches!(
-            result,
-            Err(ConfigError::FileTooLarge { limit: 1024, .. })
-        ));
-
-        let _ = std::fs::remove_file(&path);
-    }
-}
+mod tests;

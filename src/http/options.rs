@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use super::config::DeduplicationPolicy;
 use super::headers::HttpHeaders;
-#[cfg(feature = "serde")]
+#[cfg(feature = "http-json")]
 use super::request::HttpRequest;
 use super::retry::RetryPolicy;
 use super::HttpError;
@@ -28,9 +28,10 @@ impl HttpRequestOptions {
     /// # Examples
     ///
     /// ```
+    /// use axutils::http::{HttpRequestOptions};
     /// # #[cfg(feature = "http")]
     /// # fn main() {
-    /// let options = axutils::HttpRequestOptions::new();
+    /// let options = HttpRequestOptions::new();
     /// assert!(options.headers().is_empty());
     /// # }
     /// # #[cfg(not(feature = "http"))]
@@ -49,9 +50,10 @@ impl HttpRequestOptions {
     /// # Examples
     ///
     /// ```
+    /// use axutils::http::{HttpError, HttpRequestOptions};
     /// # #[cfg(feature = "http")]
-    /// # fn main() -> Result<(), axutils::HttpError> {
-    /// let options = axutils::HttpRequestOptions::new()
+    /// # fn main() -> Result<(), HttpError> {
+    /// let options = HttpRequestOptions::new()
     ///     .with_header("x-request-id", "demo")?;
     /// assert_eq!(options.headers().get("x-request-id"), Some(&b"demo"[..]));
     /// # Ok(())
@@ -76,9 +78,10 @@ impl HttpRequestOptions {
     /// # Examples
     ///
     /// ```
+    /// use axutils::http::{HttpError, HttpRequestOptions};
     /// # #[cfg(feature = "http")]
-    /// # fn main() -> Result<(), axutils::HttpError> {
-    /// let options = axutils::HttpRequestOptions::new()
+    /// # fn main() -> Result<(), HttpError> {
+    /// let options = HttpRequestOptions::new()
     ///     .append_header("accept", "application/json")?;
     /// assert!(options.headers().contains("accept"));
     /// # Ok(())
@@ -102,9 +105,10 @@ impl HttpRequestOptions {
     /// # Examples
     ///
     /// ```
+    /// use axutils::http::{HttpError, HttpRequestOptions};
     /// # #[cfg(feature = "http")]
-    /// # fn main() -> Result<(), axutils::HttpError> {
-    /// let options = axutils::HttpRequestOptions::new()
+    /// # fn main() -> Result<(), HttpError> {
+    /// let options = HttpRequestOptions::new()
     ///     .with_timeout(std::time::Duration::from_secs(5))?;
     /// assert_eq!(options.timeout(), Some(std::time::Duration::from_secs(5)));
     /// # Ok(())
@@ -125,10 +129,11 @@ impl HttpRequestOptions {
     /// # Examples
     ///
     /// ```
+    /// use axutils::http::{HttpRequestOptions, RetryPolicy};
     /// # #[cfg(feature = "http")]
     /// # fn main() {
-    /// let options = axutils::HttpRequestOptions::new()
-    ///     .with_retry_policy(axutils::RetryPolicy::new());
+    /// let options = HttpRequestOptions::new()
+    ///     .with_retry_policy(RetryPolicy::new());
     /// assert!(options.retry_policy().is_some());
     /// # }
     /// # #[cfg(not(feature = "http"))]
@@ -147,9 +152,10 @@ impl HttpRequestOptions {
     /// # Examples
     ///
     /// ```
+    /// use axutils::http::{HttpError, HttpRequestOptions};
     /// # #[cfg(feature = "http")]
-    /// # fn main() -> Result<(), axutils::HttpError> {
-    /// let options = axutils::HttpRequestOptions::new().with_max_retries(2)?;
+    /// # fn main() -> Result<(), HttpError> {
+    /// let options = HttpRequestOptions::new().with_max_retries(2)?;
     /// assert_eq!(options.retry_policy().unwrap().max_retries(), 2);
     /// # Ok(())
     /// # }
@@ -171,10 +177,11 @@ impl HttpRequestOptions {
     /// # Examples
     ///
     /// ```
+    /// use axutils::http::{DeduplicationPolicy, HttpRequestOptions};
     /// # #[cfg(feature = "http")]
     /// # fn main() {
-    /// let options = axutils::HttpRequestOptions::new()
-    ///     .with_deduplication_policy(axutils::DeduplicationPolicy::disabled());
+    /// let options = HttpRequestOptions::new()
+    ///     .with_deduplication_policy(DeduplicationPolicy::disabled());
     /// assert!(!options
     ///     .deduplication_policy()
     ///     .unwrap()
@@ -193,7 +200,8 @@ impl HttpRequestOptions {
     /// # Examples
     ///
     /// ~~~
-    /// let options = axutils::HttpRequestOptions::new();
+    /// use axutils::http::{HttpRequestOptions};
+    /// let options = HttpRequestOptions::new();
     /// assert!(options.headers().is_empty());
     /// ~~~
     pub fn headers(&self) -> &HttpHeaders {
@@ -205,10 +213,11 @@ impl HttpRequestOptions {
     /// # Examples
     ///
     /// ~~~rust
-    /// let options = axutils::HttpRequestOptions::new()
+    /// use axutils::http::{HttpError, HttpRequestOptions};
+    /// let options = HttpRequestOptions::new()
     ///     .with_timeout(std::time::Duration::from_secs(5))?;
     /// assert_eq!(options.timeout(), Some(std::time::Duration::from_secs(5)));
-    /// # Ok::<(), axutils::HttpError>(())
+    /// # Ok::<(), HttpError>(())
     /// ~~~
     pub fn timeout(&self) -> Option<Duration> {
         self.timeout
@@ -219,7 +228,8 @@ impl HttpRequestOptions {
     /// # Examples
     ///
     /// ~~~
-    /// let options = axutils::HttpRequestOptions::new();
+    /// use axutils::http::{HttpRequestOptions};
+    /// let options = HttpRequestOptions::new();
     /// assert!(options.retry_policy().is_none());
     /// ~~~
     pub fn retry_policy(&self) -> Option<&RetryPolicy> {
@@ -231,14 +241,15 @@ impl HttpRequestOptions {
     /// # Examples
     ///
     /// ~~~
-    /// let options = axutils::HttpRequestOptions::new();
+    /// use axutils::http::{HttpRequestOptions};
+    /// let options = HttpRequestOptions::new();
     /// assert!(options.deduplication_policy().is_none());
     /// ~~~
     pub fn deduplication_policy(&self) -> Option<&DeduplicationPolicy> {
         self.deduplication_policy.as_ref()
     }
 
-    #[cfg(feature = "serde")]
+    #[cfg(feature = "http-json")]
     pub(crate) fn apply_to_request(
         &self,
         mut request: HttpRequest,

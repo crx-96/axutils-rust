@@ -1,6 +1,6 @@
 use jiff::civil::{Date, DateTime};
 
-use crate::utils::TimeUtils;
+use super::facade::TimeUtils;
 
 use super::template::{
     render, Fields, TimeFormatError, TimeValueKind, DATETIME_TEMPLATE, DATE_TEMPLATE,
@@ -16,8 +16,10 @@ impl TimeUtils {
     /// # Examples
     ///
     /// ```
-    /// use axutils::TimeUtils;
-    /// let date = jiff::civil::Date::new(2024, 2, 29).unwrap();
+    /// use axutils::utils::TimeUtils;
+    /// use jiff::civil::Date;
+    ///
+    /// let date = Date::new(2024, 2, 29).unwrap();
     /// assert_eq!(TimeUtils::format_date_jiff(date, None).unwrap(), "2024-02-29");
     /// ```
     pub fn format_date_jiff(
@@ -40,9 +42,10 @@ impl TimeUtils {
     /// # Examples
     ///
     /// ```
-    /// use axutils::TimeUtils;
+    /// use axutils::utils::TimeUtils;
+    /// use jiff::civil::Date;
     ///
-    /// let value = jiff::civil::Date::new(2024, 2, 29).ok();
+    /// let value = Date::new(2024, 2, 29).ok();
     /// assert_eq!(TimeUtils::format_option_date_jiff(value, None), Some("2024-02-29".to_owned()));
     /// ```
     pub fn format_option_date_jiff(value: Option<Date>, template: Option<&str>) -> Option<String> {
@@ -57,8 +60,10 @@ impl TimeUtils {
     /// # Examples
     ///
     /// ```
-    /// use axutils::TimeUtils;
-    /// let value = jiff::civil::DateTime::new(2024, 2, 29, 1, 2, 3, 0).unwrap();
+    /// use axutils::utils::TimeUtils;
+    /// use jiff::civil::DateTime;
+    ///
+    /// let value = DateTime::new(2024, 2, 29, 1, 2, 3, 0).unwrap();
     /// assert_eq!(TimeUtils::format_datetime_jiff(value, Some("yyyy/MM/dd HH:mm:ss")).unwrap(), "2024/02/29 01:02:03");
     /// ```
     pub fn format_datetime_jiff(
@@ -82,7 +87,7 @@ impl TimeUtils {
     /// # Examples
     ///
     /// ```
-    /// use axutils::TimeUtils;
+    /// use axutils::utils::TimeUtils;
     ///
     /// assert_eq!(TimeUtils::format_option_datetime_jiff(None, None), None);
     /// ```
@@ -102,8 +107,10 @@ impl TimeUtils {
     /// # Examples
     ///
     /// ```
-    /// use axutils::TimeUtils;
-    /// let value = jiff::civil::DateTime::new(2024, 2, 29, 1, 2, 3, 0).unwrap();
+    /// use axutils::utils::TimeUtils;
+    /// use jiff::civil::DateTime;
+    ///
+    /// let value = DateTime::new(2024, 2, 29, 1, 2, 3, 0).unwrap();
     /// assert_eq!(TimeUtils::format_datetime_with_offset_jiff(value, None, None).unwrap(), "2024-02-29 01:02:03");
     /// ```
     pub fn format_datetime_with_offset_jiff(
@@ -128,7 +135,7 @@ impl TimeUtils {
     /// # Examples
     ///
     /// ```
-    /// use axutils::TimeUtils;
+    /// use axutils::utils::TimeUtils;
     ///
     /// assert_eq!(
     ///     TimeUtils::format_option_datetime_with_offset_jiff(None, None, None),
@@ -143,123 +150,6 @@ impl TimeUtils {
         value.and_then(|value| Self::format_datetime_with_offset_jiff(value, offset, template).ok())
     }
 }
-
-#[cfg(all(feature = "jiff", not(any(feature = "chrono", feature = "time"))))]
-impl TimeUtils {
-    /// Jiff 是唯一日期后端时 [`Self::format_date_jiff`] 的简写。
-    ///
-    /// `None` 使用 `yyyy-MM-dd`；仅可用 `yyyy`、`MM`、`dd`，ASCII 字母字面量须以单引号包围。
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use axutils::TimeUtils;
-    ///
-    /// let date = jiff::civil::Date::new(2024, 2, 29).unwrap();
-    /// assert_eq!(TimeUtils::format_date(date, None).unwrap(), "2024-02-29");
-    /// ```
-    pub fn format_date(value: Date, template: Option<&str>) -> Result<String, TimeFormatError> {
-        Self::format_date_jiff(value, template)
-    }
-
-    /// Jiff 是唯一日期后端时 [`Self::format_option_date_jiff`] 的简写。
-    ///
-    /// `None` 使用 `yyyy-MM-dd`；仅可用 `yyyy`、`MM`、`dd`，ASCII 字母字面量须以单引号包围。
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use axutils::TimeUtils;
-    ///
-    /// assert_eq!(TimeUtils::format_option_date(None, None), None);
-    /// ```
-    pub fn format_option_date(value: Option<Date>, template: Option<&str>) -> Option<String> {
-        Self::format_option_date_jiff(value, template)
-    }
-
-    /// Jiff 是唯一日期后端时 [`Self::format_datetime_jiff`] 的简写。
-    ///
-    /// `None` 使用 `yyyy-MM-dd HH:mm:ss`；可用 `yyyy`、`MM`、`dd`、`HH`、`mm`、`ss`、`SSS`。
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use axutils::TimeUtils;
-    ///
-    /// let value = jiff::civil::DateTime::new(2024, 2, 29, 1, 2, 3, 0).unwrap();
-    /// assert_eq!(TimeUtils::format_datetime(value, None).unwrap(), "2024-02-29 01:02:03");
-    /// ```
-    pub fn format_datetime(
-        value: DateTime,
-        template: Option<&str>,
-    ) -> Result<String, TimeFormatError> {
-        Self::format_datetime_jiff(value, template)
-    }
-
-    /// Jiff 是唯一日期后端时 [`Self::format_option_datetime_jiff`] 的简写。
-    ///
-    /// `None` 使用 `yyyy-MM-dd HH:mm:ss`；可用 `yyyy`、`MM`、`dd`、`HH`、`mm`、`ss`、`SSS`。
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use axutils::TimeUtils;
-    ///
-    /// assert_eq!(TimeUtils::format_option_datetime(None, None), None);
-    /// ```
-    pub fn format_option_datetime(
-        value: Option<DateTime>,
-        template: Option<&str>,
-    ) -> Option<String> {
-        Self::format_option_datetime_jiff(value, template)
-    }
-
-    /// Jiff 是唯一日期后端时 [`Self::format_datetime_with_offset_jiff`] 的简写。
-    ///
-    /// `template` 为 `None` 时使用 `yyyy-MM-dd HH:mm:ss`；`offset` 为 `None` 时使用 `+08:00`。
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use axutils::TimeUtils;
-    ///
-    /// let value = jiff::civil::DateTime::new(2024, 2, 29, 1, 2, 3, 0).unwrap();
-    /// assert_eq!(
-    ///     TimeUtils::format_datetime_with_offset(value, None, None).unwrap(),
-    ///     "2024-02-29 01:02:03",
-    /// );
-    /// ```
-    pub fn format_datetime_with_offset(
-        value: DateTime,
-        offset: Option<TimeZoneOffset>,
-        template: Option<&str>,
-    ) -> Result<String, TimeFormatError> {
-        Self::format_datetime_with_offset_jiff(value, offset, template)
-    }
-
-    /// Jiff 是唯一日期后端时 [`Self::format_option_datetime_with_offset_jiff`] 的简写。
-    ///
-    /// `template` 为 `None` 时使用 `yyyy-MM-dd HH:mm:ss`；`offset` 为 `None` 时使用 `+08:00`。
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use axutils::TimeUtils;
-    ///
-    /// assert_eq!(
-    ///     TimeUtils::format_option_datetime_with_offset(None, None, None),
-    ///     None,
-    /// );
-    /// ```
-    pub fn format_option_datetime_with_offset(
-        value: Option<DateTime>,
-        offset: Option<TimeZoneOffset>,
-        template: Option<&str>,
-    ) -> Option<String> {
-        Self::format_option_datetime_with_offset_jiff(value, offset, template)
-    }
-}
-
 fn date_fields(value: Date) -> Fields {
     Fields {
         year: value.year().into(),
@@ -329,25 +219,28 @@ mod tests {
 
     #[cfg(not(any(feature = "chrono", feature = "time")))]
     #[test]
-    fn single_backend_aliases_forward_to_jiff() {
+    fn jiff_entries_format_dates_and_datetimes() {
         let date = Date::new(2024, 2, 29).unwrap();
         let value = DateTime::new(2024, 2, 29, 1, 2, 3, 0).unwrap();
-        assert_eq!(TimeUtils::format_date(date, None).unwrap(), "2024-02-29");
         assert_eq!(
-            TimeUtils::format_option_date(Some(date), None),
+            TimeUtils::format_date_jiff(date, None).unwrap(),
+            "2024-02-29"
+        );
+        assert_eq!(
+            TimeUtils::format_option_date_jiff(Some(date), None),
             Some("2024-02-29".to_owned())
         );
         assert_eq!(
-            TimeUtils::format_datetime(value, None).unwrap(),
+            TimeUtils::format_datetime_jiff(value, None).unwrap(),
             "2024-02-29 01:02:03"
         );
-        assert_eq!(TimeUtils::format_option_datetime(None, None), None);
+        assert_eq!(TimeUtils::format_option_datetime_jiff(None, None), None);
         assert_eq!(
-            TimeUtils::format_datetime_with_offset(value, None, None).unwrap(),
+            TimeUtils::format_datetime_with_offset_jiff(value, None, None).unwrap(),
             "2024-02-29 01:02:03"
         );
         assert_eq!(
-            TimeUtils::format_option_datetime_with_offset(Some(value), None, Some("XXX")),
+            TimeUtils::format_option_datetime_with_offset_jiff(Some(value), None, Some("XXX")),
             Some("+08:00".to_owned())
         );
     }

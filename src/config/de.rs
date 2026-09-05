@@ -6,16 +6,17 @@
 //! （`bool` 因此只接受 `"true"`/`"false"`）。该差异必须写入 API doc，因为 JSON/YAML/TOML
 //! 不做这类字符串到标量的隐式转换。
 
-use std::collections::btree_map;
+use std::{collections::btree_map, fmt::Display, slice};
 
 use serde::de::{
-    self, DeserializeSeed, Deserializer, EnumAccess, MapAccess, SeqAccess, VariantAccess, Visitor,
+    self, DeserializeOwned, DeserializeSeed, Deserializer, EnumAccess, MapAccess, SeqAccess,
+    VariantAccess, Visitor,
 };
 
 use super::{error::ConfigError, value::ConfigValue};
 
 impl de::Error for ConfigError {
-    fn custom<T: std::fmt::Display>(_msg: T) -> Self {
+    fn custom<T: Display>(_msg: T) -> Self {
         // `#[derive(Deserialize)]` 生成的代码在一些回退路径上只能通过这个通用入口报告错误，
         // 消息文本本身可能包含被拒绝的值；为遵守“错误绝不回显配置值”的边界，这里丢弃消息，
         // 只返回一个通用分类。更精确的分类由下面几个结构化方法（携带字段名，而非配置值）提供。
@@ -299,7 +300,7 @@ impl<'de> Deserializer<'de> for KeyDeserializer<'de> {
 }
 
 struct ValueSeqAccess<'de> {
-    iter: std::slice::Iter<'de, ConfigValue>,
+    iter: slice::Iter<'de, ConfigValue>,
     key: String,
 }
 
@@ -419,16 +420,14 @@ impl<'de> VariantAccess<'de> for UnitOnlyVariantAccess {
     }
 }
 
-pub(crate) fn deserialize<T: serde::de::DeserializeOwned>(
-    value: &ConfigValue,
-) -> Result<T, ConfigError> {
+pub(crate) fn deserialize<T: DeserializeOwned>(value: &ConfigValue) -> Result<T, ConfigError> {
     T::deserialize(ValueDeserializer::root(value))
 }
 
 #[cfg(test)]
 mod tests {
-    use super::deserialize;
-    use crate::{ConfigError, ConfigValue};
+    use super as config_de;
+    use crate::config::{ConfigError, ConfigValue};
     use serde::Deserialize;
     use std::collections::BTreeMap;
 
@@ -457,7 +456,8 @@ mod tests {
             ("ratio", "0.5"),
             ("name", "primary"),
         ]);
-        let server: Server = deserialize(&value).expect("typed deserialize should succeed");
+        let server: Server =
+            config_de::deserialize(&value).expect("typed deserialize should succeed");
         assert_eq!(
             server,
             Server {
@@ -477,7 +477,7 @@ mod tests {
             ("ratio", "0.5"),
             ("name", "primary"),
         ]);
-        let error = deserialize::<Server>(&value).expect_err("invalid port should fail");
+        let error = config_de::deserialize::<Server>(&value).expect_err("invalid port should fail");
         assert!(matches!(
             error,
             ConfigError::TypeMismatch { key, expected: "u16" } if key == "port"
@@ -488,7 +488,7 @@ mod tests {
     fn missing_field_reports_field_name_without_leaking_other_values() {
         let secret = "s3cr3t";
         let value = string_table(&[("tls", "true"), ("ratio", "0.5"), ("name", secret)]);
-        let error = deserialize::<Server>(&value).expect_err("missing port should fail");
+        let error = config_de::deserialize::<Server>(&value).expect_err("missing port should fail");
         assert!(!error.to_string().contains(secret));
         assert!(matches!(
             error,
@@ -504,7 +504,8 @@ mod tests {
             ("ratio", "0.5"),
             ("name", "primary"),
         ]);
-        let error = deserialize::<Server>(&value).expect_err("non-canonical bool should fail");
+        let error =
+            config_de::deserialize::<Server>(&value).expect_err("non-canonical bool should fail");
         assert!(matches!(
             error,
             ConfigError::TypeMismatch { key, expected: "bool" } if key == "tls"
@@ -520,7 +521,7 @@ mod tests {
     #[test]
     fn deserializes_unit_enum_variant_from_string() {
         let value = ConfigValue::String("High".to_owned());
-        let level: Level = deserialize(&value).expect("enum deserialize should succeed");
+        let level: Level = config_de::deserialize(&value).expect("enum deserialize should succeed");
         assert_eq!(level, Level::High);
     }
 
@@ -540,8 +541,8 @@ mod tests {
                 ("name", "n"),
             ]),
         );
-        let nested: Nested =
-            deserialize(&ConfigValue::Table(root)).expect("nested deserialize should succeed");
+        let nested: Nested = config_de::deserialize(&ConfigValue::Table(root))
+            .expect("nested deserialize should succeed");
         assert_eq!(nested.server.port, 1);
     }
 }

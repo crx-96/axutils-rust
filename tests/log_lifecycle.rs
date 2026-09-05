@@ -3,23 +3,37 @@
 use std::io::Write;
 use std::sync::{Arc, Mutex};
 
-#[cfg(feature = "redis")]
-use axutils::RedisUtils;
 #[cfg(feature = "aes")]
-use axutils::{AesMode, CryptoUtils};
-#[cfg(feature = "lettre")]
-use axutils::{EmailConfig, EmailSecurity, EmailUtils};
+use axutils::{crypto::AesMode, utils::CryptoUtils};
+#[cfg(feature = "email")]
+use axutils::{
+    email::{EmailConfig, EmailSecurity},
+    utils::EmailUtils,
+};
 #[cfg(feature = "http")]
-use axutils::{HttpConfig, HttpUtils};
+use axutils::{http::HttpConfig, utils::HttpUtils};
 #[cfg(feature = "jwt")]
-use axutils::{JwtAlgorithm, JwtConfig, JwtSigningKey, JwtUtils, JwtValidation};
-#[cfg(all(feature = "sqlx", feature = "tokio"))]
-use axutils::{SqlxConfig, SqlxUtils};
+use axutils::{
+    jwt::{JwtAlgorithm, JwtConfig, JwtSigningKey, JwtValidation},
+    utils::JwtUtils,
+};
+#[cfg(feature = "redis")]
+use axutils::{
+    redis::{RedisError, RedisTransportErrorKind},
+    utils::RedisUtils,
+};
+#[cfg(any(feature = "sqlx", feature = "sqlx-sqlite"))]
+use axutils::{sqlx::SqlxConfig, utils::SqlxUtils};
+#[cfg(any(feature = "sqlx", feature = "sqlx-sqlite"))]
+use tokio::runtime::Builder as RuntimeBuilder;
+use tracing::{subscriber, Level};
 use tracing_subscriber::fmt::writer::MakeWriter;
 
 #[cfg(feature = "redis")]
 #[path = "support/redis_server.rs"]
 mod redis_server;
+#[cfg(feature = "redis")]
+use redis_server::RedisTestServer;
 
 #[derive(Clone)]
 struct Capture(Arc<Mutex<Vec<u8>>>);
@@ -51,10 +65,10 @@ fn capture_for(action: impl FnOnce()) -> String {
     let subscriber = tracing_subscriber::fmt()
         .with_ansi(false)
         .with_target(true)
-        .with_max_level(tracing::Level::DEBUG)
+        .with_max_level(Level::DEBUG)
         .with_writer(Capture(Arc::clone(&capture)))
         .finish();
-    tracing::subscriber::with_default(subscriber, action);
+    subscriber::with_default(subscriber, action);
     let bytes = capture.lock().expect("capture lock").clone();
     String::from_utf8(bytes).expect("UTF-8 logs")
 }
@@ -122,7 +136,7 @@ fn captures_http_init_without_base_url() {
 #[cfg(feature = "redis")]
 fn captures_redis_init_without_credentials_or_url() {
     const PASSWORD_SENTINEL: &str = "AXUTILS_REDIS_PASSWORD_SECRET";
-    let rejected = redis_server::RedisTestServer::start(|command| {
+    let rejected = RedisTestServer::start(|command| {
         Some(if command[0] == "AUTH" {
             b"-WRONGPASS AXUTILS_REDIS_PASSWORD_SECRET\r\n"
         } else {
@@ -133,8 +147,8 @@ fn captures_redis_init_without_credentials_or_url() {
     let failure = capture_for(|| {
         assert_eq!(
             RedisUtils::init(redis_server::test_config(&rejected_url)),
-            Err(axutils::RedisError::Transport(
-                axutils::RedisTransportErrorKind::Authentication
+            Err(RedisError::Transport(
+                RedisTransportErrorKind::Authentication
             ))
         );
     });
@@ -146,7 +160,7 @@ fn captures_redis_init_without_credentials_or_url() {
     assert!(!failure.contains(&rejected_url));
     drop(rejected);
 
-    let server = redis_server::RedisTestServer::start(|command| {
+    let server = RedisTestServer::start(|command| {
         Some(if command[0] == "PING" {
             b"+PONG\r\n"
         } else {
@@ -175,7 +189,7 @@ fn captures_redis_init_without_credentials_or_url() {
 }
 
 #[test]
-#[cfg(feature = "lettre")]
+#[cfg(feature = "email")]
 fn captures_email_init_without_account_data() {
     const HOST_SENTINEL: &str = "smtp-secret.example.com";
     const PASSWORD_SENTINEL: &str = "AXUTILS_EMAIL_PASSWORD_SECRET";
@@ -232,15 +246,15 @@ fn captures_aes_init_without_key_material() {
 }
 
 #[test]
-#[cfg(all(feature = "sqlx", feature = "tokio"))]
+#[cfg(any(feature = "sqlx", feature = "sqlx-sqlite"))]
 fn captures_sqlx_global_init_once() {
     let output = capture_for(|| {
-        let runtime = tokio::runtime::Builder::new_current_thread()
+        let runtime = RuntimeBuilder::new_current_thread()
             .enable_all()
             .build()
             .expect("test runtime");
         runtime.block_on(async {
-            SqlxUtils::init(SqlxConfig::new("sqlite::memory:").expect("SQLite config"))
+            SqlxUtils::init_async(SqlxConfig::new("sqlite::memory:").expect("SQLite config"))
                 .await
                 .expect("SQLx utility init");
         });

@@ -48,14 +48,15 @@ impl SqlxConfig {
     ///
     /// 支持 `postgres://`、`postgresql://`、`mysql://`、`mariadb://` 以及 `sqlite:`/`sqlite://`
     /// URL。首版不配置 TLS；可在 URL 中本地识别的显式 TLS 要求会被拒绝。该方法不会连接数据库，
-    /// SQLite 文件也只会在后续 [`crate::SqlxClient::connect`] 时产生文件 I/O。
+    /// SQLite 文件也只会在后续 [`crate::sqlx::SqlxClient::connect`] 时产生文件 I/O。
     ///
     /// # Examples
     ///
     /// ```
-    /// # #[cfg(all(feature = "sqlx", feature = "tokio"))]
-    /// # fn main() -> Result<(), axutils::SqlxError> {
-    /// use axutils::SqlxConfig;
+    /// use axutils::sqlx::{SqlxConfig, SqlxError};
+    /// # #[cfg(any(feature = "sqlx", feature = "sqlx-postgres", feature = "sqlx-mysql", feature = "sqlx-sqlite"))]
+    /// # fn main() -> Result<(), SqlxError> {
+    /// use SqlxConfig;
     ///
     /// let config = SqlxConfig::new("sqlite::memory:")?;
     /// assert!(format!("{config:?}").contains("Sqlite"));
@@ -104,9 +105,10 @@ impl SqlxConfig {
     /// # Examples
     ///
     /// ```
-    /// # #[cfg(all(feature = "sqlx", feature = "tokio"))]
-    /// # fn main() -> Result<(), axutils::SqlxError> {
-    /// use axutils::SqlxConfig;
+    /// use axutils::sqlx::{SqlxConfig, SqlxError};
+    /// # #[cfg(any(feature = "sqlx", feature = "sqlx-postgres", feature = "sqlx-mysql", feature = "sqlx-sqlite"))]
+    /// # fn main() -> Result<(), SqlxError> {
+    /// use SqlxConfig;
     /// let _config = SqlxConfig::new("sqlite::memory:")?.with_max_connections(1)?;
     /// # Ok(())
     /// # }
@@ -139,9 +141,10 @@ impl SqlxConfig {
     /// # Examples
     ///
     /// ```
-    /// # #[cfg(all(feature = "sqlx", feature = "tokio"))]
-    /// # fn main() -> Result<(), axutils::SqlxError> {
-    /// use axutils::SqlxConfig;
+    /// use axutils::sqlx::{SqlxConfig, SqlxError};
+    /// # #[cfg(any(feature = "sqlx", feature = "sqlx-postgres", feature = "sqlx-mysql", feature = "sqlx-sqlite"))]
+    /// # fn main() -> Result<(), SqlxError> {
+    /// use SqlxConfig;
     /// let _config = SqlxConfig::new("sqlite::memory:")?.with_min_connections(0)?;
     /// # Ok(())
     /// # }
@@ -163,10 +166,11 @@ impl SqlxConfig {
     /// # Examples
     ///
     /// ```
-    /// # #[cfg(all(feature = "sqlx", feature = "tokio"))]
-    /// # fn main() -> Result<(), axutils::SqlxError> {
+    /// use axutils::sqlx::{SqlxConfig, SqlxError};
+    /// # #[cfg(any(feature = "sqlx", feature = "sqlx-postgres", feature = "sqlx-mysql", feature = "sqlx-sqlite"))]
+    /// # fn main() -> Result<(), SqlxError> {
     /// use std::time::Duration;
-    /// use axutils::SqlxConfig;
+    /// use SqlxConfig;
     /// let _config = SqlxConfig::new("sqlite::memory:")?
     ///     .with_acquire_timeout(Duration::from_secs(5))?;
     /// # Ok(())
@@ -190,9 +194,10 @@ impl SqlxConfig {
     /// # Examples
     ///
     /// ```
-    /// # #[cfg(all(feature = "sqlx", feature = "tokio"))]
-    /// # fn main() -> Result<(), axutils::SqlxError> {
-    /// use axutils::SqlxConfig;
+    /// use axutils::sqlx::{SqlxConfig, SqlxError};
+    /// # #[cfg(any(feature = "sqlx", feature = "sqlx-postgres", feature = "sqlx-mysql", feature = "sqlx-sqlite"))]
+    /// # fn main() -> Result<(), SqlxError> {
+    /// use SqlxConfig;
     /// let _config = SqlxConfig::new("sqlite::memory:")?.with_max_rows(100)?;
     /// # Ok(())
     /// # }

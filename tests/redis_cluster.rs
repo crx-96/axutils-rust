@@ -1,6 +1,6 @@
-#![cfg(feature = "redis")]
+#![cfg(feature = "redis-cluster")]
 
-use axutils::{RedisClient, RedisConfig, RedisError};
+use axutils::redis::{RedisClient, RedisConfig, RedisError};
 
 const CLUSTER_LIVE_ENV: &str = "AXUTILS_REDIS_CLUSTER_LIVE_TEST";
 
@@ -100,7 +100,7 @@ fn cluster_live_fixture_covers_routing_and_cross_slot_boundaries() {
     }
 }
 
-#[cfg(all(feature = "redis", feature = "tokio"))]
+#[cfg(feature = "redis-cluster-async")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "requires local Redis Cluster on 127.0.0.1:7000-7002 and explicit AXUTILS_REDIS_CLUSTER_LIVE_TEST=1"]
 async fn cluster_async_fixture_covers_routing() {

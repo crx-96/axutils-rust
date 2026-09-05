@@ -1,8 +1,11 @@
 //! HTTP single-flight 和有限完成缓存的内部状态。
 
 use std::collections::{HashMap, VecDeque};
-use std::sync::{Condvar, Mutex};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::time::Instant;
+
+#[cfg(feature = "http-async")]
+use tokio::{sync::Notify, time as tokio_time};
 
 use super::config::DeduplicationPolicy;
 use super::headers::HeaderEntry;
@@ -98,7 +101,7 @@ impl CompletedCache {
 }
 
 pub(crate) struct SyncState {
-    pub(crate) in_flight: HashMap<RequestKey, std::sync::Arc<SyncFlight>>,
+    pub(crate) in_flight: HashMap<RequestKey, Arc<SyncFlight>>,
     pub(crate) cache: CompletedCache,
 }
 
@@ -154,13 +157,13 @@ impl SyncFlight {
     }
 }
 
-#[cfg(all(feature = "http", feature = "tokio"))]
+#[cfg(feature = "http-async")]
 pub(crate) struct AsyncState {
-    pub(crate) in_flight: HashMap<RequestKey, std::sync::Arc<AsyncFlight>>,
+    pub(crate) in_flight: HashMap<RequestKey, Arc<AsyncFlight>>,
     pub(crate) cache: CompletedCache,
 }
 
-#[cfg(all(feature = "http", feature = "tokio"))]
+#[cfg(feature = "http-async")]
 impl AsyncState {
     pub(crate) fn new() -> Self {
         Self {
@@ -170,18 +173,18 @@ impl AsyncState {
     }
 }
 
-#[cfg(all(feature = "http", feature = "tokio"))]
+#[cfg(feature = "http-async")]
 pub(crate) struct AsyncFlight {
     result: Mutex<Option<Result<HttpResponse, HttpError>>>,
-    notify: tokio::sync::Notify,
+    notify: Notify,
 }
 
-#[cfg(all(feature = "http", feature = "tokio"))]
+#[cfg(feature = "http-async")]
 impl AsyncFlight {
     pub(crate) fn new() -> Self {
         Self {
             result: Mutex::new(None),
-            notify: tokio::sync::Notify::new(),
+            notify: Notify::new(),
         }
     }
 
@@ -207,14 +210,14 @@ impl AsyncFlight {
             if let Some(result) = recover_lock(&self.result).as_ref() {
                 return result.clone();
             }
-            if tokio::time::timeout(remaining, notified).await.is_err() {
+            if tokio_time::timeout(remaining, notified).await.is_err() {
                 return Err(HttpError::CoalescedWaitTimeout);
             }
         }
     }
 }
 
-fn recover_lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+fn recover_lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())

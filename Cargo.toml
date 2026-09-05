@@ -1,6 +1,6 @@
 [package]
 name = "axutils"
-version = "0.1.3"
+version = "1.0.0"
 edition = "2021"
 rust-version = "1.95"
 resolver = "3"
@@ -39,30 +39,37 @@ features = [
     "logging",
     "rand",
     "regex",
-    "libphonenumber",
-    "serde",
-    "strfmt",
-    "minijinja",
+    "phone-validation",
+    "template-strfmt",
+    "template-minijinja",
     "chrono",
-    "chrono_tz",
-    "croner",
     "time",
     "jiff",
-    "lettre",
+    "email",
+    "email-async",
     "http",
+    "http-async",
+    "http-json",
     "redis",
+    "redis-cluster",
+    "redis-async",
+    "redis-cluster-async",
     "sqlx",
     "tokio",
+    "task-group",
+    "scheduler",
     "axum",
-    "tokio-util",
-    "tower",
-    "tower-http",
-    "tower_governor",
-    "tempfile",
-    "tempfile-async",
-    "toml",
-    "serde-saphyr",
-    "rust-ini",
+    "axum-tower",
+    "axum-tower-http",
+    "axum-governor",
+    "fs-async",
+    "fs-temp",
+    "fs-temp-async",
+    "config",
+    "config-yaml",
+    "config-toml",
+    "config-ini",
+    "config-async",
     "base64",
     "md5",
     "aes",
@@ -85,17 +92,29 @@ tracing = ["dep:tracing"]
 logging = ["tracing", "dep:tracing-subscriber", "dep:tracing-appender"]
 rand = ["dep:rand"]
 regex = ["dep:regex"]
-libphonenumber = ["dep:libphonenumber"]
-serde = ["dep:serde", "dep:serde_json", "dep:serde_urlencoded"]
-strfmt = ["dep:strfmt"]
-minijinja = ["dep:minijinja"]
+phone-validation = ["regex", "dep:libphonenumber"]
+template-strfmt = ["dep:serde", "dep:serde_json", "dep:strfmt"]
+template-minijinja = ["dep:serde", "dep:minijinja"]
 chrono = ["dep:chrono"]
-chrono_tz = ["dep:chrono_tz"]
-croner = ["dep:croner"]
 time = ["dep:time"]
 jiff = ["dep:jiff"]
-lettre = ["dep:lettre"]
-http = ["dep:ureq", "dep:reqwest", "dep:url"]
+email = ["dep:lettre"]
+email-async = ["email", "dep:tokio", "lettre/tokio1-rustls", "tokio?/rt"]
+http = ["dep:ureq", "dep:url"]
+http-async = [
+    "http",
+    "dep:reqwest",
+    "dep:tokio",
+    "tokio?/rt",
+    "tokio?/sync",
+    "tokio?/time",
+]
+http-json = [
+    "http",
+    "dep:serde",
+    "dep:serde_json",
+    "dep:serde_urlencoded",
+]
 redis = [
     "dep:redis",
     "dep:r2d2",
@@ -103,9 +122,50 @@ redis = [
     "dep:serde",
     "dep:rmp-serde",
     "redis/r2d2",
-    "redis/cluster",
 ]
-sqlx = ["dep:sqlx", "dep:futures-util"]
+redis-cluster = ["redis", "redis/cluster"]
+redis-async = [
+    "redis",
+    "dep:tokio",
+    "redis/tokio-comp",
+    "redis/connection-manager",
+    "tokio?/rt",
+    "tokio?/sync",
+    "tokio?/time",
+]
+redis-cluster-async = [
+    "redis-cluster",
+    "redis-async",
+    "redis/cluster-async",
+]
+sqlx-postgres = [
+    "dep:sqlx",
+    "dep:futures-util",
+    "dep:tokio",
+    "sqlx?/any",
+    "sqlx?/postgres",
+    "sqlx?/runtime-tokio",
+    "tokio?/rt",
+]
+sqlx-mysql = [
+    "dep:sqlx",
+    "dep:futures-util",
+    "dep:tokio",
+    "sqlx?/any",
+    "sqlx?/mysql",
+    "sqlx?/runtime-tokio",
+    "tokio?/rt",
+]
+sqlx-sqlite = [
+    "dep:sqlx",
+    "dep:futures-util",
+    "dep:tokio",
+    "sqlx?/any",
+    "sqlx?/sqlite-bundled",
+    "sqlx?/runtime-tokio",
+    "tokio?/rt",
+]
+sqlx = ["sqlx-postgres", "sqlx-mysql", "sqlx-sqlite"]
 tokio = [
     "dep:tokio",
     "tokio/fs",
@@ -116,39 +176,66 @@ tokio = [
     "tokio/signal",
     "tokio/sync",
     "tokio/time",
+]
+task-group = ["tokio", "dep:tokio-util", "tokio-util/rt", "dep:futures-timer"]
+scheduler = [
+    "dep:chrono",
+    "dep:chrono_tz",
+    "dep:croner",
+    "dep:tokio",
+    "tokio?/rt",
+    "tokio?/time",
+]
+axum = [
+    "dep:axum",
+    "dep:tower",
+    "dep:tokio",
     "axum?/http1",
     "axum?/tokio",
-    "lettre?/tokio1-rustls",
-    "redis?/cluster-async",
-    "redis?/connection-manager",
-    "redis?/tokio-comp",
-    "sqlx?/runtime-tokio",
+    "tokio?/net",
+    "tokio?/rt",
+    "tokio?/signal",
+    "tokio?/sync",
 ]
-axum = ["dep:axum", "dep:tower", "tower?/util", "tower_governor?/axum"]
-tokio-util = ["dep:tokio-util", "tokio-util/rt", "dep:futures-timer"]
-tower = ["dep:tower", "tower/util", "tower/limit", "tower/load-shed"]
-tower-http = [
+axum-tower = ["axum", "tower/util", "tower/limit", "tower/load-shed"]
+axum-tower-http = [
+    "axum",
     "dep:tower-http",
+    "axum?/matched-path",
     "tower-http/catch-panic",
     "tower-http/cors",
     "tower-http/limit",
     "tower-http/request-id",
     "tower-http/timeout",
     "tower-http/trace",
-    "axum?/matched-path",
 ]
-tower_governor = ["dep:tower_governor", "dep:futures-timer"]
-tempfile = ["dep:tempfile"]
-tempfile-async = ["dep:async-tempfile", "tokio"]
-toml = ["dep:toml"]
-serde-saphyr = ["dep:serde-saphyr"]
-rust-ini = ["dep:rust-ini"]
+axum-governor = [
+    "axum",
+    "dep:tower_governor",
+    "tower_governor/axum",
+    "dep:futures-timer",
+]
+fs-async = ["dep:tokio", "tokio?/fs", "tokio?/io-util", "tokio?/rt"]
+fs-temp = ["dep:tempfile"]
+fs-temp-async = ["dep:async-tempfile", "dep:tokio", "tokio?/fs", "tokio?/rt"]
+config = ["dep:serde", "dep:serde_json"]
+config-yaml = ["config", "dep:serde-saphyr"]
+config-toml = ["config", "dep:toml"]
+config-ini = ["config", "dep:rust-ini"]
+config-async = [
+    "config",
+    "dep:tokio",
+    "tokio?/fs",
+    "tokio?/io-util",
+    "tokio?/rt",
+]
 base64 = ["dep:base64"]
 md5 = ["dep:md5"]
 aes = ["dep:aes", "dep:aes-gcm", "dep:cbc", "dep:zeroize"]
 encoding_rs = ["dep:encoding_rs"]
-mimalloc = ["dep:mimalloc"]
-rpmalloc = ["dep:rpmalloc"]
+
+[lints.clippy]
+absolute_paths = "deny"
 
 [dependencies]
 itoa = { version = "1.0.18", optional = true, default-features = false }
@@ -191,12 +278,7 @@ reqwest = { version = "0.13.4", default-features = false, features = [
     "rustls",
 ], optional = true }
 redis = { version = "1.5.0", default-features = false, optional = true }
-sqlx = { version = "0.9.0", default-features = false, features = [
-    "any",
-    "postgres",
-    "mysql",
-    "sqlite-bundled",
-], optional = true }
+sqlx = { version = "0.9.0", default-features = false, optional = true }
 futures-util = { version = "0.3.34", default-features = false, features = [
     "alloc",
 ], optional = true }
@@ -245,8 +327,6 @@ zeroize = { version = "1.9.0", default-features = false, optional = true }
 encoding_rs = { version = "0.8.35", default-features = false, features = [
     "alloc",
 ], optional = true }
-mimalloc = { version = "0.1.52", default-features = false, optional = true }
-rpmalloc = { version = "0.2.2", default-features = false, optional = true }
 tracing = { version = "0.1.44", default-features = false, features = [
     "std",
 ], optional = true }
@@ -259,6 +339,7 @@ tracing-appender = { version = "0.2.5", default-features = false, optional = tru
 [dev-dependencies]
 tokio = { version = "1.53.1", default-features = false, features = [
     "macros",
+    "io-util",
     "rt-multi-thread",
     "time",
     "test-util",

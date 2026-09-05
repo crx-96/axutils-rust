@@ -3,7 +3,7 @@
 use serde::ser::Error as _;
 use serde::{Serialize, Serializer};
 
-use axutils::{RedisClient, RedisConfig, RedisError};
+use axutils::redis::{RedisClient, RedisConfig, RedisError};
 
 struct FailingValue;
 

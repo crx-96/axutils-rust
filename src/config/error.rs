@@ -1,6 +1,6 @@
 //! 配置读取与解析错误。
 
-use std::{fmt, io, path::PathBuf};
+use std::{error::Error as StdError, fmt, io, path::PathBuf};
 
 /// 配置文件读取、格式识别与解析过程中可能发生的错误。
 ///
@@ -149,12 +149,12 @@ impl fmt::Display for ConfigError {
     }
 }
 
-impl std::error::Error for ConfigError {}
+impl StdError for ConfigError {}
 
 /// 计算字节偏移量在文本中对应的一基行号与列号（按 Unicode 标量值计数）。
 ///
 /// 仅用于将后端返回的字节 span 转换为定位信息；不读取或返回偏移量之外的文本内容。
-#[cfg(feature = "toml")]
+#[cfg(feature = "config-toml")]
 pub(crate) fn line_column_at(text: &str, byte_offset: usize) -> (usize, usize) {
     let mut offset = byte_offset.min(text.len());
     while offset > 0 && !text.is_char_boundary(offset) {
@@ -176,38 +176,38 @@ pub(crate) fn line_column_at(text: &str, byte_offset: usize) -> (usize, usize) {
 
 #[cfg(test)]
 mod tests {
-    use super::ConfigError;
-    use std::path::PathBuf;
+    use std::{io::ErrorKind, path::PathBuf};
 
-    #[cfg(feature = "toml")]
+    #[cfg(feature = "config-toml")]
+    use super as config_error;
+    use super::ConfigError;
+
+    #[cfg(feature = "config-toml")]
     #[test]
     fn line_column_at_counts_unicode_scalars_not_bytes() {
-        use super::line_column_at;
-
         let text = "a=1\nb=你好\nc=3";
-        assert_eq!(line_column_at(text, 0), (1, 1));
-        assert_eq!(line_column_at(text, 4), (2, 1));
+        assert_eq!(config_error::line_column_at(text, 0), (1, 1));
+        assert_eq!(config_error::line_column_at(text, 4), (2, 1));
         // "你" starts at byte 6 on line 2 (b'b','=' take bytes 4,5), and is 3 bytes in UTF-8.
         let second_line_third_char_offset = 4 + "b=".len() + "你".len();
-        assert_eq!(line_column_at(text, second_line_third_char_offset), (2, 4));
+        assert_eq!(
+            config_error::line_column_at(text, second_line_third_char_offset),
+            (2, 4)
+        );
     }
 
-    #[cfg(feature = "toml")]
+    #[cfg(feature = "config-toml")]
     #[test]
     fn line_column_at_clamps_out_of_range_offsets() {
-        use super::line_column_at;
-
         let text = "abc";
-        assert_eq!(line_column_at(text, 100), (1, 4));
+        assert_eq!(config_error::line_column_at(text, 100), (1, 4));
     }
 
-    #[cfg(feature = "toml")]
+    #[cfg(feature = "config-toml")]
     #[test]
     fn line_column_at_clamps_offsets_inside_utf8_scalars() {
-        use super::line_column_at;
-
         let text = "a=你";
-        assert_eq!(line_column_at(text, 3), (1, 3));
+        assert_eq!(config_error::line_column_at(text, 3), (1, 3));
     }
 
     #[test]
@@ -216,7 +216,7 @@ mod tests {
         let errors = [
             ConfigError::Io {
                 path: PathBuf::from("config.toml"),
-                kind: std::io::ErrorKind::NotFound,
+                kind: ErrorKind::NotFound,
             },
             ConfigError::FileTooLarge {
                 path: PathBuf::from("config.toml"),

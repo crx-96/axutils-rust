@@ -1,121 +1,205 @@
-# axutils 工具类定位
+# axutils 模块与 feature 定位
 
-本文档维护 `axutils` 中工具类和公共模块的职责边界，帮助贡献者在新增能力前找到合适的
-归属位置，避免重复实现或职责交叉。涉及工具类、跨模块 API 或新增方法时，应先阅读本文档。
+本文档是当前源码结构、公共路径和能力 feature 的定位清单。它描述“能力归属在哪里”，不复制每个
+方法的完整签名；方法、错误和安全语义以 Rustdoc 与对应领域文档为准。
 
-## 定位清单
+## 架构约束
 
-| 工具类 | 源文件 | crate 根模块导出 | 可用条件与依赖 | 职责与主要使用场景 |
-| --- | --- | --- | --- | --- |
-| `PathUtils` | `src/utils/path_utils.rs` | `axutils::PathUtils`；模块为 `axutils::path_utils` | 默认可用；仅依赖 Rust 标准库 | 判断路径是否为绝对路径，获取当前工作目录和当前可执行文件路径，按平台规则拼接并词法规整多个路径；不负责文件系统存在性、权限、符号链接或真实路径解析 |
-| `FsUtils` 与文件系统领域类型 | `src/fs/{mod,error,ops,transfer}.rs`；可选临时能力为 `src/fs/temp.rs`；`src/utils/fs_utils.rs` | `FsUtils`：`axutils::FsUtils`、`axutils::utils::FsUtils`、`axutils::utils::fs_utils::FsUtils`；`FsError`：`axutils::FsError`、`axutils::fs::FsError`；传输类型 `FsChunkProcessor`、`FsTransferOptions`、`FsTransferStats`、`FsTransferError` 从 `axutils::fs` 与 crate 根导出，`FsAsyncChunkProcessor` 在 `tokio` 下追加；`FsTempConfig`、`FsTempError`、`FsUtilsContext` 在任一临时 feature 下从 `axutils::fs` 与 crate 根导出；`FsTempFile`/`FsTempDir` 仅在 `tempfile` 下导出，`FsAsyncTempFile`/`FsAsyncTempDir` 仅在 `tempfile-async` 下导出；领域模块为 `axutils::fs` | 同步查询/读写/复制等能力默认可用且仅依赖标准库；`FsChunkProcessor`/`FsTransferOptions`/`FsTransferStats`/`FsTransferError` 的同步流式传输默认可用；`FsAsyncChunkProcessor` 与 `copy_file_with_async` 需要现有 `tokio` feature；同步临时能力需要独立 `tempfile` feature，异步临时能力需要独立 `tempfile-async` feature（该 feature 联动 `tokio`，但 `tokio` 单独不会启用临时 API）；`FsUtilsContext` 只从 `fs` 和 crate 根导出；不提供 `axutils::fs::FsUtils`、`axutils::fs_utils::FsUtils`、`axutils::fs_utils` 根模块、`axutils::utils::FsError`、`axutils::utils::fs_utils::FsError` 或在 `utils` 中复制领域类型 | 查询、创建、受限二进制/UTF-8 读取、写入/追加、浅层目录列举、普通文件复制、rename 移动和文件/目录删除；`copy_file_with` 提供串行、拥有型块处理器流水线和累计输出上限；临时 wrapper 提供有状态配置 context、同步/异步文件与目录创建、路径、同步 `close` 和异步 `drop_async`；直接使用调用方路径，不负责安全根、授权、canonicalize 沙箱、权限修改、抗 TOCTOU、原子写、fsync、递归复制或回滚；`remove_dir_all` 是受信路径上的破坏性非事务操作；流式传输不会自动 rollback，异步取消可能留下部分目标；异步临时 wrapper 的显式 `drop_async` 正常路径是异步尽力清理，取消/隐式 Drop 仍受后端同步 Drop 后备语义约束 |
-| `TimeUtils` 与时间错误 | `src/utils/time_utils.rs`、`src/time/{mod,error,offset,template}.rs` | `axutils::TimeUtils`；时间戳模块为 `axutils::time_utils`；`TimeError`、`TimeZoneOffset`、`TimeZoneOffsetError`、`TimeFormatError`、`TimeFormatToken`、`TimeValueKind` 默认从 crate 根导出 | Unix 时间戳和 `TimeError` 默认可用且仅依赖标准库；推荐的五个 `try_timestamp*` 入口返回 `Result<_, TimeError>`；保留的五个旧入口维持原返回签名和纪元前 panic 语义并标记 `deprecated`；日期格式化分别需要独立的 `chrono`、`time` 或 `jiff` feature | 获取当前 Unix 时间戳；系统时钟早于 Unix 纪元时，推荐入口统一返回稳定且脱敏的 `TimeError::BeforeUnixEpoch`；按统一受限模板格式化各后端自身的日期、civil 日期时间及可选附加固定 UTC 偏移的日期时间。日期默认模板为 `yyyy-MM-dd`，含时间值默认模板为 `yyyy-MM-dd HH:mm:ss`；带偏移方法传入 `None` 时使用 `+08:00`，只有自定义模板显式包含 `XXX` 才输出偏移。固定偏移不等同于 IANA 时区，不查询 DST、不转换字段、不解析日期或执行日历运算；多个后端同时启用时必须调用带后缀 API |
-| `FormatUtils` | `src/utils/format_utils.rs` | `axutils::FormatUtils`；模块为 `axutils::format_utils`；启用 `serde` 与至少一个模板后端时，`TemplateEngine` 定义于 `axutils::format_utils::TemplateEngine`，并重导出为 `axutils::utils::TemplateEngine` 和 `axutils::TemplateEngine` | `seconds_to_human`、`mask` 和 `mask_email` 默认可用且仅依赖标准库；模板能力须由用户显式同时启用 `serde` 和一个后端 feature（`strfmt` 或 `minijinja`）。每个后端 feature 仅启用其同名依赖；`serde` 是公共基础 feature，并启用内部所需的 `serde`、`serde_json` 和 HTTP query 基础设施 `serde_urlencoded` 依赖；`serde` 未启用或两个模板后端均未启用时不导出 `TemplateEngine` 和统一入口；单后端时枚举只包含对应变体，双后端时包含两个变体 | 将秒数格式化为中文持续时间字符串（天/小时/分钟/秒，最大单位为天，不足一天不显示天）；`mask` 按有序、非重叠的零基左闭右开 Unicode 字符范围执行单段或多段位置型脱敏；`mask_email` 默认从邮箱本地部分第 4 位开始、也接受自定义一基起始位置，本地部分比起始位置短时全部遮盖，域名保持不变；非法范围或无法安全拆分的邮箱返回 `None`。通过 `FormatUtils::template(template, context, default, engine)` 使用显式 `TemplateEngine` 渲染运行时模板。`TemplateEngine::Strfmt` 仅支持扁平命名变量 `{name}`；`TemplateEngine::MiniJinja` 支持 `{{ name }}`、嵌套字段、数组、条件和循环。渲染成功返回 `Some(String)`（包括空字符串），解析、序列化或渲染失败返回 `default` 的拥有副本或 `None`；不负责邮箱真实性验证、内存秘密擦除、时区转换、周/月/年等更大单位、负数或小数秒，也不执行模板来源安全审计或资源限制 |
-| `ConvertUtils` | `src/utils/convert_utils.rs`（面向调用方的静态工具类）、`src/convert/mod.rs`、`src/convert/integer.rs`、`src/convert/float.rs`、`src/convert/uuid.rs`（后端实现） | `axutils::ConvertUtils`、`axutils::convert::ConvertUtils`、`axutils::utils::ConvertUtils`、`axutils::utils::convert_utils::ConvertUtils`；`IntegerBuffer`/`IntegerValue`、`FloatBuffer`/`FloatFormat`/`FloatValue`、`UuidBuffer` 仅从 crate 根和 `axutils::convert` 按 feature 导出，不从 `utils` 导出；不存在 `axutils::convert_utils` 根模块 | `ConvertUtils`、`convert` 模块和 `utils::convert_utils` 模块始终存在且不依赖第三方包；`itoa` 独立提供整数格式化与标准库整数解析；`ryu`/`zmij` 独立提供浮点格式化与标准库浮点解析；`uuid` 仅启用 `uuid` crate 的 `std` feature。四个依赖均为 `optional = true`、`default-features = false`，feature 只映射同名 `dep:`；`uuid::Uuid`/`uuid::Error` 是公开签名中的直接依赖类型，不是 axutils 重导出 | 提供整数、`f32`/`f64` 和 UUID 与字符串之间的显式转换；借用型 `*_to_str` 写入调用方 buffer，追加型 `append_*` 直接写入已有 `String`，拥有型 `*_to_string` 返回独立字符串；解析不自动 trim、不回退、不改写原生错误；不负责布尔/字符/日期时间/JSON/Serde/本地化格式、UUID 生成或版本校验 |
-| `RegUtils` | `src/utils/reg_utils.rs` | 启用 `regex` feature 后提供 `axutils::RegUtils`；模块为 `axutils::reg_utils` | `regex` feature 提供模块、常见/严格邮箱和中国大陆手机号校验；可选的第三方 `regex` crate。`is_phone` 还要求独立的 `libphonenumber` feature，并通过依赖别名 `libphonenumber` 使用 crates.io 的 `phonenumber` crate | 校验常见和严格电子邮箱格式、中国大陆手机号码格式，以及启用两个 feature 后的国际 E.164 手机号码格式；只做本地格式、号段和号码类型校验，不验证地址或号码是否真实存在 |
-| `RandomUtils` | `src/utils/random_utils.rs` | 启用 `rand` feature 后提供 `axutils::RandomUtils`、`axutils::LetterCase` 和 `axutils::RandomRangeError`；模块为 `axutils::random_utils` | 默认不可用；`rand` feature 提供能力，可选的第三方 `rand` crate | 生成数字、大小写字母、混合字母和数字字母 ASCII 字符串，从闭区间生成 `i64` 或可构造的有限 `f64` 随机数；字符串长度不设固定上限，调用方需限制不可信输入；不负责密码学安全随机数、密码、令牌、密钥或可复现随机序列 |
-| `EmailClient` | `src/email/mod.rs`、`src/email/client.rs`、`src/email/config.rs`、`src/email/message.rs`、`src/email/error.rs` | 启用 `lettre` feature 后提供 `axutils::email::EmailClient` 和 `axutils::EmailClient`；配置、消息、错误和安全类型同时从 `axutils::email` 与 crate 根导出 | 仅显式启用 `lettre`；最低依赖版本为 `lettre 0.11.23`，关闭默认 feature，使用 `builder`、`smtp-transport`、`pool`、`rustls`、`ring`、`webpki-roots`，允许 Cargo 解析后续兼容的 `0.11.x` 版本；同时启用 `tokio` 后才提供异步方法，Tokio 最低版本为 `1.53.1` | 创建多个互不覆盖的 SMTP 账号客户端，使用强制 SMTPS 或强制 STARTTLS 发送纯文本/HTML 邮件，并复用每实例的同步/异步连接池；负责本地配置、消息规模与邮件头注入校验；不负责附件、抄送/密送、模板、DKIM、OAuth2、重试、队列、邮件接收或地址真实性验证 |
-| `EmailUtils` | `src/utils/email_utils.rs` | 启用 `lettre` feature 后提供 `axutils::utils::EmailUtils`、`axutils::utils::email_utils::EmailUtils` 和 `axutils::EmailUtils` | 仅随 `lettre` feature 导出，复用 `EmailClient`；异步方法要求 `lettre` 与 `tokio` 同时启用；Tokio 通过 `lettre?/tokio1-rustls` 弱依赖适配，不会被单独 `tokio` 激活 | 单默认账号的一次初始化全局便捷入口，提供初始化状态、同步发送和组合 feature 下的异步发送；不可 reset/replace，不能替代多账号实例生命周期管理；与 `RegUtils` 的地址格式校验无依赖关系 |
-| `HttpClient` 与 HTTP 领域类型 | `src/http/{mod,client,coalesce,config,error,headers,options,request,response,retry,serde_api}.rs` | 启用 `http` feature 后公开模块为 `axutils::http`；`HttpClient`、`HttpConfig`、`HttpConfigBuilder`、`HttpHeaders`、`HttpMethod`、`HttpRequest`、`HttpRequestBuilder`、`HttpRequestOptions`、`HttpResponse`、`HttpError`、`HttpTransportErrorKind`、`RetryPolicy`、`DeduplicationPolicy`、`DeduplicationMode` 同时从 `axutils::http::*` 与 crate 根导出；内部 `headers`/`client`/`options`/`serde_api` 等实现模块不单独公开 | 仅显式启用 `http`；同步依赖为 `ureq 3.4.0`（关闭默认 feature，仅启用 Rustls；使用 `ring` 与静态 `webpki-roots`）和 `url 2.5.8`，异步后端为 `reqwest 0.13.4`（关闭默认 feature，仅启用 `rustls`；未预安装进程级 provider 时请求 AWS-LC，并通过 `rustls-platform-verifier` 使用目标平台系统根证书），Cargo 可解析同一兼容范围内的补丁版本；为保持 `http + tokio` 的组合式异步 API 契约，`http` 单 feature 也会编译 `reqwest` 及其传递依赖；同步执行 API 仅需 `http`，异步执行 API 仅在 `http + tokio` 同时启用时导出；Serde JSON/query/字节快捷 API 仅在 `http + serde` 下导出，异步快捷 API 还要求 `tokio`；`http` 不自动启用项目 `serde` 或 `tokio` feature，`serde` 通过 `serde_json 1` 和 `serde_urlencoded 0.7.1` 提供序列化依赖 | 提供关闭系统代理、自动重定向、自动压缩和隐式重试的 HTTP/HTTPS 客户端；`HttpConfig` 的 builder 字段均可省略，默认请求总超时 30 秒、连接超时 10 秒，默认最多进行 3 次总网络尝试（包括首次请求）；不设置 `base_url` 时只接受绝对 HTTP/HTTPS URL，配置了 `base_url` 时请求自身的绝对 URL 优先，但跨 origin 绝对 URL 不继承默认敏感 Header；执行总时间预算、连接池、请求/响应大小上限、有限指数退避、敏感 Header 合并保护和安全方法默认 single-flight；仅显式请求级去重才合并非安全方法；完成缓存只接受 2xx 的无体 GET/HEAD 且拒绝认证、Cookie、条件、Range、`no-store`/`no-cache`、`Vary: *` 和 `Set-Cookie`；Serde 便捷方法用三参数 URL/可选 query 或 JSON body/可选单次配置，默认 JSON 响应并提供 `*_bytes` 原始字节入口；不承诺 SSRF 防护，不负责代理、重定向、Cookie jar、上传流、multipart、HTTP/2 优化或业务级鉴权 |
-| `HttpUtils` | `src/utils/http_utils.rs` | 启用 `http` feature 后提供 `axutils::HttpUtils`、`axutils::utils::HttpUtils`、`axutils::utils::http_utils::HttpUtils`；在 `http + serde` 下追加与 `HttpClient` 同名的同步 JSON/字节快捷方法，在 `http + serde + tokio` 下追加异步快捷方法 | 仅随 `http` feature 导出并复用 `HttpClient`；同步 `execute` 及同步快捷方法只需要 `http`（快捷方法另需 `serde`），`execute_async` 及异步快捷方法需要 `http + tokio`（快捷方法另需 `serde`）；全局 `OnceLock` 只能初始化一次，不会自动创建 runtime | 单默认客户端的一次初始化全局便捷入口，提供初始化状态、原始执行和与 `HttpClient` 保持相同三参数/返回语义的 JSON、字节转发；绝对 URL 不依赖初始化时的 `base_url`，相对 URL 仍需要配置基地址；不能 reset/replace，不能替代多客户端实例的配置和生命周期管理 |
-| `RedisClient` 与 Redis 领域类型 | `src/redis/{mod,client,config,codec,commands,error,lock,transaction}.rs` | 启用 `redis` feature 后，公开模块为 `axutils::redis`；`RedisClient`、`RedisConfig`、`RedisError`、`RedisTransportErrorKind`、`RedisLockGuard`、`RedisTransaction` 同时从 `axutils::redis::*` 与 crate 根导出；`RedisAsyncLockGuard` 同时从 `axutils::redis::*` 与 crate 根导出，但还需要 `tokio`；实现子模块不是公共路径 | `redis` feature 启用 `redis 1.5.0`（关闭默认 feature，同步使用 `r2d2`、`cluster`）、`r2d2 0.8.10`、`rmp-serde 1.3.1`、Redis 专用 `serde` 依赖和现有可选 `rand` 依赖（仅内部用于 OS CSPRNG token，不启用公共 `RandomUtils`）；不启用项目公共 `serde` feature；同步 API 只需要 `redis` 且不引入 Tokio；异步 API 需要 `redis + tokio`，由 `tokio` 对 Redis 的弱依赖映射追加 `cluster-async`、`connection-manager`、`tokio-comp` | 提供单机/Cluster 的有界配置、惰性 r2d2 连接池、普通命令、MessagePack/raw 值、批量限制、TTL/counter/list/set、单 Redis 拓扑单键租约锁和单机 MULTI/EXEC 事务；锁使用 token 校验的原子 `EVAL` 释放/续租、TTL 兜底和同步/异步 guard，支持 Cluster 单 key 路由但不是 Redlock/fencing；主从异步复制故障切换可能丢失锁，临界区仍需数据库条件更新、唯一约束、事务或幂等保护；只接受 `redis://`，不提供 TLS、WATCH/CAS、无界 keys/scan 或底层 Pipeline/连接类型；构造阶段不访问网络，Cluster 事务返回 `UnsupportedMode`，多 key 跨 slot 映射为 `CrossSlot` |
-| `RedisUtils` | `src/utils/redis_utils.rs` | 启用 `redis` feature 后提供 `axutils::RedisUtils`、`axutils::utils::RedisUtils`、`axutils::utils::redis_utils::RedisUtils`；同步方法与 `RedisClient` 同名，异步方法还要求 `tokio`；`init_async` 与异步转发要求 `redis + tokio` 和调用方 runtime；`try_lock` 返回拥有 `RedisClient` clone 的 guard，不借用 `OnceLock` | `init` 与 `init_async` 共用 `OnceLock<RedisClient>`，合计只在 `PING` 返回 `PONG` 后成功初始化一次；连接、认证、命令、既有超时、无 runtime 或 await 取消失败不占位，可使用相同或新配置重试（并发调用可能已由其他调用成功）；非 `PONG` 返回 `RedisError::Transport(RedisTransportErrorKind::Protocol)`；已有全局客户端时直接返回 `AlreadyInitialized`，不访问新目标；`redis` 直接启用 Redis 专用 Serde 和锁 token 所需 `rand` 依赖但不会启用项目公共 `serde` 或公共 `RandomUtils` feature | 单默认 Redis 客户端的一次初始化进程级便捷入口，转发全部同步/异步命令、租约锁与事务；`init` 同步阻塞并预热同步池，`init_async` 在调用方 runtime 中预热异步连接且同步池仍惰性；并发调用可分别验证但仅一个写入单例。`is_initialized` 只表示曾成功完成初始化，不是持续健康检查；Cluster 按当前后端的 `PING` 路由验证，不承诺未来持续可用。全局客户端只是连接入口，不是进程内互斥锁，不提供 client/config/凭据 getter、reset 或 replace，不代替多个实例的生命周期管理 |
-| `SqlxClient` 与 SQLx 领域类型 | `src/sqlx/{mod,client,config,driver,error}.rs` | 仅在 `sqlx + tokio` 下公开模块 `axutils::sqlx`；`SqlxClient`、`SqlxConfig`、`SqlxError`、`SqlxTransportErrorKind`、`SqlxRow`、`SqlxQueryResult`、`SqlxTransaction` 同时从 `axutils::sqlx::*` 与 crate 根导出；实现子模块不是稳定公共路径 | `sqlx` feature 启用可选 SQLx `0.9.0`（`default-features = false`，`any`、`postgres`、`mysql`、`sqlite-bundled`），并启用 `futures-util` 行流消费；只有 `tokio` 与 `sqlx` 同时启用时，Tokio 的弱依赖 feature 映射才追加 SQLx `runtime-tokio`。不启用 SQLx facade 的 `macros`、`migrate`、`json` 或任何 TLS feature；SQLx 0.9.0 的驱动依赖会在内部树中带出 `sqlx-core` 的 `migrate` 实现依赖（不再带出旧版的 `json` core feature），但本 crate 不开放对应 SQLx API。SQLite 使用 `sqlite-bundled`，三种驱动共用 Any 类型；查询入口接受 SQLx 0.9 的 `SqlSafeStr`，静态 SQL 可直接传入，动态 SQL 必须由调用方审计后包装 `AssertSqlSafe`，用户数据应优先使用 `.bind`；调用方应直接依赖匹配的 SQLx 0.9.x 版本以使用 `FromRow`、`QueryBuilder` 和事务 Executor trait | 使用 SQLx Any pool 在运行时选择 PostgreSQL、MySQL/MariaDB 或 SQLite；`SqlxConfig` 只做本地 URL、TLS、连接数、获取超时和结果行数上限校验，`SqlxClient::connect` 才访问网络或 SQLite 文件；查询构造是 SQLx 原生薄包装，执行/单行/可选行/标量/映射行按明确类型分组，`fetch_all` 逐行消费并在第 `max_rows + 1` 行返回限制错误；事务返回原生 `Transaction`，调用方显式使用 `&mut *tx`、commit/rollback。不创建 Tokio runtime、不调用 `block_on`，默认不配置 TLS；Any 默认 driver 注册是进程级一次性前提，要求本 crate 是唯一注册方，不捕获自定义注册冲突 panic |
-| `SqlxUtils` | `src/utils/sqlx_utils.rs` | 仅在 `sqlx + tokio` 下提供 `axutils::SqlxUtils`、`axutils::utils::SqlxUtils`、`axutils::utils::sqlx_utils::SqlxUtils`；静态查询构造与 `SqlxClient` 方法对应 | 内部为 `OnceLock<SqlxClient>`；`init` 成功后不可 reset/replace，失败不占用机会，并发竞争中输掉的 client 会先 close；清理失败不会替换公开的 `AlreadyInitialized` 结果，启用 `tracing` 时只记录脱敏错误类别；调用方自行提供 Tokio runtime，`close_async` 后 initialized 状态仍为 `true` | 单默认 SQLx client 的一次初始化全局转发；构造查询对象不检查初始化，执行入口未初始化返回 `NotInitialized`，关闭后返回 pool closed 语义；不提供 URL/凭据 getter、全局 `is_closed` 或 query builder，不代替多实例 `SqlxClient` 生命周期管理 |
-| `LogUtils` 与 tracing 事件 | `src/utils/log_utils.rs`；跨领域事件共用辅助代码位于 `src/tracing/` | `tracing` feature 只发布库内事件；启用 `logging` feature 后提供 `axutils::{LogUtils, LogConfig, LogLevel, LogFileConfig, LogRotation, LogError}`、对应的 `axutils::utils::*` 重导出和 `axutils::utils::log_utils::*` 子模块；不提供 `axutils::log_utils` 根模块 | `tracing` 只启用 `tracing 0.1.44`；`logging` 额外聚合 `tracing-subscriber 0.3.23`（`fmt/env-filter/registry/std`）和 `tracing-appender 0.2.5`，均关闭默认 feature；EnvFilter 允许带入 `matchers`、`once_cell`、`regex-automata`、`regex-syntax`、`thread_local`，appender 允许带入必需的 `time`、`crossbeam-channel`、`symlink`、`thiserror`，但不映射为本 crate 的 `time` feature，也不引入 Tokio/TLS；默认不引入这些依赖，不创建 Tokio runtime | 发布 HTTP/Redis/SQLx/邮件/配置/JWT/Crypto 的固定、脱敏结构化事件，并提供显式一次性的同步无 ANSI subscriber 初始化、统一默认级别、可配置的 EnvFilter target directive、`LogUtils::trace/debug/info/warn/error` 五个固定 `axutils::log` target 消息方法、标准输出/文件/双输出和 Never/分钟/小时/天轮转；`lettre=off,rustls=off` 等规则只在调用方通过 `with_directives` 显式传入时生效，不是库内固定默认值；库不自动读取 `RUST_LOG`，也不提供运行时重载；无输出和非法过滤器分别返回 `InvalidConfig { field: "output" }` 与 `InvalidConfig { field: "filter" }` 且不回显调用方文本；不记录 URL、Header、body、SQL、bind、Redis key/value/token、邮件地址/正文、配置路径/内容、JWT/AES secret，不负责日志权限、历史文件 retention 或异步日志 worker |
-| `ConfigLoader` | `src/config/{mod,error,format,value,de,source,json,env,yaml,toml,ini}.rs` | 启用 `serde` feature 后提供 `axutils::ConfigLoader`、`axutils::ConfigFormat`、`axutils::ConfigValue`、`axutils::ConfigError`，模块为 `axutils::config`；YAML/TOML/INI 变体和后端分别需要额外启用 `serde-saphyr`/`toml`/`rust-ini` feature；同时启用 `tokio` feature 后，文件异步方法还要求 `serde + tokio`，Tokio 最低版本为 `1.53.1` | `serde` 提供 JSON 与自实现 `.env`（dotenv）解析，并启用 `serde`、`serde_json` 及公共 feature 中的 HTTP query 基础设施 `serde_urlencoded`；`serde-saphyr`（YAML，嵌套深度 1–256、总别名回放事件最多 1,000,000 次、单个 anchor 最多展开 10,000 次）、`toml`（TOML）、`rust-ini`（INI）三个后端 feature 相互独立，仅通过 `dep:<name>` 启用同名依赖，最低版本分别为 `serde-saphyr 1.0.1`（自身要求 Rust 1.88，低于本 crate 当前 `rust-version = 1.95` 的发布兼容性下限）、`toml 1.1.4`、`rust-ini 0.21.3`；模块直接使用 Tokio 的 `fs`、`io-util`、`rt`、`sync`、`time` 子集；公开的 `tokio` feature 完整启用 `fs`、`io-util`、`net`、`rt`、`rt-multi-thread`、`signal`、`sync`、`time`，不包含宏 feature | 从磁盘或内存字符串按扩展名/显式指定读取单个配置文件，提供无类型 `ConfigValue` 与有类型 `serde::Deserialize` 两条路径；文件大小（1 KiB–16 MiB，默认 1 MiB）统一限制，`.env` 插值后累计 key/value 也受同一上限约束，JSON/TOML/YAML/INI 的无类型读取以及 YAML/INI 的有类型读取使用可配置嵌套深度（1–256，默认 64），JSON/TOML 有类型读取依赖后端自身的递归保护；`serde + tokio` 下额外提供 `load_value_async`/`load_async`，异步路径只替换文件读取并复用解析器，不创建 runtime 或调用 `block_on`；错误不回显配置值或原始行内容；不做多文件合并、层叠覆盖、热重载、写回或 `include` 指令；`.env` 插值仅支持 `${VAR}`，变量名遵守 `[A-Za-z_][A-Za-z0-9_]*`，文件内键优先于进程环境变量，未定义变量报错而非空串，与 `dotenv`/`dotenvy` 存在已知差异 |
-| `ConfigUtils` | `src/utils/config_utils.rs` | 启用 `serde` feature 后提供 `axutils::utils::ConfigUtils`、`axutils::utils::config_utils::ConfigUtils` 和 `axutils::ConfigUtils`；同时启用 `tokio` 后提供四个异步文件包装，实际要求 `serde + tokio` | 与 `ConfigLoader` 使用同一组 feature；无状态静态方法，等价于默认 `ConfigLoader` | 配置文件读取的静态便捷入口；需要自定义大小/深度上限或关闭 `.env` 环境回退时通过 `ConfigUtils::loader()` 获取可配置的 `ConfigLoader`；不引入全局单例、缓存或可变全局状态，与 `EmailUtils` 的一次初始化语义不同；异步入口不负责 runtime、CPU 解析调度或全局并发预算 |
-| `CryptoUtils` | `src/utils/crypto_utils.rs`、`src/crypto/{mod,error,text,hex,base64,md5,aes,cipher}.rs` | `CryptoUtils`：`axutils::CryptoUtils`、`axutils::utils::CryptoUtils`、`axutils::crypto_utils::CryptoUtils`、`axutils::utils::crypto_utils::CryptoUtils`；`CryptoError`/`TextEncoding`：`axutils::CryptoError`/`axutils::TextEncoding` 与 `axutils::crypto::CryptoError`/`axutils::crypto::TextEncoding`；`CryptoError::NotInitialized`/`AlreadyInitialized`（`aes`）：仅在 `aes` feature 下出现在上述 `CryptoError` 路径；`Base64Alphabet`/`Base64Options`（`base64`）：`axutils::*` 与 `axutils::crypto::*`；`AesCipher`/`AesKey`/`AesKeyBits`/`AesMode`（`aes`）：`axutils::*` 与 `axutils::crypto::*`；公开模块：`axutils::crypto`、`axutils::crypto_utils`、`axutils::utils::crypto_utils` | 十六进制编解码（`hex_encode`/`hex_encode_upper`/`hex_decode`）与 `TextEncoding::Utf8` 文本编解码**默认可用**，仅依赖标准库，与 `PathUtils`/`FormatUtils::seconds_to_human` 同类；Base64/MD5/AES 分别需要显式启用 `base64`/`md5`/`aes` feature；`md5` feature 实际启用 crates.io 上的 `md-5` crate（别名映射，**不是**同名的旧 `md5` crate）；`aes` feature 聚合 `aes`/`aes-gcm`/`cbc`/`zeroize` 四个内部适配依赖；`AesCipher` 提供可独立销毁的实例级密钥生命周期，`CryptoUtils::aes_init`/`aes_init_from_bytes` 提供一次初始化的进程级全局便捷入口，密钥与模式不可修改且全局密钥常驻进程；`encoding_rs` feature 为 `TextEncoding` 追加 `Gbk`/`Gb18030`/`Big5`/`ShiftJis`/`EucKr`/`Windows1252` 六个 legacy 变体；`aes` 与 `base64` 同时启用后额外提供 `aes_encrypt_base64`/`aes_decrypt_base64` | 把内存中的一段数据安全地编码（十六进制、Base64）、摘要（MD5）或加解密（AES-128/192/256，GCM 认证加密或 CBC+PKCS#7 互操作模式，随机或调用方显式提供的 IV/nonce）；错误（`CryptoError`）不回显明文、密文、密钥、IV 或原始文本内容，仅包含必要的初始化状态、长度、位置偏移和编码名称等非敏感信息；不提供非对称密码学、口令派生（KDF）、密钥存储/轮换/封装策略、流式/文件接口或 AAD；`AesCipher` 只负责实例生命周期，不负责 KMS/HSM 等密钥管理；MD5 不可用于对抗性场景，CBC 无完整性认证；与 `RandomUtils` 无共用代码，`RandomUtils` 不提供密码学安全随机数，AES 的随机 IV/nonce/密钥生成仅使用操作系统随机源 |
-| `JwtUtils` 与 JWT 领域类型 | `src/utils/jwt_utils.rs`、`src/jwt/{mod,algorithm,key,config,header,claims,clock,codec,error}.rs` | 仅在 `jwt` feature 下：公开模块为 `axutils::jwt`；`JwtAlgorithm`、`JwtSigningKey`、`JwtVerificationKey`、`JwtConfig`、`JwtValidation`、`JwtError` 同时从 `axutils::*` 与 `axutils::jwt::*` 导出；`JwtUtils` 从 `axutils::JwtUtils`、`axutils::utils::JwtUtils`、`axutils::utils::jwt_utils::JwtUtils` 导出；不提供 `axutils::jwt_utils` 根级别名 | `jwt` 直接启用可选 `jsonwebtoken`（11.0.0，`rust_crypto` + `use_pem`）、`serde` 和 `serde_json`，不启用项目现有 `serde` feature、配置、邮件或其他能力；默认 feature 为空 | 通过固定算法和拥有型 signing/verification key 提供受限 JWS 签发与验证；`JwtUtils` 只负责一次初始化的进程级全局转发，`JwtConfig` 不提供实例 encode/decode；claims 有 Header/重复键/深度/成员/数组/大小预检，标准 `exp`/`nbf`/`aud`/`iss`/`sub` 规则在签名成功后固定执行；不负责 JWE 加密、JWKS、远程 key、`kid` 路由、多 key 轮换、撤销、黑名单、重放保护、密钥托管或时钟同步；同进程外部依赖启用第二个 jsonwebtoken backend 的 provider 竞争不在本 crate 保证范围内 |
-| `TokioUtils` 与 Tokio 领域类型 | `src/tokio/{mod,config,error,shutdown,tasks}.rs`、`src/utils/tokio_utils.rs` | `TokioConfig`/`TokioRuntimeFlavor`/`TokioError`/`TokioShutdownReason`：`axutils::*` 与 `axutils::tokio::*`；`TokioUtils`：crate 根、`axutils::utils::*`、`axutils::utils::tokio_utils::*`；`TokioTaskGroup`：crate 根与领域模块 | 核心要求 `tokio`；任务组还要求 `tokio-util` 与独立 grace timer `futures-timer`。Tokio 1.53.1，生产启用 fs/io-util/net/rt/rt-multi-thread/signal/sync/time，不由 tokio-only 启用 macros | 显式 runtime 配置/build/run、spawn/timeout/channel/signal 和协作式任务组；普通异步 API 不创建 runtime，blocking closure 不可强停，任务组 Drop 不 abort |
-| `Scheduler`、`SchedulerUtils` 与调度领域类型 | `src/scheduler/{mod,config,cron,error,task}.rs`、`src/utils/scheduler_utils.rs` | `Scheduler`/`SchedulerConfig`/`SchedulerError`/`TaskId`/`TaskSchedule`：`axutils::*` 与 `axutils::scheduler::*`；`SchedulerUtils`：`axutils::SchedulerUtils`、`axutils::utils::SchedulerUtils`、`axutils::utils::scheduler_utils::SchedulerUtils`；不提供 `axutils::scheduler_utils` 根模块 | 仅在 `chrono + chrono_tz + tokio + croner` 四项同时启用时导出；16 种组合中只有完整组合导出 API。四项均为独立 provider feature，`croner` 单独启用只带入 Croner 及其内部 `chrono` 默认 feature（含 `clock`）、`derive_builder`、`strum`，不等于启用本 crate 的 `chrono` feature。Tokio 生产 feature 沿用 fs/io-util/net/rt/rt-multi-thread/signal/sync/time，不启用 macros | 提供有界的单实例一次、固定间隔和六段 POSIX/Vixie cron 调度，以及一次初始化的进程级 facade；固定间隔使用 monotonic timer，cron 使用显式 IANA 时区并逐次计算下一触发时间，同一任务 callback 不重叠。调度器不创建 runtime、不调用 `block_on`、不接管 signal，不负责持久化、分布式协调、业务重试、callback 超时或强制停止阻塞/不让出控制权的任务；取消和关闭是非阻塞取消请求，全局入口关闭后不能 reset/reinitialize |
-| `AxumApp`、`AxumServer` 与 `AxumUtils` | `src/axum/`、`src/utils/axum_utils.rs` | 领域类型从 `axutils::*` 与 `axutils::axum::*`；`AxumUtils` 另从 `axutils::utils::*`、`axutils::utils::axum_utils::*` | 基础要求 `axum + tokio`；provider 分别要求 `tower`、`tower-http`、`tower_governor`，trace 另需 `tracing`。`tower_governor/axum` 会启用 Axum default（form/json/query/original-uri/tower-log/tracing）及 Tokio macros；provider-only 不拉 Axum | 通过泛型 `AxumApp::<S>::create_router`、`AxumUtils::create_router<S>` 创建保留 missing-state 类型的原生空 Router，通过 `AxumUtils::create_app` 创建空应用构建器；提供 HTTP/1 Router/state、延迟 layer、单次共享状态机和协作式 drain；工厂只组装内存对象且不读取全局 server；不负责 TLS/HTTP2/强制 drain、鉴权、业务错误或 trusted-proxy CIDR；unchecked forwarded 模式需可信入口代理；serve 通过 futures-timer 每 60 秒清理 governor stale key（禁用 Tokio time driver 仍工作），关闭时取消任务 |
-| 全局内存分配器 | `src/allocator.rs` | 无公共模块、类型、函数、trait、常量、静态项或宏；`src/allocator.rs` 为 crate 私有实现，不存在 `axutils::allocator` 或 `AllocatorUtils` | `mimalloc` 与 `rpmalloc` 是互斥 feature，分别通过同名 optional dependency 注册 `mimalloc::MiMalloc` 或 `rpmalloc::RpMalloc`；不启用时保持默认分配器；native 构建依赖目标平台 C compiler/linker/SDK，Windows 的 rpmalloc 还需要 `Advapi32` import library，支持目标以实际验证为准 | 编译期为依赖该 library 的最终 Rust binary 选择唯一进程级 Rust global allocator；不提供运行时切换、allocator handle、统计或性能保证；已有 `#[global_allocator]`、动态库/静态库和 native/FFI 内存所有权由调用方按依赖边界单独处理 |
+`axutils` 保持单 crate，依赖方向固定为：
 
-HTTP 完成缓存还会拒绝请求侧的认证、Cookie、Range、条件 Header、`Pragma` 及
-`Cache-Control: no-store/no-cache`；响应侧的 `Cache-Control: no-store/no-cache`、
-`Vary: *` 及 `Set-Cookie` 也会阻止缓存。具体执行语义和测试边界见
-[`docs/examples/http.md`](examples/http.md)。
+```text
+axutils::utils façade -> 领域公开 API -> 领域私有实现 -> 第三方 crate
+                                      -> 私有 telemetry
+```
 
-HTTP 错误枚举采用 `#[non_exhaustive]`，调用方匹配 `HttpError` 或
-`HttpTransportErrorKind` 时必须保留 wildcard；其他已标记的领域错误枚举遵循同一可扩展错误
-策略，协议/配置值枚举则按文档明确的闭合集合处理。
+- `src/lib.rs` 只声明公开领域模块，不平铺重导出类型。
+- Client、配置、错误和模型的规范路径是 `axutils::<domain>::Type`。
+- 所有 `*Utils` 及其支持类型的规范路径是 `axutils::utils::Type`。
+- `utils` 叶模块和领域实现模块不是公共 API；领域代码不得反向依赖 `utils`。
+- 状态型 façade 只管理初始化、状态和实例访问，业务方法由返回的实例承担。
+- 默认 feature 为空；无第三方依赖的基础能力默认可用。
 
-### `ConvertUtils` 公共导出与 feature 明细
+推荐导入：
 
-`ConvertUtils` 本体以及 `axutils::convert`、`axutils::utils::convert_utils` 模块始终公开。工具类提供
-四条兼容导出路径；`convert` 领域的 buffer、trait 和枚举只提供 crate 根与领域模块路径，避免把
-领域实现类型混入 `utils` 工具类命名空间。以下路径都经过源码重导出和 feature fixture 验证：
+```rust
+use axutils::{
+    config::{ConfigFormat, ConfigLoader, ConfigValue},
+    redis::{RedisClient, RedisConfig},
+    utils::{ConfigUtils, RedisUtils},
+};
+# let _ = (
+#     ConfigFormat::Json,
+#     ConfigLoader::new(),
+#     ConfigValue::Null,
+#     RedisClient::new,
+#     RedisConfig::single("redis://127.0.0.1:6379/0"),
+#     ConfigUtils::loader(),
+#     RedisUtils::is_initialized(),
+# );
+```
 
-| 公共项 | crate 根路径 | 领域模块路径 | `utils` 重导出路径 | `utils` 子模块路径 | feature |
-| --- | --- | --- | --- | --- | --- |
-| `ConvertUtils` | `axutils::ConvertUtils` | `axutils::convert::ConvertUtils` | `axutils::utils::ConvertUtils` | `axutils::utils::convert_utils::ConvertUtils` | 始终 |
-| `IntegerBuffer` | `axutils::IntegerBuffer` | `axutils::convert::IntegerBuffer` | —（不从 `utils` 导出） | —（不从 `utils` 导出） | `itoa` |
-| `IntegerValue` | `axutils::IntegerValue` | `axutils::convert::IntegerValue` | —（不从 `utils` 导出） | —（不从 `utils` 导出） | `itoa` |
-| `FloatBuffer` | `axutils::FloatBuffer` | `axutils::convert::FloatBuffer` | —（不从 `utils` 导出） | —（不从 `utils` 导出） | `ryu` 或 `zmij` |
-| `FloatFormat` | `axutils::FloatFormat` | `axutils::convert::FloatFormat` | —（不从 `utils` 导出） | —（不从 `utils` 导出） | `ryu` 或 `zmij` |
-| `FloatFormat::Ryu` | `axutils::FloatFormat::Ryu` | `axutils::convert::FloatFormat::Ryu` | —（不从 `utils` 导出） | —（不从 `utils` 导出） | `ryu` |
-| `FloatFormat::Zmij` | `axutils::FloatFormat::Zmij` | `axutils::convert::FloatFormat::Zmij` | —（不从 `utils` 导出） | —（不从 `utils` 导出） | `zmij` |
-| `FloatValue` | `axutils::FloatValue` | `axutils::convert::FloatValue` | —（不从 `utils` 导出） | —（不从 `utils` 导出） | `ryu` 或 `zmij` |
-| `UuidBuffer` | `axutils::UuidBuffer` | `axutils::convert::UuidBuffer` | —（不从 `utils` 导出） | —（不从 `utils` 导出） | `uuid` |
+不要创建 `prelude`，也不要重新引入 crate 根类型别名或公开 `utils::*_utils` 叶模块。
 
-`IntegerValue` 只为 12 种内建整数实现，`FloatValue` 只为 `f32`/`f64` 实现；两者的 sealed
-supertrait 是私有实现细节，不形成额外公共路径。`uuid::Uuid` 和 `uuid::Error` 是
-`string_to_uuid`/UUID 格式化方法的直接依赖类型，crate 不重导出它们，也不创建
-`axutils::convert_utils` 根模块。完整方法签名、示例、借用生命周期和错误语义见
-[`docs/examples/convert.md`](examples/convert.md)。
+## 默认能力
 
-## 新增工具类时的定位要求
+以下入口不需要第三方依赖：
 
-新增工具类或公共模块时，应在同一变更中补充以下信息：
+| 领域 | 公共入口 | 职责 |
+| --- | --- | --- |
+| `fs` | `axutils::fs::*`、`axutils::utils::FsUtils` | 同步文件与目录操作、受限读取、同步流式传输 |
+| `time` | `axutils::time::*`、`axutils::utils::TimeUtils` | Unix 时间戳、格式模板和固定偏移支持类型 |
+| `crypto` | `axutils::crypto::{CryptoError, TextEncoding}`、`axutils::utils::CryptoUtils` | Hex 与 UTF-8 文本编解码 |
+| `convert` | `axutils::convert`、`axutils::utils::ConvertUtils` | feature 控制的数值/UUID 转换 façade |
+| `utils` | `FormatUtils`、`PathUtils` | 持续时间/脱敏格式化与词法路径操作 |
 
-1. 源文件路径和 crate 根模块的公共导出路径；
-2. 是否默认可用、对应 feature 以及第三方依赖；
-3. 单一且清晰的职责边界、主要使用场景和明确不负责的范围；
-4. 与现有工具类的关系，尤其是可能重叠的 API 和复用方式。
+对应文档：
 
-如果工具类的职责、公共导出、feature、依赖或适用范围发生变化，也必须同步更新本清单。
+- [文件系统](examples/fs.md)
+- [时间](examples/time.md)
+- [加密与编码](examples/crypto.md)
+- [转换](examples/convert.md)
+- [格式化](examples/format.md)
+- [路径](examples/path.md)
 
-## 使用示例文档
+## 能力 feature
 
-每个公共能力单元在 `docs/examples/` 维护详细使用文档（命名取能力前缀、不带 `Utils`
-后缀），作为 README 简单示例的补充：
+### 基础与纯工具
 
-| 能力单元 | 使用文档 |
+| Feature | 开放能力 | 主要依赖 |
+| --- | --- | --- |
+| `itoa` | 整数格式化与 `IntegerBuffer` | `itoa` |
+| `ryu` | `FloatFormat::Ryu` | `ryu` |
+| `zmij` | `FloatFormat::Zmij` | `zmij` |
+| `uuid` | UUID 解析、格式化与 `UuidBuffer` | `uuid` |
+| `rand` | `RandomUtils`、`LetterCase`、`RandomRangeError` | `rand` |
+| `regex` | 邮箱和中国大陆手机号校验 | `regex` |
+| `phone-validation` | 国际手机号校验，同时包含 `regex` | `phonenumber` |
+| `template-strfmt` | Strfmt 模板 | `serde`、`serde_json`、`strfmt` |
+| `template-minijinja` | MiniJinja 模板 | `serde`、`minijinja` |
+| `chrono` / `time` / `jiff` | 对应后端且名称稳定的时间格式化 API | 同名后端 |
+| `base64` / `md5` / `aes` | 对应编码、摘要或 AES 实例/全局 cipher | 对应加密后端 |
+| `encoding_rs` | `TextEncoding` 的 legacy 编码变体 | `encoding_rs` |
+| `jwt` | JWS 配置、Key、公开 `JwtCodec` 与全局生命周期入口 | `jsonwebtoken`、Serde |
+| `tracing` | 私有 telemetry 发出的脱敏结构化事件 | `tracing` |
+| `logging` | 日志 subscriber 生命周期入口，同时包含 `tracing` | `tracing-subscriber`、`tracing-appender` |
+
+详见 [随机数](examples/random.md)、[正则校验](examples/reg.md)、[JWT](examples/jwt.md) 和
+[日志](examples/log.md)。
+
+### 文件系统与配置
+
+| Feature | 契约 |
 | --- | --- |
-| `PathUtils` | `docs/examples/path.md` |
-| `FsUtils` 与 `FsError` | `docs/examples/fs.md` |
-| `TimeUtils` 与时间类型 | `docs/examples/time.md` |
-| `FormatUtils` 与 `TemplateEngine` | `docs/examples/format.md` |
-| `ConvertUtils` 与整数/浮点/UUID 转换类型 | `docs/examples/convert.md` |
-| `RegUtils` | `docs/examples/reg.md` |
-| `RandomUtils` 与相关类型 | `docs/examples/random.md` |
-| `EmailClient`、email 配置/消息/错误类型 | `docs/examples/email.md` |
-| `EmailUtils`（`axutils::EmailUtils`、`axutils::utils::EmailUtils`、`axutils::utils::email_utils::EmailUtils`） | `docs/examples/email.md` |
-| `HttpClient` 与 HTTP 领域类型（`HttpConfig`、`HttpHeaders`、`HttpRequest`、`HttpRequestOptions`、`HttpResponse`、`HttpError`、Serde JSON/query/字节快捷方法、重试/去重策略） | `docs/examples/http.md` |
-| `HttpUtils`（`axutils::HttpUtils`、`axutils::utils::HttpUtils`、`axutils::utils::http_utils::HttpUtils`） | `docs/examples/http.md` |
-| `RedisClient` 与 Redis 领域类型（`RedisConfig`、`RedisError`、`RedisTransportErrorKind`、`RedisLockGuard`、`RedisAsyncLockGuard`、`RedisTransaction`） | `docs/examples/redis.md` |
-| `RedisUtils`（`axutils::RedisUtils`、`axutils::utils::RedisUtils`、`axutils::utils::redis_utils::RedisUtils`） | `docs/examples/redis.md` |
-| `SqlxClient` 与 SQLx 领域类型（`SqlxConfig`、`SqlxError`、`SqlxTransportErrorKind`、`SqlxRow`、`SqlxQueryResult`、`SqlxTransaction`） | `docs/examples/sqlx.md` |
-| `SqlxUtils`（`axutils::SqlxUtils`、`axutils::utils::SqlxUtils`、`axutils::utils::sqlx_utils::SqlxUtils`） | `docs/examples/sqlx.md` |
-| `LogUtils`、日志配置类型与库内 tracing 事件 | `docs/examples/log.md` |
-| `ConfigLoader`、配置格式/值/错误类型 | `docs/examples/config.md` |
-| `ConfigUtils`（`axutils::ConfigUtils`、`axutils::utils::ConfigUtils`、`axutils::utils::config_utils::ConfigUtils`） | `docs/examples/config.md` |
-| `CryptoUtils` 与 `crypto` 类型（`CryptoError`、`TextEncoding`、`Base64Alphabet`、`Base64Options`、`AesCipher`、`AesKey`、`AesKeyBits`、`AesMode`） | `docs/examples/crypto.md` |
-| `JwtUtils` 与 JWT 领域类型（`JwtAlgorithm`、`JwtSigningKey`、`JwtVerificationKey`、`JwtConfig`、`JwtValidation`、`JwtError`） | `docs/examples/jwt.md` |
-| Tokio runtime、任务组与信号 | `docs/examples/tokio.md` |
-| Scheduler 一次、固定间隔、IANA 时区 cron 与全局入口 | `docs/examples/scheduler.md` |
-| Axum HTTP/1 服务与 middleware | `docs/examples/axum.md` |
-| 全局内存分配器（`mimalloc`/`rpmalloc` feature） | `docs/examples/allocator.md` |
+| `fs-async` | 异步文件读写与流式传输 |
+| `fs-temp` | 同步临时文件/目录 |
+| `fs-temp-async` | 异步临时文件/目录；不开放完整异步 FS API |
+| `config` | JSON、`.env`、typed/untyped 配置 |
+| `config-yaml` / `config-toml` / `config-ini` | 包含 `config` 并增加单一格式后端 |
+| `config-async` | 包含 `config` 并增加异步文件读取 |
 
-补充边界：JSON 无类型解析关闭 `serde_json` 的较小默认递归限制，严格使用
-`ConfigLoader::with_max_depth` 的 1–256 预算；JSON 有类型解析在后端反序列化前还会完整扫描一次
-重复键，因此文件输入在大小上限内仍有双遍解析成本，内存字符串由调用方自行限长；JSON/TOML
-有类型解析仍依赖各自后端的递归保护。
-Redis 的 r2d2 checkout 只检查本地连接 open 状态，不发送 PING；MessagePack 反序列化沿用
-`rmp-serde` 约 1024 层的默认递归预算。async Cluster 首次连接在共享 slot 锁内建立，竞争请求
-会串行等待连接 timeout；async transaction 没有独立 liveness probe，完整服务端错误保留连接，
-未知失效连接在后续事务的传输错误中被发现并丢弃。
+单独启用 `tokio` 不会开放 FS 或 Config 的异步 API。详见 [配置](examples/config.md)。
 
-新增、删除或重命名能力单元时，必须同步更新本表与对应的 `docs/examples/` 使用文档；使用文档随
-crate 发布，本定位清单不随包发布。
+### 外部服务
+
+| Feature | 契约 |
+| --- | --- |
+| `email` | 同步 SMTP client |
+| `email-async` | 包含 `email` 并增加异步发送 |
+| `http` | 同步 `ureq + url`；依赖树不包含 `reqwest` |
+| `http-async` | 包含 `http`，增加 `reqwest` 与异步 transport |
+| `http-json` | 包含 `http`，增加同步 JSON/query API；异步 JSON 需再启用 `http-async` |
+| `redis` | 单机同步、r2d2、MessagePack、事务与租约锁 |
+| `redis-cluster` | 包含 `redis`，增加同步 Cluster |
+| `redis-async` | 包含 `redis`，增加异步单机连接管理 |
+| `redis-cluster-async` | 包含 `redis-cluster + redis-async`，增加异步 Cluster |
+| `sqlx-postgres` / `sqlx-mysql` / `sqlx-sqlite` | SQLx Any、Tokio runtime 与一个 driver |
+| `sqlx` | 聚合三个 SQLx driver |
+
+详见 [邮件](examples/email.md)、[HTTP](examples/http.md)、[Redis](examples/redis.md) 和
+[SQLx](examples/sqlx.md)。
+
+### Runtime 与服务
+
+| Feature | 契约 |
+| --- | --- |
+| `tokio` | 只开放 Tokio runtime、任务、channel、timeout 与 shutdown 工具 |
+| `task-group` | 包含 `tokio`，增加基于 `tokio-util` 的任务组 |
+| `scheduler` | 一次启用 Tokio、Chrono、IANA 时区和 Croner 的完整调度能力 |
+| `axum` | 基础 Axum HTTP/1 server 与最小 runtime |
+| `axum-tower` | limit/load-shed 等 Tower 能力 |
+| `axum-tower-http` | CORS、request-id、timeout、body-limit、panic 等能力 |
+| `axum-governor` | Governor 限流能力 |
+
+详见 [Tokio](examples/tokio.md)、[调度器](examples/scheduler.md) 和 [Axum](examples/axum.md)。
+
+## 公开领域模块
+
+| 模块 | 主要领域类型 | `utils` 入口 | 可用条件 |
+| --- | --- | --- | --- |
+| `convert` | `IntegerBuffer`、`FloatBuffer`、`FloatFormat`、`UuidBuffer` | `ConvertUtils` | 模块默认；方法按转换 feature |
+| `crypto` | `CryptoError`、`TextEncoding`、`Base64Options`、`AesKey`、`AesMode`、`AesCipher` | `CryptoUtils` | 基线 + 对应后端 feature |
+| `fs` | `FsError`、传输类型、临时资源类型 | `FsUtils` | 同步基线；异步/临时按 feature |
+| `time` | `TimeError`、`TimeZoneOffset`、模板支持类型 | `TimeUtils` | 时间戳基线；后端按 feature |
+| `config` | `ConfigLoader`、`ConfigFormat`、`ConfigValue`、`ConfigError` | `ConfigUtils` | `config` |
+| `email` | `EmailClient`、配置、消息、错误 | `EmailUtils` | `email` |
+| `http` | `HttpClient`、请求/响应、配置、策略、错误 | `HttpUtils` | `http` |
+| `jwt` | `JwtCodec`、Key、配置、验证、错误 | `JwtUtils` | `jwt` |
+| `redis` | `RedisClient`、配置、事务、锁、错误 | `RedisUtils` | `redis` |
+| `sqlx` | `SqlxClient`、配置、row/result/transaction 别名、错误 | `SqlxUtils` | 任一 SQLx driver |
+| `tokio` | `TokioConfig`、shutdown 类型；`TokioTaskGroup` 需 `task-group` | `TokioUtils` | `tokio`；任务组按 `task-group` |
+| `scheduler` | `Scheduler`、配置、Schedule、TaskId、错误 | `SchedulerUtils` | `scheduler` |
+| `axum` | `AxumApp`、Server/Builder、配置与关闭类型；中间件类型按扩展 feature | `AxumUtils` | 基础 `axum`；扩展按 `axum-*` |
+| `logging` | `LogConfig`、level、file/rotation、错误 | `LogUtils` | `logging` |
+
+## 状态型 façade
+
+| Façade | 保留入口 | 实例业务入口 |
+| --- | --- | --- |
+| `EmailUtils` | `init`、`is_initialized`、`client` | `EmailClient` |
+| `HttpUtils` | `init`、`is_initialized`、`client` | `HttpClient` |
+| `JwtUtils` | `init`、`is_initialized`、`codec` | `JwtCodec` |
+| `RedisUtils` | `init`、`init_async`、`is_initialized`、`client` | `RedisClient` |
+| `SqlxUtils` | `init_async`、`is_initialized`、`client` | `SqlxClient` |
+| `SchedulerUtils` | `init`、`is_initialized`、`scheduler` | `Scheduler` |
+| `AxumUtils` | `init`、`is_initialized`、`server` | `AxumServer` |
+| `CryptoUtils`（AES） | `aes_init`、`aes_init_from_bytes`、`aes_is_initialized`、`cipher` | `AesCipher` |
+| `LogUtils` | `init`、`is_initialized` | 标准 `tracing` 宏 |
+
+这些全局对象成功初始化后不可 reset 或 replace。初始化失败不得占位；取得实例后，其关闭或失败语义
+由领域实例决定。需要多配置、测试隔离或可控销毁时，应直接创建实例。
+
+`ConfigUtils`、`FsUtils`、`ConvertUtils`、`FormatUtils`、`PathUtils`、`RandomUtils`、
+`RegUtils`、`TimeUtils` 是无状态工具，不受上述生命周期收缩限制。
+
+## 私有实现定位
+
+- `src/<domain>/global.rs`：领域状态 façade 的私有实现。
+- `src/<domain>/**`：client、config、transport、codec、policy、validation 等领域实现。
+- `src/telemetry/**`：只在 `tracing` 下编译的私有事件适配；不形成 `axutils::tracing` 模块。
+- `src/utils/*_utils.rs`：私有聚合叶；只由 `src/utils/mod.rs` 重导出。
+
+跨模块调用应先导入有业务含义的模块限定符，例如：
+
+```rust,ignore
+use crate::telemetry::sqlx as sqlx_trace;
+use crate::fs::transfer;
+
+sqlx_trace::record_client_init(&result, started);
+transfer::copy_file_with(source, destination, options, processor);
+```
+
+普通表达式与签名路径最多保留两个 segment；`execute`、`parse` 等通用函数不得裸导入。
+
+## 新增或调整能力
+
+新增能力时同时确认：
+
+1. 领域归属和单向依赖是否明确；
+2. canonical path 是否保留来源，且没有新增根级或公开叶模块别名；
+3. 用户 feature 单独启用后是否存在可用 API，并只编译必要依赖；
+4. sync/async、provider 和附加能力是否按语义 feature 分层；
+5. 错误、资源上限、敏感数据和全局生命周期是否有正向及负向测试；
+6. Rustdoc、本清单、对应领域文档和 CHANGELOG 是否同步。
+
+实现模块可以继续拆分，但不要按行数机械切割；普通生产文件超过约 600 行时评估职责，超过 800 行
+必须有清晰且不可再拆的理由。

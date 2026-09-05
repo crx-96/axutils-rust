@@ -10,7 +10,7 @@ use std::fmt;
 /// # Examples
 ///
 /// ```
-/// use axutils::TimeError;
+/// use axutils::time::TimeError;
 ///
 /// assert!(matches!(TimeError::BeforeUnixEpoch, TimeError::BeforeUnixEpoch));
 /// ```

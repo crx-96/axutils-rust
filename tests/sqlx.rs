@@ -1,8 +1,11 @@
-#![cfg(all(feature = "sqlx", feature = "tokio"))]
+#![cfg(any(feature = "sqlx", feature = "sqlx-sqlite"))]
 
 use std::time::Duration;
 
-use axutils::{SqlxClient, SqlxConfig, SqlxError, SqlxTransportErrorKind, SqlxUtils};
+use axutils::sqlx::{SqlxClient, SqlxConfig, SqlxError, SqlxTransportErrorKind};
+use axutils::utils::SqlxUtils;
+use futures_util::future;
+use tokio::{task as tokio_task, time as tokio_time};
 
 #[test]
 fn config_is_local_bounded_and_redacted() {
@@ -275,8 +278,8 @@ async fn pool_acquire_timeout_and_cancellation_release_connections() {
         let client = client.clone();
         async move { client.fetch_all_async(client.query("SELECT 1")).await }
     });
-    tokio::task::yield_now().await;
-    tokio::time::sleep(Duration::from_millis(10)).await;
+    tokio_task::yield_now().await;
+    tokio_time::sleep(Duration::from_millis(10)).await;
     task.abort();
     match task.await {
         Err(error) => assert!(error.is_cancelled()),
@@ -296,27 +299,28 @@ async fn pool_acquire_timeout_and_cancellation_release_connections() {
 }
 
 #[tokio::test]
-async fn global_utils_has_one_lifecycle_and_forwards() {
+async fn global_utils_has_one_lifecycle_and_exposes_the_client() {
     assert!(!SqlxUtils::is_initialized());
     assert!(matches!(
-        SqlxUtils::execute_async(SqlxUtils::query("SELECT 1")).await,
+        SqlxUtils::client(),
         Err(SqlxError::NotInitialized)
     ));
 
-    let failed =
-        SqlxUtils::init(SqlxConfig::new("sqlite://?vfs=axutils_definitely_missing_vfs").unwrap())
-            .await;
+    let failed = SqlxUtils::init_async(
+        SqlxConfig::new("sqlite://?vfs=axutils_definitely_missing_vfs").unwrap(),
+    )
+    .await;
     assert!(failed.is_err());
     assert!(!SqlxUtils::is_initialized());
 
     let handles = (0..8)
         .map(|_| {
             tokio::spawn(async {
-                SqlxUtils::init(SqlxConfig::new("sqlite::memory:").unwrap()).await
+                SqlxUtils::init_async(SqlxConfig::new("sqlite::memory:").unwrap()).await
             })
         })
         .collect::<Vec<_>>();
-    let results = futures_util::future::join_all(handles)
+    let results = future::join_all(handles)
         .await
         .into_iter()
         .map(|result| result.expect("initialization task should not panic"))
@@ -331,20 +335,22 @@ async fn global_utils_has_one_lifecycle_and_forwards() {
     );
     assert!(SqlxUtils::is_initialized());
     assert!(matches!(
-        SqlxUtils::init(SqlxConfig::new("sqlite::memory:").unwrap()).await,
+        SqlxUtils::init_async(SqlxConfig::new("sqlite::memory:").unwrap()).await,
         Err(SqlxError::AlreadyInitialized)
     ));
+    let client = SqlxUtils::client().unwrap();
     assert_eq!(
-        SqlxUtils::fetch_scalar_async(SqlxUtils::query_scalar::<i64>("SELECT 1"))
+        client
+            .fetch_scalar_async(client.query_scalar::<i64>("SELECT 1"))
             .await
             .unwrap(),
         1
     );
 
-    SqlxUtils::close_async().await.unwrap();
+    client.close_async().await.unwrap();
     assert!(SqlxUtils::is_initialized());
     assert!(matches!(
-        SqlxUtils::execute_async(SqlxUtils::query("SELECT 1")).await,
+        client.execute_async(client.query("SELECT 1")).await,
         Err(SqlxError::PoolClosed)
     ));
 }

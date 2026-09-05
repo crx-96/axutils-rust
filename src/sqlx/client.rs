@@ -1,8 +1,16 @@
 use std::fmt;
 
 use futures_util::StreamExt;
+use sqlx::{
+    any::{AnyArguments, AnyPoolOptions, AnyQueryResult},
+    query::{Query, QueryAs, QueryScalar},
+    Any, AnyPool, FromRow, SqlSafeStr,
+};
+use tokio::runtime::Handle;
 
-use super::{SqlxConfig, SqlxError, SqlxRow, SqlxTransaction};
+use super::{driver, SqlxConfig, SqlxError, SqlxRow, SqlxTransaction};
+#[cfg(feature = "tracing")]
+use crate::telemetry::sqlx as sqlx_trace;
 
 /// 可克隆的 SQLx Any 连接池客户端。
 ///
@@ -11,7 +19,7 @@ use super::{SqlxConfig, SqlxError, SqlxRow, SqlxTransaction};
 /// 客户端 clone 共享 SQLx pool 的引用计数，`close_async` 会关闭共享 pool，且不会重新打开它。
 #[derive(Clone)]
 pub struct SqlxClient {
-    pub(crate) pool: sqlx::AnyPool,
+    pub(crate) pool: AnyPool,
     pub(crate) max_rows: usize,
     #[cfg(feature = "tracing")]
     driver: &'static str,
@@ -28,9 +36,9 @@ impl SqlxClient {
     /// # Examples
     ///
     /// ```rust,no_run
-    /// # #[cfg(all(feature = "sqlx", feature = "tokio"))]
-    /// # async fn example() -> Result<(), axutils::SqlxError> {
-    /// use axutils::{SqlxClient, SqlxConfig};
+    /// use axutils::sqlx::{SqlxClient, SqlxConfig, SqlxError};
+    /// # #[cfg(any(feature = "sqlx", feature = "sqlx-postgres", feature = "sqlx-mysql", feature = "sqlx-sqlite"))]
+    /// # async fn example() -> Result<(), SqlxError> {
     /// let client = SqlxClient::connect(SqlxConfig::new("sqlite::memory:")?).await?;
     /// assert!(!client.is_closed());
     /// client.close_async().await?;
@@ -41,7 +49,7 @@ impl SqlxClient {
         #[cfg(feature = "tracing")]
         let started = std::time::Instant::now();
         #[cfg(feature = "tracing")]
-        let metadata = crate::tracing::sqlx::ConnectMetadata {
+        let metadata = sqlx_trace::ConnectMetadata {
             driver: config.driver_name(),
             sqlite_memory: config.sqlite_memory,
             max_connections: config.max_connections,
@@ -51,16 +59,16 @@ impl SqlxClient {
         };
         let result = Self::connect_inner(config).await;
         #[cfg(feature = "tracing")]
-        crate::tracing::sqlx::record_connect(metadata, &result, started);
+        sqlx_trace::record_connect(metadata, &result, started);
         result
     }
 
     async fn connect_inner(config: SqlxConfig) -> Result<Self, SqlxError> {
         ensure_runtime()?;
         config.validate()?;
-        super::driver::install_default_drivers();
+        driver::install_default_drivers();
 
-        let pool = sqlx::any::AnyPoolOptions::new()
+        let pool = AnyPoolOptions::new()
             .max_connections(config.max_connections)
             .min_connections(config.min_connections)
             .acquire_timeout(config.acquire_timeout)
@@ -85,19 +93,16 @@ impl SqlxClient {
     /// # Examples
     ///
     /// ```rust,no_run
-    /// # #[cfg(all(feature = "sqlx", feature = "tokio"))]
-    /// # async fn example() -> Result<(), axutils::SqlxError> {
-    /// use axutils::{SqlxClient, SqlxConfig};
+    /// use axutils::sqlx::{SqlxClient, SqlxConfig, SqlxError};
+    /// # #[cfg(any(feature = "sqlx", feature = "sqlx-postgres", feature = "sqlx-mysql", feature = "sqlx-sqlite"))]
+    /// # async fn example() -> Result<(), SqlxError> {
     /// let client = SqlxClient::connect(SqlxConfig::new("sqlite::memory:")?).await?;
     /// let _query = client.query("SELECT 1");
     /// # Ok(())
     /// # }
     /// ```
-    pub fn query<'q>(
-        &self,
-        sql: impl sqlx::SqlSafeStr,
-    ) -> sqlx::query::Query<'q, sqlx::Any, sqlx::any::AnyArguments> {
-        sqlx::query::<sqlx::Any>(sql)
+    pub fn query<'q>(&self, sql: impl SqlSafeStr) -> Query<'q, Any, AnyArguments> {
+        sqlx::query::<Any>(sql)
     }
 
     /// 创建固定为 SQLx `Any` 后端、映射到 `T` 的查询对象。
@@ -109,20 +114,17 @@ impl SqlxClient {
     /// # Examples
     ///
     /// ```rust,no_run
-    /// # #[cfg(all(feature = "sqlx", feature = "tokio"))]
-    /// # async fn example() -> Result<(), axutils::SqlxError> {
-    /// use axutils::{SqlxClient, SqlxConfig};
+    /// use axutils::sqlx::{SqlxClient, SqlxConfig, SqlxError};
+    /// # #[cfg(any(feature = "sqlx", feature = "sqlx-postgres", feature = "sqlx-mysql", feature = "sqlx-sqlite"))]
+    /// # async fn example() -> Result<(), SqlxError> {
     /// let client = SqlxClient::connect(SqlxConfig::new("sqlite::memory:")?).await?;
     /// let _query = client.query_as::<(i64,)>("SELECT 1");
     /// # Ok(())
     /// # }
     /// ```
-    pub fn query_as<'q, T>(
-        &self,
-        sql: impl sqlx::SqlSafeStr,
-    ) -> sqlx::query::QueryAs<'q, sqlx::Any, T, sqlx::any::AnyArguments>
+    pub fn query_as<'q, T>(&self, sql: impl SqlSafeStr) -> QueryAs<'q, Any, T, AnyArguments>
     where
-        T: for<'r> sqlx::FromRow<'r, SqlxRow>,
+        T: for<'r> FromRow<'r, SqlxRow>,
     {
         sqlx::query_as::<sqlx::Any, T>(sql)
     }
@@ -136,20 +138,17 @@ impl SqlxClient {
     /// # Examples
     ///
     /// ```rust,no_run
-    /// # #[cfg(all(feature = "sqlx", feature = "tokio"))]
-    /// # async fn example() -> Result<(), axutils::SqlxError> {
-    /// use axutils::{SqlxClient, SqlxConfig};
+    /// use axutils::sqlx::{SqlxClient, SqlxConfig, SqlxError};
+    /// # #[cfg(any(feature = "sqlx", feature = "sqlx-postgres", feature = "sqlx-mysql", feature = "sqlx-sqlite"))]
+    /// # async fn example() -> Result<(), SqlxError> {
     /// let client = SqlxClient::connect(SqlxConfig::new("sqlite::memory:")?).await?;
     /// let _query = client.query_scalar::<i64>("SELECT 1");
     /// # Ok(())
     /// # }
     /// ```
-    pub fn query_scalar<'q, T>(
-        &self,
-        sql: impl sqlx::SqlSafeStr,
-    ) -> sqlx::query::QueryScalar<'q, sqlx::Any, T, sqlx::any::AnyArguments>
+    pub fn query_scalar<'q, T>(&self, sql: impl SqlSafeStr) -> QueryScalar<'q, Any, T, AnyArguments>
     where
-        (T,): for<'r> sqlx::FromRow<'r, SqlxRow>,
+        (T,): for<'r> FromRow<'r, SqlxRow>,
     {
         sqlx::query_scalar::<sqlx::Any, T>(sql)
     }
@@ -162,16 +161,17 @@ impl SqlxClient {
     /// # Examples
     ///
     /// ```rust,no_run
-    /// # #[cfg(all(feature = "sqlx", feature = "tokio"))]
-    /// # async fn example(client: &axutils::SqlxClient) -> Result<(), axutils::SqlxError> {
+    /// use axutils::sqlx::{SqlxClient, SqlxError};
+    /// # #[cfg(any(feature = "sqlx", feature = "sqlx-postgres", feature = "sqlx-mysql", feature = "sqlx-sqlite"))]
+    /// # async fn example(client: &SqlxClient) -> Result<(), SqlxError> {
     /// client.execute_async(client.query("CREATE TABLE items (id INTEGER)")).await?;
     /// # Ok(())
     /// # }
     /// ```
     pub async fn execute_async<'q>(
         &self,
-        query: sqlx::query::Query<'q, sqlx::Any, sqlx::any::AnyArguments>,
-    ) -> Result<sqlx::any::AnyQueryResult, SqlxError> {
+        query: Query<'q, Any, AnyArguments>,
+    ) -> Result<AnyQueryResult, SqlxError> {
         #[cfg(feature = "tracing")]
         let started = std::time::Instant::now();
         let result = async {
@@ -183,7 +183,7 @@ impl SqlxClient {
         }
         .await;
         #[cfg(feature = "tracing")]
-        crate::tracing::sqlx::record_event("execute", self.driver, 0, 0, &result, started);
+        sqlx_trace::record_event("execute", self.driver, 0, 0, &result, started);
         result
     }
 
@@ -192,8 +192,9 @@ impl SqlxClient {
     /// # Examples
     ///
     /// ```rust,no_run
-    /// # #[cfg(all(feature = "sqlx", feature = "tokio"))]
-    /// # async fn example(client: &axutils::SqlxClient) -> Result<(), axutils::SqlxError> {
+    /// use axutils::sqlx::{SqlxClient, SqlxError};
+    /// # #[cfg(any(feature = "sqlx", feature = "sqlx-postgres", feature = "sqlx-mysql", feature = "sqlx-sqlite"))]
+    /// # async fn example(client: &SqlxClient) -> Result<(), SqlxError> {
     /// let row = client.fetch_one_async(client.query("SELECT 1")).await?;
     /// # let _ = row;
     /// # Ok(())
@@ -201,7 +202,7 @@ impl SqlxClient {
     /// ```
     pub async fn fetch_one_async<'q>(
         &self,
-        query: sqlx::query::Query<'q, sqlx::Any, sqlx::any::AnyArguments>,
+        query: Query<'q, Any, AnyArguments>,
     ) -> Result<SqlxRow, SqlxError> {
         #[cfg(feature = "tracing")]
         let started = std::time::Instant::now();
@@ -214,7 +215,7 @@ impl SqlxClient {
         }
         .await;
         #[cfg(feature = "tracing")]
-        crate::tracing::sqlx::record_event(
+        sqlx_trace::record_event(
             "fetch_one",
             self.driver,
             usize::from(result.is_ok()),
@@ -232,8 +233,9 @@ impl SqlxClient {
     /// # Examples
     ///
     /// ```rust,no_run
-    /// # #[cfg(all(feature = "sqlx", feature = "tokio"))]
-    /// # async fn example(client: &axutils::SqlxClient) -> Result<(), axutils::SqlxError> {
+    /// use axutils::sqlx::{SqlxClient, SqlxError};
+    /// # #[cfg(any(feature = "sqlx", feature = "sqlx-postgres", feature = "sqlx-mysql", feature = "sqlx-sqlite"))]
+    /// # async fn example(client: &SqlxClient) -> Result<(), SqlxError> {
     /// let row: (i64,) = client.fetch_one_as_async(client.query_as::<(i64,)>("SELECT 1")).await?;
     /// # let _ = row;
     /// # Ok(())
@@ -241,10 +243,10 @@ impl SqlxClient {
     /// ```
     pub async fn fetch_one_as_async<'q, T>(
         &self,
-        query: sqlx::query::QueryAs<'q, sqlx::Any, T, sqlx::any::AnyArguments>,
+        query: QueryAs<'q, Any, T, AnyArguments>,
     ) -> Result<T, SqlxError>
     where
-        T: Send + Unpin + for<'r> sqlx::FromRow<'r, SqlxRow>,
+        T: Send + Unpin + for<'r> FromRow<'r, SqlxRow>,
     {
         #[cfg(feature = "tracing")]
         let started = std::time::Instant::now();
@@ -257,7 +259,7 @@ impl SqlxClient {
         }
         .await;
         #[cfg(feature = "tracing")]
-        crate::tracing::sqlx::record_event(
+        sqlx_trace::record_event(
             "fetch_one_as",
             self.driver,
             usize::from(result.is_ok()),
@@ -273,8 +275,9 @@ impl SqlxClient {
     /// # Examples
     ///
     /// ```rust,no_run
-    /// # #[cfg(all(feature = "sqlx", feature = "tokio"))]
-    /// # async fn example(client: &axutils::SqlxClient) -> Result<(), axutils::SqlxError> {
+    /// use axutils::sqlx::{SqlxClient, SqlxError};
+    /// # #[cfg(any(feature = "sqlx", feature = "sqlx-postgres", feature = "sqlx-mysql", feature = "sqlx-sqlite"))]
+    /// # async fn example(client: &SqlxClient) -> Result<(), SqlxError> {
     /// let row = client.fetch_optional_async(client.query("SELECT 1 WHERE 0")).await?;
     /// # let _ = row;
     /// # Ok(())
@@ -282,7 +285,7 @@ impl SqlxClient {
     /// ```
     pub async fn fetch_optional_async<'q>(
         &self,
-        query: sqlx::query::Query<'q, sqlx::Any, sqlx::any::AnyArguments>,
+        query: Query<'q, Any, AnyArguments>,
     ) -> Result<Option<SqlxRow>, SqlxError> {
         #[cfg(feature = "tracing")]
         let started = std::time::Instant::now();
@@ -295,7 +298,7 @@ impl SqlxClient {
         }
         .await;
         #[cfg(feature = "tracing")]
-        crate::tracing::sqlx::record_event(
+        sqlx_trace::record_event(
             "fetch_optional",
             self.driver,
             usize::from(result.as_ref().ok().is_some_and(Option::is_some)),
@@ -311,8 +314,9 @@ impl SqlxClient {
     /// # Examples
     ///
     /// ```rust,no_run
-    /// # #[cfg(all(feature = "sqlx", feature = "tokio"))]
-    /// # async fn example(client: &axutils::SqlxClient) -> Result<(), axutils::SqlxError> {
+    /// use axutils::sqlx::{SqlxClient, SqlxError};
+    /// # #[cfg(any(feature = "sqlx", feature = "sqlx-postgres", feature = "sqlx-mysql", feature = "sqlx-sqlite"))]
+    /// # async fn example(client: &SqlxClient) -> Result<(), SqlxError> {
     /// let row: Option<(i64,)> = client
     ///     .fetch_optional_as_async(client.query_as::<(i64,)>("SELECT 1 WHERE 0"))
     ///     .await?;
@@ -322,10 +326,10 @@ impl SqlxClient {
     /// ```
     pub async fn fetch_optional_as_async<'q, T>(
         &self,
-        query: sqlx::query::QueryAs<'q, sqlx::Any, T, sqlx::any::AnyArguments>,
+        query: QueryAs<'q, Any, T, AnyArguments>,
     ) -> Result<Option<T>, SqlxError>
     where
-        T: Send + Unpin + for<'r> sqlx::FromRow<'r, SqlxRow>,
+        T: Send + Unpin + for<'r> FromRow<'r, SqlxRow>,
     {
         #[cfg(feature = "tracing")]
         let started = std::time::Instant::now();
@@ -338,7 +342,7 @@ impl SqlxClient {
         }
         .await;
         #[cfg(feature = "tracing")]
-        crate::tracing::sqlx::record_event(
+        sqlx_trace::record_event(
             "fetch_optional_as",
             self.driver,
             usize::from(result.as_ref().ok().is_some_and(Option::is_some)),
@@ -357,8 +361,9 @@ impl SqlxClient {
     /// # Examples
     ///
     /// ```rust,no_run
-    /// # #[cfg(all(feature = "sqlx", feature = "tokio"))]
-    /// # async fn example(client: &axutils::SqlxClient) -> Result<(), axutils::SqlxError> {
+    /// use axutils::sqlx::{SqlxClient, SqlxError};
+    /// # #[cfg(any(feature = "sqlx", feature = "sqlx-postgres", feature = "sqlx-mysql", feature = "sqlx-sqlite"))]
+    /// # async fn example(client: &SqlxClient) -> Result<(), SqlxError> {
     /// let rows = client.fetch_all_async(client.query("SELECT 1")).await?;
     /// # let _ = rows;
     /// # Ok(())
@@ -366,7 +371,7 @@ impl SqlxClient {
     /// ```
     pub async fn fetch_all_async<'q>(
         &self,
-        query: sqlx::query::Query<'q, sqlx::Any, sqlx::any::AnyArguments>,
+        query: Query<'q, Any, AnyArguments>,
     ) -> Result<Vec<SqlxRow>, SqlxError> {
         #[cfg(feature = "tracing")]
         let started = std::time::Instant::now();
@@ -402,7 +407,7 @@ impl SqlxClient {
             Err(_) => 0,
         };
         #[cfg(feature = "tracing")]
-        crate::tracing::sqlx::record_event(
+        sqlx_trace::record_event(
             "fetch_all",
             self.driver,
             observed_rows,
@@ -418,8 +423,9 @@ impl SqlxClient {
     /// # Examples
     ///
     /// ```rust,no_run
-    /// # #[cfg(all(feature = "sqlx", feature = "tokio"))]
-    /// # async fn example(client: &axutils::SqlxClient) -> Result<(), axutils::SqlxError> {
+    /// use axutils::sqlx::{SqlxClient, SqlxError};
+    /// # #[cfg(any(feature = "sqlx", feature = "sqlx-postgres", feature = "sqlx-mysql", feature = "sqlx-sqlite"))]
+    /// # async fn example(client: &SqlxClient) -> Result<(), SqlxError> {
     /// let rows: Vec<(i64,)> = client
     ///     .fetch_all_as_async(client.query_as::<(i64,)>("SELECT 1"))
     ///     .await?;
@@ -429,10 +435,10 @@ impl SqlxClient {
     /// ```
     pub async fn fetch_all_as_async<'q, T>(
         &self,
-        query: sqlx::query::QueryAs<'q, sqlx::Any, T, sqlx::any::AnyArguments>,
+        query: QueryAs<'q, Any, T, AnyArguments>,
     ) -> Result<Vec<T>, SqlxError>
     where
-        T: Send + Unpin + for<'r> sqlx::FromRow<'r, SqlxRow>,
+        T: Send + Unpin + for<'r> FromRow<'r, SqlxRow>,
     {
         #[cfg(feature = "tracing")]
         let started = std::time::Instant::now();
@@ -468,7 +474,7 @@ impl SqlxClient {
             Err(_) => 0,
         };
         #[cfg(feature = "tracing")]
-        crate::tracing::sqlx::record_event(
+        sqlx_trace::record_event(
             "fetch_all_as",
             self.driver,
             observed_rows,
@@ -484,8 +490,9 @@ impl SqlxClient {
     /// # Examples
     ///
     /// ```rust,no_run
-    /// # #[cfg(all(feature = "sqlx", feature = "tokio"))]
-    /// # async fn example(client: &axutils::SqlxClient) -> Result<(), axutils::SqlxError> {
+    /// use axutils::sqlx::{SqlxClient, SqlxError};
+    /// # #[cfg(any(feature = "sqlx", feature = "sqlx-postgres", feature = "sqlx-mysql", feature = "sqlx-sqlite"))]
+    /// # async fn example(client: &SqlxClient) -> Result<(), SqlxError> {
     /// let value: i64 = client.fetch_scalar_async(client.query_scalar::<i64>("SELECT 1")).await?;
     /// # let _ = value;
     /// # Ok(())
@@ -493,11 +500,11 @@ impl SqlxClient {
     /// ```
     pub async fn fetch_scalar_async<'q, T>(
         &self,
-        query: sqlx::query::QueryScalar<'q, sqlx::Any, T, sqlx::any::AnyArguments>,
+        query: QueryScalar<'q, Any, T, AnyArguments>,
     ) -> Result<T, SqlxError>
     where
         T: Send + Unpin,
-        (T,): for<'r> sqlx::FromRow<'r, SqlxRow>,
+        (T,): for<'r> FromRow<'r, SqlxRow>,
     {
         #[cfg(feature = "tracing")]
         let started = std::time::Instant::now();
@@ -510,7 +517,7 @@ impl SqlxClient {
         }
         .await;
         #[cfg(feature = "tracing")]
-        crate::tracing::sqlx::record_event(
+        sqlx_trace::record_event(
             "fetch_scalar",
             self.driver,
             usize::from(result.is_ok()),
@@ -530,8 +537,9 @@ impl SqlxClient {
     /// # Examples
     ///
     /// ```rust,no_run
-    /// # #[cfg(all(feature = "sqlx", feature = "tokio"))]
-    /// # async fn example(client: &axutils::SqlxClient) -> Result<(), Box<dyn std::error::Error>> {
+    /// use axutils::sqlx::{SqlxClient};
+    /// # #[cfg(any(feature = "sqlx", feature = "sqlx-postgres", feature = "sqlx-mysql", feature = "sqlx-sqlite"))]
+    /// # async fn example(client: &SqlxClient) -> Result<(), Box<dyn std::error::Error>> {
     /// let mut tx = client.begin_async().await?;
     /// sqlx::query::<sqlx::Any>("SELECT 1").execute(&mut *tx).await?;
     /// tx.commit().await?;
@@ -550,7 +558,7 @@ impl SqlxClient {
         }
         .await;
         #[cfg(feature = "tracing")]
-        crate::tracing::sqlx::record_event("begin", self.driver, 0, 0, &result, started);
+        sqlx_trace::record_event("begin", self.driver, 0, 0, &result, started);
         result
     }
 
@@ -562,8 +570,9 @@ impl SqlxClient {
     /// # Examples
     ///
     /// ```rust,no_run
-    /// # #[cfg(all(feature = "sqlx", feature = "tokio"))]
-    /// # async fn example(client: &axutils::SqlxClient) -> Result<(), axutils::SqlxError> {
+    /// use axutils::sqlx::{SqlxClient, SqlxError};
+    /// # #[cfg(any(feature = "sqlx", feature = "sqlx-postgres", feature = "sqlx-mysql", feature = "sqlx-sqlite"))]
+    /// # async fn example(client: &SqlxClient) -> Result<(), SqlxError> {
     /// client.close_async().await?;
     /// assert!(client.is_closed());
     /// # Ok(())
@@ -579,7 +588,7 @@ impl SqlxClient {
         }
         .await;
         #[cfg(feature = "tracing")]
-        crate::tracing::sqlx::record_event("close", self.driver, 0, 0, &result, started);
+        sqlx_trace::record_event("close", self.driver, 0, 0, &result, started);
         result
     }
 
@@ -590,9 +599,10 @@ impl SqlxClient {
     /// # Examples
     ///
     /// ```
-    /// # #[cfg(all(feature = "sqlx", feature = "tokio"))]
+    /// use axutils::sqlx::{SqlxClient};
+    /// # #[cfg(any(feature = "sqlx", feature = "sqlx-postgres", feature = "sqlx-mysql", feature = "sqlx-sqlite"))]
     /// # {
-    /// let _is_closed = axutils::SqlxClient::is_closed;
+    /// let _is_closed = SqlxClient::is_closed;
     /// # }
     /// ```
     pub fn is_closed(&self) -> bool {
@@ -611,7 +621,7 @@ impl fmt::Debug for SqlxClient {
 }
 
 fn ensure_runtime() -> Result<(), SqlxError> {
-    tokio::runtime::Handle::try_current()
+    Handle::try_current()
         .map(|_| ())
         .map_err(|_| SqlxError::RuntimeRequired)
 }

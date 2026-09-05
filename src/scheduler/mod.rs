@@ -1,12 +1,13 @@
 //! Tokio timer 驱动的一次、固定间隔和 IANA 时区 cron 调度器。
 //!
-//! 该模块仅在同时启用 `chrono`、`chrono_tz`、`tokio`、`croner` feature 时导出。调度器不会
+//! 该模块仅在启用 `scheduler` feature 时导出。调度器不会
 //! 创建 runtime、调用 `block_on` 或接管 signal；注册任务时必须处于启用了 time driver 的 Tokio
 //! runtime。
 
 mod config;
 mod cron;
 mod error;
+pub(crate) mod global;
 mod task;
 
 use std::{future::Future, sync::Arc};
@@ -34,9 +35,11 @@ impl Scheduler {
     /// # Examples
     ///
     /// ```rust
-    /// # #[cfg(all(feature="chrono",feature="chrono_tz",feature="tokio",feature="croner"))]
-    /// # fn example() -> Result<(), axutils::SchedulerError> {
-    /// let scheduler = axutils::Scheduler::new(axutils::SchedulerConfig::default())?;
+    /// # use axutils::scheduler::*;
+    /// # use axutils::scheduler::*;
+    /// # #[cfg(feature="scheduler")]
+    /// # fn example() -> Result<(), SchedulerError> {
+    /// let scheduler = Scheduler::new(SchedulerConfig::default())?;
     /// scheduler.shutdown()?;
     /// # Ok(()) }
     /// # fn main() {}
@@ -60,10 +63,12 @@ impl Scheduler {
     /// # Examples
     ///
     /// ```rust
-    /// # #[cfg(all(feature="chrono",feature="chrono_tz",feature="tokio",feature="croner"))]
-    /// # async fn example() -> Result<(), axutils::SchedulerError> {
-    /// let scheduler = axutils::Scheduler::new(axutils::SchedulerConfig::default())?;
-    /// let id = scheduler.register(axutils::TaskSchedule::once(std::time::Duration::ZERO), || async {})?;
+    /// # use axutils::scheduler::*;
+    /// # use axutils::scheduler::*;
+    /// # #[cfg(feature="scheduler")]
+    /// # async fn example() -> Result<(), SchedulerError> {
+    /// let scheduler = Scheduler::new(SchedulerConfig::default())?;
+    /// let id = scheduler.register(TaskSchedule::once(std::time::Duration::ZERO), || async {})?;
     /// let _ = scheduler.cancel(id)?;
     /// # Ok(()) }
     /// # fn main() {}
@@ -89,10 +94,12 @@ impl Scheduler {
     /// # Examples
     ///
     /// ```rust
-    /// # #[cfg(all(feature="chrono",feature="chrono_tz",feature="tokio",feature="croner"))]
-    /// # async fn example() -> Result<(), axutils::SchedulerError> {
-    /// let scheduler = axutils::Scheduler::new(axutils::SchedulerConfig::default())?;
-    /// let id = scheduler.register(axutils::TaskSchedule::once(std::time::Duration::from_secs(60)), || async {})?;
+    /// # use axutils::scheduler::*;
+    /// # use axutils::scheduler::*;
+    /// # #[cfg(feature="scheduler")]
+    /// # async fn example() -> Result<(), SchedulerError> {
+    /// let scheduler = Scheduler::new(SchedulerConfig::default())?;
+    /// let id = scheduler.register(TaskSchedule::once(std::time::Duration::from_secs(60)), || async {})?;
     /// assert!(scheduler.cancel(id)?);
     /// assert!(!scheduler.cancel(id)?);
     /// # Ok(()) }
@@ -111,9 +118,11 @@ impl Scheduler {
     /// # Examples
     ///
     /// ```rust
-    /// # #[cfg(all(feature="chrono",feature="chrono_tz",feature="tokio",feature="croner"))]
-    /// # fn example() -> Result<(), axutils::SchedulerError> {
-    /// let scheduler = axutils::Scheduler::new(axutils::SchedulerConfig::default())?;
+    /// # use axutils::scheduler::*;
+    /// # use axutils::scheduler::*;
+    /// # #[cfg(feature="scheduler")]
+    /// # fn example() -> Result<(), SchedulerError> {
+    /// let scheduler = Scheduler::new(SchedulerConfig::default())?;
     /// scheduler.shutdown()?;
     /// scheduler.shutdown()?;
     /// # Ok(()) }

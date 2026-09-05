@@ -2,7 +2,10 @@
 
 use std::time::Duration;
 
-use axutils::{RedisClient, RedisConfig, RedisError};
+use axutils::{
+    redis::{RedisClient, RedisConfig, RedisError},
+    utils::RedisUtils,
+};
 
 #[test]
 fn config_defaults_and_boundaries_are_local() {
@@ -43,7 +46,7 @@ fn config_defaults_and_boundaries_are_local() {
 }
 
 #[test]
-fn rejects_invalid_urls_and_inconsistent_cluster_credentials() {
+fn rejects_invalid_single_node_urls() {
     assert!(matches!(
         RedisConfig::single("rediss://127.0.0.1:6379/0"),
         Err(RedisError::InvalidConfig { field: "scheme" })
@@ -52,6 +55,11 @@ fn rejects_invalid_urls_and_inconsistent_cluster_credentials() {
         RedisConfig::single("redis://127.0.0.1:6379/1\n"),
         Err(RedisError::InvalidConfig { field: "url" })
     ));
+}
+
+#[cfg(feature = "redis-cluster")]
+#[test]
+fn rejects_inconsistent_cluster_credentials() {
     assert!(matches!(
         RedisConfig::cluster([
             "redis://user:one@127.0.0.1:7000/0",
@@ -69,7 +77,7 @@ fn client_construction_and_local_validation_do_not_connect() {
         .expect("client construction should be lazy");
     fn assert_send_sync<T: Send + Sync>() {}
     assert_send_sync::<RedisClient>();
-    assert_send_sync::<axutils::RedisUtils>();
+    assert_send_sync::<RedisUtils>();
 
     assert_eq!(client.get_bytes(""), Err(RedisError::InvalidKey));
     assert_eq!(client.delete_many(std::iter::empty::<&str>()), Ok(0));
@@ -104,7 +112,7 @@ fn lock_validation_is_local_and_enforces_the_24_hour_bound() {
     }
 }
 
-#[cfg(feature = "tokio")]
+#[cfg(feature = "redis-async")]
 #[tokio::test]
 async fn async_lock_validation_is_local_and_enforces_the_24_hour_bound() {
     let client = RedisClient::new(RedisConfig::single("redis://127.0.0.1:6379/0").unwrap())

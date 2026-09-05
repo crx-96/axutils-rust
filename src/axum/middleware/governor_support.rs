@@ -1,4 +1,8 @@
+#[cfg(test)]
+use super::super::AxumApp;
 use super::super::{AxumError, AxumServerBuilder};
+#[cfg(test)]
+use axum::body;
 use axum::{
     body::Body,
     http::{header::RETRY_AFTER, HeaderValue, Response, StatusCode},
@@ -12,7 +16,7 @@ use tower_governor::{
 impl AxumServerBuilder {
     /// 按真实 TCP peer IP 安装限流 layer。
     ///
-    /// 需要同时启用 `axum`、`tokio` 与 `tower_governor` feature。`replenish_interval` 是补充
+    /// 需要启用 `axum-governor` feature。`replenish_interval` 是补充
     /// 一个配额的周期，必须位于 1 毫秒到 1 小时（含）之间；`burst` 是允许的突发配额，
     /// 必须位于 1..=65,536。方法返回安装了 layer 的 builder；参数越界或 provider 无法生成
     /// 配置时返回 `AxumError::InvalidConfig`。
@@ -24,7 +28,8 @@ impl AxumServerBuilder {
     /// # Examples
     ///
     /// ```rust,no_run
-    /// use axutils::AxumApp;
+    /// # use axutils::axum::*;
+    /// use axutils::axum::AxumApp;
     /// use std::{num::NonZeroU32, time::Duration};
     ///
     /// let server = AxumApp::new()
@@ -32,7 +37,7 @@ impl AxumServerBuilder {
     ///     .with_governor_peer(Duration::from_secs(1), NonZeroU32::new(10).unwrap())?
     ///     .build()?;
     /// # let _ = server;
-    /// # Ok::<(), axutils::AxumError>(())
+    /// # Ok::<(), AxumError>(())
     /// ```
     pub fn with_governor_peer(
         mut self,
@@ -59,7 +64,7 @@ impl AxumServerBuilder {
     }
     /// 按未经验证的转发 header 客户端 IP 安装限流 layer。
     ///
-    /// 需要同时启用 `axum`、`tokio` 与 `tower_governor` feature。`replenish_interval` 是补充
+    /// 需要启用 `axum-governor` feature。`replenish_interval` 是补充
     /// 一个配额的周期，必须位于 1 毫秒到 1 小时（含）之间；`burst` 必须位于
     /// 1..=65,536。方法返回安装了 layer 的 builder；参数越界或 provider 无法生成配置时返回
     /// `AxumError::InvalidConfig`。
@@ -72,7 +77,8 @@ impl AxumServerBuilder {
     /// # Examples
     ///
     /// ```rust,no_run
-    /// use axutils::AxumApp;
+    /// # use axutils::axum::*;
+    /// use axutils::axum::AxumApp;
     /// use std::{num::NonZeroU32, time::Duration};
     ///
     /// let server = AxumApp::new()
@@ -83,7 +89,7 @@ impl AxumServerBuilder {
     ///     )?
     ///     .build()?;
     /// # let _ = server;
-    /// # Ok::<(), axutils::AxumError>(())
+    /// # Ok::<(), AxumError>(())
     /// ```
     pub fn with_governor_forwarded_headers_unchecked(
         mut self,
@@ -168,7 +174,7 @@ mod tests {
 
     #[tokio::test]
     async fn peer_mode_without_connect_info_returns_sanitized_500() {
-        let builder = crate::AxumApp::from_router(Router::new().route("/", get(|| async { "ok" })))
+        let builder = AxumApp::from_router(Router::new().route("/", get(|| async { "ok" })))
             .into_server_builder()
             .with_governor_peer(Duration::from_secs(1), NonZeroU32::new(1).unwrap())
             .unwrap();
@@ -178,9 +184,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
-        let body = axum::body::to_bytes(response.into_body(), 1024)
-            .await
-            .unwrap();
+        let body = body::to_bytes(response.into_body(), 1024).await.unwrap();
         assert_eq!(&body[..], b"rate limit integration error");
         assert!(!String::from_utf8_lossy(&body).contains("peer"));
     }

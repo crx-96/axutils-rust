@@ -1,21 +1,18 @@
-#![cfg(all(
-    feature = "chrono",
-    feature = "chrono_tz",
-    feature = "tokio",
-    feature = "croner"
-))]
+#![cfg(feature = "scheduler")]
 
 use std::{sync::Arc, time::Duration};
 
-use axutils::{SchedulerConfig, SchedulerError, SchedulerUtils, TaskSchedule};
+use axutils::scheduler::{SchedulerConfig, SchedulerError, TaskSchedule};
+use axutils::utils::SchedulerUtils;
+use tokio::runtime::Builder as RuntimeBuilder;
 
 #[test]
 fn global_scheduler_has_one_irreversible_lifecycle() {
     assert!(!SchedulerUtils::is_initialized());
-    assert_eq!(
-        SchedulerUtils::shutdown(),
+    assert!(matches!(
+        SchedulerUtils::scheduler(),
         Err(SchedulerError::NotInitialized)
-    );
+    ));
     assert_eq!(
         SchedulerUtils::init(SchedulerConfig { max_tasks: 0 }),
         Err(SchedulerError::InvalidConfig { field: "max_tasks" })
@@ -49,21 +46,26 @@ fn global_scheduler_has_one_irreversible_lifecycle() {
         Err(SchedulerError::InvalidConfig { field: "max_tasks" })
     );
 
-    let runtime = tokio::runtime::Builder::new_current_thread()
+    let runtime = RuntimeBuilder::new_current_thread()
         .enable_time()
         .build()
         .unwrap();
     runtime.block_on(async {
-        let id = SchedulerUtils::register(TaskSchedule::once(Duration::from_secs(60)), || async {})
+        let scheduler = SchedulerUtils::scheduler().unwrap();
+        let id = scheduler
+            .register(TaskSchedule::once(Duration::from_secs(60)), || async {})
             .unwrap();
-        assert!(SchedulerUtils::cancel(id).unwrap());
+        assert!(scheduler.cancel(id).unwrap());
     });
-    SchedulerUtils::shutdown().unwrap();
-    SchedulerUtils::shutdown().unwrap();
+    let scheduler = SchedulerUtils::scheduler().unwrap();
+    scheduler.shutdown().unwrap();
+    scheduler.shutdown().unwrap();
     assert!(SchedulerUtils::is_initialized());
     assert_eq!(
         runtime.block_on(async {
-            SchedulerUtils::register(TaskSchedule::once(Duration::ZERO), || async {})
+            SchedulerUtils::scheduler()
+                .unwrap()
+                .register(TaskSchedule::once(Duration::ZERO), || async {})
         }),
         Err(SchedulerError::Shutdown)
     );

@@ -9,6 +9,8 @@ use std::{
     time::Duration,
 };
 
+#[cfg(test)]
+use tokio::runtime::Builder as RuntimeBuilder;
 use tokio::{
     runtime::Handle,
     task::AbortHandle,
@@ -22,9 +24,11 @@ use super::{cron::CronSchedule, SchedulerConfig, SchedulerError, TaskSchedule};
 /// # Examples
 ///
 /// ```rust
-/// # #[cfg(all(feature="chrono",feature="chrono_tz",feature="tokio",feature="croner"))] {
-/// let _cancel: fn(&axutils::Scheduler, axutils::TaskId)
-///     -> Result<bool, axutils::SchedulerError> = axutils::Scheduler::cancel;
+/// # use axutils::scheduler::*;
+/// # use axutils::scheduler::*;
+/// # #[cfg(feature="scheduler")] {
+/// let _cancel: fn(&Scheduler, TaskId)
+///     -> Result<bool, SchedulerError> = Scheduler::cancel;
 /// # }
 /// ```
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -233,9 +237,7 @@ mod tests {
             lifecycle: Arc::clone(&lifecycle),
         });
 
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .build()
-            .unwrap();
+        let runtime = RuntimeBuilder::new_current_thread().build().unwrap();
         let task = runtime.spawn(std::future::pending::<()>());
         publish_task(&mut shared.lock(), &lifecycle, task.abort_handle());
 
@@ -247,7 +249,7 @@ mod tests {
     fn task_id_overflow_does_not_consume_capacity() {
         let shared = Arc::new(Shared::new(SchedulerConfig::new(1).unwrap()));
         shared.lock().next_task_id = u64::MAX;
-        let runtime = tokio::runtime::Builder::new_current_thread()
+        let runtime = RuntimeBuilder::new_current_thread()
             .enable_time()
             .build()
             .unwrap();

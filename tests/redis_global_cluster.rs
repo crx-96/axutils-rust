@@ -1,6 +1,7 @@
-#![cfg(feature = "redis")]
+#![cfg(feature = "redis-cluster")]
 
-use axutils::{RedisConfig, RedisUtils};
+use axutils::redis::RedisConfig;
+use axutils::utils::RedisUtils;
 use std::time::Duration;
 
 #[path = "support/redis_server.rs"]
@@ -37,5 +38,5 @@ fn cluster_init_checks_connectivity_before_installing_the_global_client() {
     assert!(commands.iter().any(|name| name == "CLUSTER"));
     assert!(commands.iter().any(|name| name == "PING"));
     drop(commands);
-    assert_eq!(RedisUtils::ping().unwrap(), "PONG");
+    assert_eq!(RedisUtils::client().unwrap().ping().unwrap(), "PONG");
 }

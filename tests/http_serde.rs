@@ -1,4 +1,4 @@
-#![cfg(all(feature = "http", feature = "serde"))]
+#![cfg(feature = "http-json")]
 
 use std::io::ErrorKind;
 use std::io::{Read, Write};
@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use axutils::{HttpClient, HttpConfig, HttpRequestOptions};
+use axutils::http::{HttpClient, HttpConfig, HttpError, HttpRequestOptions};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Deserialize, PartialEq)]
@@ -264,7 +264,7 @@ fn serde_shortcuts_validate_missing_base_urls_and_prefer_absolute_urls() {
     let error = no_base_client
         .get::<Reply, _>("/relative", None::<()>, None)
         .expect_err("relative URL without base URL must fail");
-    assert_eq!(error, axutils::HttpError::InvalidUrl);
+    assert_eq!(error, HttpError::InvalidUrl);
 
     let (address, requests, server) = spawn_server(2);
     let absolute_url = format!("{address}/absolute");
@@ -315,13 +315,13 @@ fn serde_shortcuts_return_stable_serialization_errors() {
         client
             .post::<Reply, _>("http://127.0.0.1:1", Some(FailingSerialize), None)
             .expect_err("body serialization should fail"),
-        axutils::HttpError::JsonSerialize
+        HttpError::JsonSerialize
     );
     assert_eq!(
         client
             .get::<Reply, _>("http://127.0.0.1:1", Some(FailingSerialize), None)
             .expect_err("query serialization should fail"),
-        axutils::HttpError::QuerySerialize
+        HttpError::QuerySerialize
     );
 }
 
@@ -340,7 +340,7 @@ fn serde_shortcuts_reject_sensitive_header_override() {
     let error = client
         .get::<Reply, _>("http://127.0.0.1:1", None::<()>, Some(options))
         .expect_err("sensitive default header must not be overridden");
-    assert_eq!(error, axutils::HttpError::DuplicateSensitiveHeader);
+    assert_eq!(error, HttpError::DuplicateSensitiveHeader);
 }
 
 #[test]
@@ -350,12 +350,12 @@ fn serde_shortcuts_hide_json_decode_details() {
     let error = client
         .get::<Reply, _>("/invalid", None::<()>, None)
         .expect_err("invalid JSON should fail");
-    assert_eq!(error, axutils::HttpError::JsonDeserialize);
+    assert_eq!(error, HttpError::JsonDeserialize);
     assert!(!error.to_string().contains("not-json"));
     server.join().expect("server thread");
 }
 
-#[cfg(feature = "tokio")]
+#[cfg(feature = "http-async")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn async_serde_methods_cover_common_verbs_and_bytes() {
     let (address, requests, server) = spawn_server(8);

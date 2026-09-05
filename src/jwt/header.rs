@@ -1,6 +1,7 @@
 use std::fmt;
 
 use serde::de::{self, Deserializer as _, MapAccess, Visitor};
+use serde_json::Deserializer as JsonDeserializer;
 
 use super::{JwtAlgorithm, JwtError};
 
@@ -9,7 +10,7 @@ pub(crate) fn validate_header_segment(
     expected_algorithm: JwtAlgorithm,
 ) -> Result<(), JwtError> {
     let decoded = decode_base64url(encoded).ok_or(JwtError::InvalidHeader { field: "base64" })?;
-    let mut deserializer = serde_json::Deserializer::from_slice(&decoded);
+    let mut deserializer = JsonDeserializer::from_slice(&decoded);
     let header = deserializer
         .deserialize_any(HeaderVisitor)
         .map_err(|_| JwtError::InvalidHeader { field: "json" })?;

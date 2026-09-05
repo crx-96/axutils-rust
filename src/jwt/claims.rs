@@ -1,11 +1,10 @@
 use std::fmt;
 
 use serde::de::{self, DeserializeSeed, MapAccess, SeqAccess, Visitor};
-use serde_json::Value;
+use serde_json::{Deserializer as JsonDeserializer, Value};
 
 use super::config::{JwtValidation, MAX_ALLOWLIST_ITEMS, MAX_CLAIM_STRING_BYTES};
-use super::header::decode_base64url;
-use super::JwtError;
+use super::{header, JwtError};
 
 pub(crate) const MAX_CLAIMS_BYTES: usize = 32 * 1024;
 pub(crate) const MAX_CLAIMS_DEPTH: usize = 32;
@@ -18,7 +17,7 @@ pub(crate) fn preflight_claims(payload: &[u8]) -> Result<(), JwtError> {
             segment: "claims_size",
         });
     }
-    let mut deserializer = serde_json::Deserializer::from_slice(payload);
+    let mut deserializer = JsonDeserializer::from_slice(payload);
     ClaimsSeed {
         depth: 1,
         root: true,
@@ -182,7 +181,7 @@ impl ClaimsVisitor {
 }
 
 pub(crate) fn decode_payload(payload: &str) -> Result<Vec<u8>, JwtError> {
-    decode_base64url(payload).ok_or(JwtError::InvalidToken {
+    header::decode_base64url(payload).ok_or(JwtError::InvalidToken {
         segment: "payload_base64",
     })
 }

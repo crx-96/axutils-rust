@@ -3,7 +3,9 @@
 use std::io::Write;
 use std::sync::{Arc, Mutex};
 
-use axutils::{LogConfig, LogError, LogUtils};
+use axutils::logging::{LogConfig, LogError};
+use axutils::utils::LogUtils;
+use tracing::subscriber;
 use tracing_subscriber::fmt::writer::MakeWriter;
 
 #[derive(Clone)]
@@ -39,7 +41,7 @@ fn external_global_subscriber_conflict_is_reported_without_consuming_state() {
         .with_ansi(false)
         .with_writer(Capture(Arc::clone(&capture)))
         .finish();
-    tracing::subscriber::set_global_default(subscriber).expect("install test subscriber");
+    subscriber::set_global_default(subscriber).expect("install test subscriber");
 
     assert!(matches!(
         LogUtils::init(LogConfig::default()),

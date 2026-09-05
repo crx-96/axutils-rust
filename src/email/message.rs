@@ -40,14 +40,14 @@ impl EmailMessage {
     /// # Errors
     ///
     /// 如果收件人数量、单个收件人长度、主题或正文超出上限，或收件人/主题格式非法，返回
-    /// [`EmailError`](crate::EmailError)；收件人错误只包含其零基索引，不回显地址内容。
+    /// [`EmailError`](crate::email::EmailError)；收件人错误只包含其零基索引，不回显地址内容。
     ///
     /// # Examples
     ///
     /// ```
-    /// use axutils::EmailMessage;
+    /// use axutils::email::{EmailError, EmailMessage};
     ///
-    /// # fn main() -> Result<(), axutils::EmailError> {
+    /// # fn main() -> Result<(), EmailError> {
     /// let message = EmailMessage::text(
     ///     vec!["receiver@example.com".to_owned()],
     ///     "A test message",
@@ -73,14 +73,14 @@ impl EmailMessage {
     /// # Errors
     ///
     /// 如果收件人数量、单个收件人长度、主题或正文超出上限，或收件人/主题格式非法，返回
-    /// [`EmailError`](crate::EmailError)；收件人错误只包含其零基索引，不回显地址内容。
+    /// [`EmailError`](crate::email::EmailError)；收件人错误只包含其零基索引，不回显地址内容。
     ///
     /// # Examples
     ///
     /// ```
-    /// use axutils::EmailMessage;
+    /// use axutils::email::{EmailError, EmailMessage};
     ///
-    /// # fn main() -> Result<(), axutils::EmailError> {
+    /// # fn main() -> Result<(), EmailError> {
     /// let message = EmailMessage::html(
     ///     vec!["receiver@example.com".to_owned()],
     ///     "An HTML message",

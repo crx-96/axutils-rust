@@ -4,8 +4,8 @@ use std::sync::OnceLock;
 
 use regex::Regex;
 
-#[cfg(all(feature = "regex", feature = "libphonenumber"))]
-use libphonenumber::Type;
+#[cfg(feature = "phone-validation")]
+use libphonenumber::{self as phone, metadata::DATABASE, Type};
 
 const EMAIL_PATTERN: &str = r"^[^\s@.]+(?:\.[^\s@.]+)*@[^\s@.]+(?:\.[^\s@.]+)+$";
 const EMAIL_STRICT_LOCAL_PATTERN: &str =
@@ -33,7 +33,7 @@ impl RegUtils {
     /// # Examples
     ///
     /// ```
-    /// use axutils::RegUtils;
+    /// use axutils::utils::RegUtils;
     ///
     /// assert!(RegUtils::is_email("user@example.com"));
     /// assert!(RegUtils::is_email("first.last+tag@example.co.uk"));
@@ -58,7 +58,7 @@ impl RegUtils {
     /// # Examples
     ///
     /// ```
-    /// use axutils::RegUtils;
+    /// use axutils::utils::RegUtils;
     ///
     /// assert!(RegUtils::is_email_strict("user@example.com"));
     /// assert!(RegUtils::is_email_strict("first.last+tag@example.co.uk"));
@@ -104,7 +104,7 @@ impl RegUtils {
     /// # Examples
     ///
     /// ```
-    /// use axutils::RegUtils;
+    /// use axutils::utils::RegUtils;
     ///
     /// assert!(RegUtils::is_phone_cn("13812345678"));
     /// assert!(RegUtils::is_phone_cn("19900000000"));
@@ -130,19 +130,19 @@ impl RegUtils {
     /// 由于部分国家/地区无法仅凭号段区分固定电话和手机号码，元数据标记为
     /// `FixedLineOrMobile` 的号码不会被此严格方法接受。
     ///
-    /// 此方法需要同时启用 `regex` 和 `libphonenumber` features。
+    /// 此方法需要同时启用 `phone-validation` feature。
     ///
     /// # Examples
     ///
     /// ```
-    /// use axutils::RegUtils;
+    /// use axutils::utils::RegUtils;
     ///
     /// assert!(RegUtils::is_phone("+8613812345678"));
     /// assert!(RegUtils::is_phone("+447911123456"));
     /// assert!(!RegUtils::is_phone("13812345678"));
     /// assert!(!RegUtils::is_phone("+86 13812345678"));
     /// ```
-    #[cfg(all(feature = "regex", feature = "libphonenumber"))]
+    #[cfg(feature = "phone-validation")]
     pub fn is_phone(value: &str) -> bool {
         let Some(digits) = value.strip_prefix('+') else {
             return false;
@@ -155,11 +155,11 @@ impl RegUtils {
             return false;
         }
 
-        let Ok(number) = libphonenumber::parse(None, value) else {
+        let Ok(number) = phone::parse(None, value) else {
             return false;
         };
 
-        number.is_valid() && number.number_type(&libphonenumber::metadata::DATABASE) == Type::Mobile
+        number.is_valid() && number.number_type(&DATABASE) == Type::Mobile
     }
 }
 
@@ -336,7 +336,7 @@ mod tests {
         }
     }
 
-    #[cfg(all(feature = "regex", feature = "libphonenumber"))]
+    #[cfg(feature = "phone-validation")]
     #[test]
     fn accepts_valid_international_mobile_numbers() {
         let valid_values = ["+8613812345678", "+447911123456", "+919876543210"];
@@ -349,7 +349,7 @@ mod tests {
         }
     }
 
-    #[cfg(all(feature = "regex", feature = "libphonenumber"))]
+    #[cfg(feature = "phone-validation")]
     #[test]
     fn rejects_invalid_international_mobile_numbers() {
         let invalid_values = [

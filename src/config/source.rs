@@ -1,13 +1,23 @@
 //! 受限的配置文件读取：大小上限、BOM 处理与 UTF-8 校验。
 //!
-//! 同时启用 `serde` 与 `tokio` 时，异步 helper 使用 Tokio 普通文件 API，并复用同步路径的
+//! 启用 `config-async` 时，异步 helper 使用 Tokio 普通文件 API，并复用同步路径的
 //! 错误映射、BOM 处理和 UTF-8 校验。
 
-use std::{fs::File, io::Read, path::Path};
+#[cfg(feature = "tracing")]
+use std::time::Instant;
+use std::{
+    fs::File,
+    io::{Error as IoError, Read},
+    path::Path,
+};
 
 use super::error::ConfigError;
 
-#[cfg(all(feature = "serde", feature = "tokio"))]
+#[cfg(feature = "tracing")]
+use crate::telemetry::config as config_trace;
+#[cfg(feature = "config-async")]
+use tokio::fs::File as AsyncFile;
+#[cfg(feature = "config-async")]
 use tokio::io::AsyncReadExt;
 
 const UTF8_BOM: [u8; 3] = [0xEF, 0xBB, 0xBF];
@@ -19,10 +29,10 @@ const UTF8_BOM: [u8; 3] = [0xEF, 0xBB, 0xBF];
 /// 等大小汇报为 0 却可能无限输出的特殊文件耗尽内存。
 pub(crate) fn read_bounded(path: &Path, max_bytes: usize) -> Result<String, ConfigError> {
     #[cfg(feature = "tracing")]
-    let started = std::time::Instant::now();
+    let started = Instant::now();
     let result = read_bounded_inner(path, max_bytes);
     #[cfg(feature = "tracing")]
-    crate::tracing::config::record_read("sync", max_bytes, &result, started);
+    config_trace::record_read("sync", max_bytes, &result, started);
     result
 }
 
@@ -48,22 +58,22 @@ fn read_bounded_inner(path: &Path, max_bytes: usize) -> Result<String, ConfigErr
 /// 在 `max_bytes` 上限内异步读取文件并解码为 UTF-8 字符串（跳过前导 BOM）。
 ///
 /// 读取使用 Tokio 的普通文件 API 和 `take(max_bytes + 1)`，不会把无界文件一次性读入内存。
-#[cfg(all(feature = "serde", feature = "tokio"))]
+#[cfg(feature = "config-async")]
 pub(crate) async fn read_bounded_async(
     path: &Path,
     max_bytes: usize,
 ) -> Result<String, ConfigError> {
     #[cfg(feature = "tracing")]
-    let started = std::time::Instant::now();
+    let started = Instant::now();
     let result = read_bounded_async_inner(path, max_bytes).await;
     #[cfg(feature = "tracing")]
-    crate::tracing::config::record_read("async", max_bytes, &result, started);
+    config_trace::record_read("async", max_bytes, &result, started);
     result
 }
 
-#[cfg(all(feature = "serde", feature = "tokio"))]
+#[cfg(feature = "config-async")]
 async fn read_bounded_async_inner(path: &Path, max_bytes: usize) -> Result<String, ConfigError> {
-    let file = tokio::fs::File::open(path)
+    let file = AsyncFile::open(path)
         .await
         .map_err(|error| io_error(path, &error))?;
 
@@ -83,7 +93,7 @@ async fn read_bounded_async_inner(path: &Path, max_bytes: usize) -> Result<Strin
     decode_utf8(buffer, path)
 }
 
-fn io_error(path: &Path, error: &std::io::Error) -> ConfigError {
+fn io_error(path: &Path, error: &IoError) -> ConfigError {
     ConfigError::Io {
         path: path.to_path_buf(),
         kind: error.kind(),
@@ -101,19 +111,23 @@ fn decode_utf8(mut buffer: Vec<u8>, path: &Path) -> Result<String, ConfigError> 
 
 #[cfg(test)]
 mod tests {
-    use super::read_bounded;
-    use crate::ConfigError;
-    use std::io::Write;
+    use std::{
+        env,
+        fs::{self, File},
+        io::{ErrorKind, Write},
+        path::PathBuf,
+        process,
+    };
 
-    #[cfg(all(feature = "serde", feature = "tokio"))]
-    use super::read_bounded_async;
+    use super as config_source;
+    use crate::config::ConfigError;
 
-    fn write_temp_file(name: &str, contents: &[u8]) -> std::path::PathBuf {
-        let path = std::env::temp_dir().join(format!(
+    fn write_temp_file(name: &str, contents: &[u8]) -> PathBuf {
+        let path = env::temp_dir().join(format!(
             "axutils-config-source-test-{}-{name}",
-            std::process::id()
+            process::id()
         ));
-        let mut file = std::fs::File::create(&path).expect("create temp file");
+        let mut file = File::create(&path).expect("create temp file");
         file.write_all(contents).expect("write temp file");
         path
     }
@@ -121,109 +135,109 @@ mod tests {
     #[test]
     fn reads_file_within_limit_and_strips_bom() {
         let path = write_temp_file("bom.txt", b"\xEF\xBB\xBFhello");
-        let text = read_bounded(&path, 1024).expect("read within limit");
+        let text = config_source::read_bounded(&path, 1024).expect("read within limit");
         assert_eq!(text, "hello");
-        let _ = std::fs::remove_file(&path);
+        let _ = fs::remove_file(&path);
     }
 
     #[test]
     fn rejects_file_exceeding_limit_without_reading_it_fully() {
         let path = write_temp_file("too-large.txt", &[b'a'; 20]);
-        let result = read_bounded(&path, 10);
+        let result = config_source::read_bounded(&path, 10);
         assert!(matches!(
             result,
             Err(ConfigError::FileTooLarge { limit: 10, .. })
         ));
-        let _ = std::fs::remove_file(&path);
+        let _ = fs::remove_file(&path);
     }
 
     #[test]
     fn accepts_file_exactly_at_limit() {
         let path = write_temp_file("exact.txt", &[b'a'; 10]);
-        let text = read_bounded(&path, 10).expect("read exactly at limit");
+        let text = config_source::read_bounded(&path, 10).expect("read exactly at limit");
         assert_eq!(text.len(), 10);
-        let _ = std::fs::remove_file(&path);
+        let _ = fs::remove_file(&path);
     }
 
     #[test]
     fn rejects_non_utf8_content() {
         let path = write_temp_file("invalid-utf8.bin", &[0xFF, 0xFE, 0xFD]);
-        let result = read_bounded(&path, 1024);
+        let result = config_source::read_bounded(&path, 1024);
         assert!(matches!(result, Err(ConfigError::NotUtf8 { .. })));
-        let _ = std::fs::remove_file(&path);
+        let _ = fs::remove_file(&path);
     }
 
     #[test]
     fn reports_io_error_for_missing_file() {
-        let path = std::env::temp_dir().join(format!(
+        let path = env::temp_dir().join(format!(
             "axutils-config-source-test-{}-missing.txt",
-            std::process::id()
+            process::id()
         ));
-        let result = read_bounded(&path, 1024);
+        let result = config_source::read_bounded(&path, 1024);
         assert!(matches!(
             result,
             Err(ConfigError::Io {
-                kind: std::io::ErrorKind::NotFound,
+                kind: ErrorKind::NotFound,
                 ..
             })
         ));
     }
 
-    #[cfg(all(feature = "serde", feature = "tokio"))]
+    #[cfg(feature = "config-async")]
     #[tokio::test]
     async fn async_reads_file_within_limit_and_strips_bom() {
         let path = write_temp_file("async-bom.txt", b"\xEF\xBB\xBFhello");
-        let text = read_bounded_async(&path, 1024)
+        let text = config_source::read_bounded_async(&path, 1024)
             .await
             .expect("async read within limit");
         assert_eq!(text, "hello");
-        let _ = std::fs::remove_file(&path);
+        let _ = fs::remove_file(&path);
     }
 
-    #[cfg(all(feature = "serde", feature = "tokio"))]
+    #[cfg(feature = "config-async")]
     #[tokio::test]
     async fn async_rejects_file_exceeding_limit() {
         let path = write_temp_file("async-too-large.txt", &[b'a'; 20]);
-        let result = read_bounded_async(&path, 10).await;
+        let result = config_source::read_bounded_async(&path, 10).await;
         assert!(matches!(
             result,
             Err(ConfigError::FileTooLarge { limit: 10, .. })
         ));
-        let _ = std::fs::remove_file(&path);
+        let _ = fs::remove_file(&path);
     }
 
-    #[cfg(all(feature = "serde", feature = "tokio"))]
+    #[cfg(feature = "config-async")]
     #[tokio::test]
     async fn async_accepts_file_exactly_at_limit() {
         let path = write_temp_file("async-exact.txt", &[b'a'; 10]);
-        let text = read_bounded_async(&path, 10)
+        let text = config_source::read_bounded_async(&path, 10)
             .await
             .expect("async read exactly at limit");
         assert_eq!(text.len(), 10);
-        let _ = std::fs::remove_file(&path);
+        let _ = fs::remove_file(&path);
     }
 
-    #[cfg(all(feature = "serde", feature = "tokio"))]
+    #[cfg(feature = "config-async")]
     #[tokio::test]
     async fn async_rejects_non_utf8_content() {
         let path = write_temp_file("async-invalid-utf8.bin", &[0xFF, 0xFE, 0xFD]);
-        let result = read_bounded_async(&path, 1024).await;
+        let result = config_source::read_bounded_async(&path, 1024).await;
         assert!(matches!(result, Err(ConfigError::NotUtf8 { .. })));
-        let _ = std::fs::remove_file(&path);
+        let _ = fs::remove_file(&path);
     }
 
-    #[cfg(all(feature = "serde", feature = "tokio"))]
+    #[cfg(feature = "config-async")]
     #[tokio::test]
     async fn async_reports_io_error_for_missing_file() {
-        let path = std::env::temp_dir().join(format!(
+        let path = env::temp_dir().join(format!(
             "axutils-config-source-test-{}-async-missing.txt",
-            std::process::id()
+            process::id()
         ));
-        let result = read_bounded_async(&path, 1024).await;
+        let result = config_source::read_bounded_async(&path, 1024).await;
         assert!(matches!(
             result,
             Err(ConfigError::Io {
-                kind: std::io::ErrorKind::NotFound,
+                kind: ErrorKind::NotFound,
                 ..
             })
         ));

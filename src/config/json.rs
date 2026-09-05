@@ -5,15 +5,17 @@ use std::{collections::BTreeSet, fmt};
 use serde::de::{
     self, DeserializeOwned, DeserializeSeed, Deserializer, MapAccess, SeqAccess, Visitor,
 };
+use serde_json::{Deserializer as JsonDeserializer, Error as JsonError};
 
+use super::value as config_value;
 use super::{
     error::ConfigError,
-    value::{classify_marker, duplicate_key_error_for_deserializer, ConfigValueSeed, ErrorMarker},
+    value::{ConfigValueSeed, ErrorMarker},
     ConfigValue,
 };
 
 pub(crate) fn parse_value(text: &str, max_depth: usize) -> Result<ConfigValue, ConfigError> {
-    let mut deserializer = serde_json::Deserializer::from_str(text);
+    let mut deserializer = JsonDeserializer::from_str(text);
     // `ConfigValueSeed` applies the crate's explicit 1..=256 depth budget and maps its
     // marker to `ConfigError::DepthLimitExceeded`; do not let serde_json's smaller default
     // recursion limit preempt that stable error contract.
@@ -36,8 +38,8 @@ pub(crate) fn parse<T: DeserializeOwned>(text: &str) -> Result<T, ConfigError> {
     serde_json::from_str(text).map_err(|error| map_parse_error(&error))
 }
 
-fn map_value_error(error: &serde_json::Error, max_depth: usize) -> ConfigError {
-    match classify_marker(&error.to_string()) {
+fn map_value_error(error: &JsonError, max_depth: usize) -> ConfigError {
+    match config_value::classify_marker(&error.to_string()) {
         ErrorMarker::DepthLimitExceeded => ConfigError::DepthLimitExceeded { limit: max_depth },
         ErrorMarker::DuplicateKey(key) => ConfigError::DuplicateKey {
             key: key.to_owned(),
@@ -50,7 +52,7 @@ fn map_value_error(error: &serde_json::Error, max_depth: usize) -> ConfigError {
 }
 
 fn reject_duplicate_keys(text: &str) -> Result<(), ConfigError> {
-    let mut deserializer = serde_json::Deserializer::from_str(text);
+    let mut deserializer = JsonDeserializer::from_str(text);
     DuplicateKeySeed
         .deserialize(&mut deserializer)
         .map_err(|error| map_value_error(&error, 0))?;
@@ -136,7 +138,7 @@ impl<'de> Visitor<'de> for DuplicateKeyVisitor {
         let mut keys = BTreeSet::new();
         while let Some(key) = map.next_key::<String>()? {
             if !keys.insert(key.clone()) {
-                return Err(duplicate_key_error_for_deserializer(&key));
+                return Err(config_value::duplicate_key_error_for_deserializer(&key));
             }
             map.next_value_seed(DuplicateKeySeed)?;
         }
@@ -144,7 +146,7 @@ impl<'de> Visitor<'de> for DuplicateKeyVisitor {
     }
 }
 
-fn map_parse_error(error: &serde_json::Error) -> ConfigError {
+fn map_parse_error(error: &JsonError) -> ConfigError {
     ConfigError::Parse {
         format: "json",
         line: (error.line() != 0).then(|| error.line()),
@@ -154,14 +156,16 @@ fn map_parse_error(error: &serde_json::Error) -> ConfigError {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse, parse_value};
-    use crate::ConfigError;
+    use std::collections::BTreeMap;
+
+    use super as json_config;
+    use crate::config::ConfigError;
     use serde::Deserialize;
 
     #[test]
     fn parses_typed_and_untyped_json() {
         let text = r#"{"server": {"port": 8080, "tls": true}}"#;
-        let value = parse_value(text, 64).expect("parse untyped");
+        let value = json_config::parse_value(text, 64).expect("parse untyped");
         assert_eq!(
             value.get("server.port").and_then(|v| v.as_i64()),
             Some(8080)
@@ -176,7 +180,7 @@ mod tests {
         struct Config {
             server: Server,
         }
-        let typed: Config = parse(text).expect("parse typed");
+        let typed: Config = json_config::parse(text).expect("parse typed");
         assert_eq!(typed.server.port, 8080);
         assert!(typed.server.tls);
     }
@@ -185,7 +189,7 @@ mod tests {
     fn rejects_invalid_syntax_with_location_and_no_snippet() {
         let secret = "s3cr3t-should-not-leak";
         let text = format!("{{\"password\": \"{secret}\", invalid}}");
-        let error = parse_value(&text, 64).expect_err("invalid json should fail");
+        let error = json_config::parse_value(&text, 64).expect_err("invalid json should fail");
         assert!(matches!(
             error,
             ConfigError::Parse {
@@ -199,23 +203,25 @@ mod tests {
 
     #[test]
     fn empty_object_parses_to_empty_table() {
-        let value = parse_value("{}", 64).expect("parse empty object");
+        let value = json_config::parse_value("{}", 64).expect("parse empty object");
         assert_eq!(value.as_table().map(|table| table.len()), Some(0));
     }
 
     #[test]
     fn depth_exactly_at_limit_succeeds_and_one_more_level_fails() {
         // depth 1: {"a": null} — one table level.
-        let shallow = parse_value(r#"{"a": null}"#, 1).expect("depth 1 should fit budget 1");
+        let shallow =
+            json_config::parse_value(r#"{"a": null}"#, 1).expect("depth 1 should fit budget 1");
         assert!(shallow.as_table().is_some());
 
         let nested = r#"{"a": {"b": null}}"#;
-        let error = parse_value(nested, 1).expect_err("depth 2 should exceed budget 1");
+        let error =
+            json_config::parse_value(nested, 1).expect_err("depth 2 should exceed budget 1");
         assert!(matches!(
             error,
             ConfigError::DepthLimitExceeded { limit: 1 }
         ));
-        assert!(parse_value(nested, 2).is_ok());
+        assert!(json_config::parse_value(nested, 2).is_ok());
     }
 
     #[test]
@@ -225,9 +231,9 @@ mod tests {
             text = format!(r#"{{"nested":{text}}}"#);
         }
 
-        assert!(parse_value(&text, 256).is_ok());
+        assert!(json_config::parse_value(&text, 256).is_ok());
         assert!(matches!(
-            parse_value(&text, 128),
+            json_config::parse_value(&text, 128),
             Err(ConfigError::DepthLimitExceeded { limit: 128 })
         ));
     }
@@ -237,7 +243,7 @@ mod tests {
         // u64::MAX fits serde_json's u64 fast path (no float fallback) and exceeds i64::MAX,
         // exercising this crate's own overflow check in `ConfigValueVisitor::visit_u64`.
         let text = format!("{{\"count\": {}}}", u64::MAX);
-        let error = parse_value(&text, 64).expect_err("overflow should fail");
+        let error = json_config::parse_value(&text, 64).expect_err("overflow should fail");
         assert!(matches!(
             error,
             ConfigError::ValueOutOfRange { key } if key == "count"
@@ -246,7 +252,7 @@ mod tests {
 
     #[test]
     fn rejects_trailing_non_whitespace_after_the_root_value() {
-        let error = parse_value(r#"{"a": 1} trailing"#, 64)
+        let error = json_config::parse_value(r#"{"a": 1} trailing"#, 64)
             .expect_err("trailing content should not be ignored");
         assert!(matches!(error, ConfigError::Parse { format: "json", .. }));
     }
@@ -254,16 +260,15 @@ mod tests {
     #[test]
     fn rejects_duplicate_object_keys_for_untyped_and_typed_json() {
         let text = r#"{"server":{"port":8080,"port":9090}}"#;
-        let untyped = parse_value(text, 64).expect_err("untyped duplicate should fail");
+        let untyped =
+            json_config::parse_value(text, 64).expect_err("untyped duplicate should fail");
         assert!(matches!(
             untyped,
             ConfigError::DuplicateKey { key } if key == "port"
         ));
 
-        let typed = parse::<
-            std::collections::BTreeMap<String, std::collections::BTreeMap<String, i64>>,
-        >(text)
-        .expect_err("typed duplicate should fail");
+        let typed = json_config::parse::<BTreeMap<String, BTreeMap<String, i64>>>(text)
+            .expect_err("typed duplicate should fail");
         assert!(matches!(
             typed,
             ConfigError::DuplicateKey { key } if key == "port"

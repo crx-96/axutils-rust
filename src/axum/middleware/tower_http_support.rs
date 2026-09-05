@@ -1,8 +1,8 @@
 use super::super::{AxumError, AxumServerBuilder};
 use axum::{
-    extract::Request,
+    extract::{MatchedPath, Request},
     http::{HeaderName, HeaderValue, Method, StatusCode},
-    middleware::Next,
+    middleware::{from_fn, Next},
     response::Response,
 };
 use std::time::Duration;
@@ -19,16 +19,18 @@ use tower_http::{
 const REQUEST_ID: HeaderName = HeaderName::from_static("x-request-id");
 /// `tower-http` service timeout 的 HTTP 响应状态。
 ///
-/// 需要同时启用 `axum`、`tokio` 与 `tower-http` feature，仅决定
+/// 需要启用 `axum-tower-http` feature，仅决定
 /// [`AxumServerBuilder::with_timeout`] 超时响应的状态码，不改变时限、不产生 I/O，也不会自行
 /// 报错。408 表示本服务处理超时；504 只应在调用方明确采用网关语义时使用。
 ///
 /// # Examples
 ///
 /// ```rust
+/// # use axutils::axum::*;
+/// # use axutils::axum::*;
 /// assert_eq!(
-///     axutils::AxumTimeoutStatus::default(),
-///     axutils::AxumTimeoutStatus::RequestTimeout,
+///     AxumTimeoutStatus::default(),
+///     AxumTimeoutStatus::RequestTimeout,
 /// );
 /// ```
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -41,14 +43,15 @@ pub enum AxumTimeoutStatus {
 }
 /// `tower-http` CORS layer 的允许 origin 模式。
 ///
-/// 需要同时启用 `axum`、`tokio` 与 `tower-http` feature。空列表与 `Disabled` 都不会安装
+/// 需要启用 `axum-tower-http` feature。空列表与 `Disabled` 都不会安装
 /// CORS layer，绝不会隐式扩大为 `Any`。该值只保存配置，不访问网络、修改全局状态或自行报错；
 /// 具体校验由 [`AxumServerBuilder::with_cors`] 执行。
 ///
 /// # Examples
 ///
 /// ```rust
-/// use axutils::AxumCorsOrigin;
+/// # use axutils::axum::*;
+/// use axutils::axum::AxumCorsOrigin;
 ///
 /// let origins = AxumCorsOrigin::List(vec![
 ///     "https://example.com".parse().unwrap(),
@@ -66,7 +69,7 @@ pub enum AxumCorsOrigin {
 }
 /// 有界的 `tower-http` CORS 配置。
 ///
-/// 需要同时启用 `axum`、`tokio` 与 `tower-http` feature。三个列表分别最多 64 项，origin
+/// 需要启用 `axum-tower-http` feature。三个列表分别最多 64 项，origin
 /// 列表还限制每项最多 1,024 字节，`max_age` 最多一天；`Any` 不能与 `allow_credentials`
 /// 同时使用。默认值禁用 CORS，且所有列表为空。本类型只保存内存配置，不访问网络或修改
 /// 全局状态；安装时的无效组合由 [`AxumServerBuilder::with_cors`] 以 `AxumError` 返回。
@@ -74,7 +77,8 @@ pub enum AxumCorsOrigin {
 /// # Examples
 ///
 /// ```rust
-/// use axutils::{AxumCorsConfig, AxumCorsOrigin};
+/// # use axutils::axum::*;
+/// use axutils::axum::{AxumCorsConfig, AxumCorsOrigin};
 ///
 /// let config = AxumCorsConfig {
 ///     origins: AxumCorsOrigin::List(vec!["https://example.com".parse().unwrap()]),
@@ -191,7 +195,9 @@ impl AxumServerBuilder {
     /// 安装内部 request ID；移除全部入站同名 header 并覆盖 handler 冲突响应值。
     /// # Examples
     /// ```rust
-    /// # #[cfg(all(feature="axum",feature="tokio",feature="tower-http"))] { let _=axutils::AxumApp::new().into_server_builder().with_request_id(); }
+    /// # use axutils::axum::*;
+    /// # use axutils::axum::*;
+    /// # #[cfg(feature="axum-tower-http")] { let _=AxumApp::new().into_server_builder().with_request_id(); }
     /// ```
     pub fn with_request_id(mut self) -> Self {
         self.request_id_installed = true;
@@ -200,7 +206,9 @@ impl AxumServerBuilder {
     /// 安装 1 毫秒..=10 分钟 service timeout；不是连接/header/drain timeout。
     /// # Examples
     /// ```rust
-    /// # #[cfg(all(feature="axum",feature="tokio",feature="tower-http"))] { let _=axutils::AxumApp::new().into_server_builder().with_timeout(std::time::Duration::from_secs(1),axutils::AxumTimeoutStatus::RequestTimeout).unwrap(); }
+    /// # use axutils::axum::*;
+    /// # use axutils::axum::*;
+    /// # #[cfg(feature="axum-tower-http")] { let _=AxumApp::new().into_server_builder().with_timeout(std::time::Duration::from_secs(1),AxumTimeoutStatus::RequestTimeout).unwrap(); }
     /// ```
     pub fn with_timeout(
         mut self,
@@ -218,7 +226,9 @@ impl AxumServerBuilder {
     /// 安装 1 字节..=64 MiB 请求体上限；约束 Content-Length 和流式累计 body。
     /// # Examples
     /// ```rust
-    /// # #[cfg(all(feature="axum",feature="tokio",feature="tower-http"))] { assert!(axutils::AxumApp::new().into_server_builder().with_body_limit(0).is_err()); }
+    /// # use axutils::axum::*;
+    /// # use axutils::axum::*;
+    /// # #[cfg(feature="axum-tower-http")] { assert!(AxumApp::new().into_server_builder().with_body_limit(0).is_err()); }
     /// ```
     pub fn with_body_limit(mut self, max_bytes: usize) -> Result<Self, AxumError> {
         if !(1..=64 * 1024 * 1024).contains(&max_bytes) {
@@ -233,7 +243,9 @@ impl AxumServerBuilder {
     /// 但进程 panic hook 会在捕获前运行，宿主必须安装脱敏 hook，不能把 secret 放入 panic payload。
     /// # Examples
     /// ```rust
-    /// # #[cfg(all(feature="axum",feature="tokio",feature="tower-http"))] { let _=axutils::AxumApp::new().into_server_builder().with_catch_panic(); }
+    /// # use axutils::axum::*;
+    /// # use axutils::axum::*;
+    /// # #[cfg(feature="axum-tower-http")] { let _=AxumApp::new().into_server_builder().with_catch_panic(); }
     /// ```
     pub fn with_catch_panic(mut self) -> Self {
         self.catch_panic_installed = true;
@@ -242,7 +254,9 @@ impl AxumServerBuilder {
     /// 安装全 Router CORS；Disabled/空列表不安装，wildcard + credentials 返回错误。
     /// # Examples
     /// ```rust
-    /// # #[cfg(all(feature="axum",feature="tokio",feature="tower-http"))] { let _=axutils::AxumApp::new().into_server_builder().with_cors(axutils::AxumCorsConfig::default()).unwrap(); }
+    /// # use axutils::axum::*;
+    /// # use axutils::axum::*;
+    /// # #[cfg(feature="axum-tower-http")] { let _=AxumApp::new().into_server_builder().with_cors(AxumCorsConfig::default()).unwrap(); }
     /// ```
     pub fn with_cors(mut self, config: AxumCorsConfig) -> Result<Self, AxumError> {
         if let Some(layer) = config.layer()? {
@@ -265,12 +279,10 @@ impl AxumServerBuilder {
         }
         #[cfg(feature = "tracing")]
         if self.http_trace_installed {
-            self.router = self.router.layer(axum::middleware::from_fn(trace_request));
+            self.router = self.router.layer(from_fn(trace_request));
         }
         if self.request_id_installed {
-            self.router = self
-                .router
-                .layer(axum::middleware::from_fn(force_request_id));
+            self.router = self.router.layer(from_fn(force_request_id));
         }
         self
     }
@@ -297,7 +309,9 @@ impl AxumServerBuilder {
     /// 安装脱敏 trace 并确保内部 request ID；只记录 method/matched route/status/latency/ID。
     /// # Examples
     /// ```rust
-    /// # #[cfg(all(feature="axum",feature="tokio",feature="tower-http",feature="tracing"))] { let _=axutils::AxumApp::new().into_server_builder().with_http_trace(); }
+    /// # use axutils::axum::*;
+    /// # use axutils::axum::*;
+    /// # #[cfg(all(feature="axum-tower-http",feature="tracing"))] { let _=AxumApp::new().into_server_builder().with_http_trace(); }
     /// ```
     pub fn with_http_trace(mut self) -> Self {
         self.request_id_installed = true;
@@ -311,7 +325,7 @@ async fn trace_request(request: Request, next: Next) -> Response {
     let method = request.method().clone();
     let route = request
         .extensions()
-        .get::<axum::extract::MatchedPath>()
+        .get::<MatchedPath>()
         .map(|v| v.as_str().to_owned())
         .unwrap_or_else(|| "<unmatched>".into());
     let request_id = request

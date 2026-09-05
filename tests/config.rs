@@ -1,13 +1,16 @@
-#![cfg(feature = "serde")]
+#![cfg(feature = "config")]
 
 use std::path::{Path, PathBuf};
 
-#[cfg(all(feature = "serde", feature = "tokio"))]
+#[cfg(feature = "config-async")]
 use std::fs;
 
-#[cfg(all(feature = "serde", feature = "tokio"))]
-use axutils::ConfigLoader;
-use axutils::{ConfigError, ConfigFormat, ConfigUtils};
+#[cfg(feature = "config-async")]
+use axutils::config::ConfigLoader;
+use axutils::{
+    config::{ConfigError, ConfigFormat},
+    utils::ConfigUtils,
+};
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
@@ -44,7 +47,7 @@ fn reads_json_fixture_untyped_and_typed() {
     assert!(config.server.tls);
 }
 
-#[cfg(feature = "serde-saphyr")]
+#[cfg(feature = "config-yaml")]
 #[test]
 fn reads_yaml_fixture_untyped_and_typed() {
     let path = fixture("valid.yaml");
@@ -62,7 +65,7 @@ fn reads_yaml_fixture_untyped_and_typed() {
     assert_eq!(config.server.host, "localhost");
 }
 
-#[cfg(feature = "toml")]
+#[cfg(feature = "config-toml")]
 #[test]
 fn reads_toml_fixture_untyped_and_typed() {
     let path = fixture("valid.toml");
@@ -81,7 +84,7 @@ fn reads_toml_fixture_untyped_and_typed() {
     assert_eq!(config.server.port, 8080);
 }
 
-#[cfg(feature = "rust-ini")]
+#[cfg(feature = "config-ini")]
 #[test]
 fn reads_ini_fixture_untyped_and_typed() {
     let path = fixture("valid.ini");
@@ -155,7 +158,7 @@ fn missing_file_reports_io_error() {
     ));
 }
 
-#[cfg(all(feature = "serde", feature = "tokio"))]
+#[cfg(feature = "config-async")]
 #[tokio::test]
 async fn reads_json_fixture_async_untyped_and_typed() {
     let path = fixture("valid.json");
@@ -184,7 +187,7 @@ async fn reads_json_fixture_async_untyped_and_typed() {
     assert_eq!(direct.server.host, "localhost");
 }
 
-#[cfg(all(feature = "serde", feature = "tokio"))]
+#[cfg(feature = "config-async")]
 #[tokio::test]
 async fn async_explicit_format_overrides_extension_for_untyped_and_typed_loads() {
     let file = TempConfigFile::new("explicit-format-async.txt", br#"{"port": 8080}"#);
@@ -204,7 +207,7 @@ async fn async_explicit_format_overrides_extension_for_untyped_and_typed_loads()
     assert_eq!(config.port, 8080);
 }
 
-#[cfg(all(feature = "serde", feature = "tokio"))]
+#[cfg(feature = "config-async")]
 #[tokio::test]
 async fn async_loader_preserves_format_limits_and_env_setting() {
     let explicit = TempConfigFile::new("loader-format-async.txt", br#"{"port": 8080}"#);
@@ -256,7 +259,7 @@ async fn async_loader_preserves_format_limits_and_env_setting() {
     assert!(matches!(error, ConfigError::UndefinedVariable { .. }));
 }
 
-#[cfg(all(feature = "serde", feature = "tokio"))]
+#[cfg(feature = "config-async")]
 #[tokio::test]
 async fn async_loader_can_be_reused_by_multiple_reads_without_state_leaks() {
     let json = fixture("valid.json");
@@ -279,7 +282,7 @@ async fn async_loader_can_be_reused_by_multiple_reads_without_state_leaks() {
     );
 }
 
-#[cfg(all(feature = "serde", feature = "tokio"))]
+#[cfg(feature = "config-async")]
 #[tokio::test]
 async fn async_errors_keep_existing_categories_and_redaction() {
     let invalid = fixture("invalid_with_sentinel.json");
@@ -335,7 +338,7 @@ async fn async_errors_keep_existing_categories_and_redaction() {
     assert_eq!(error, sync_error);
 }
 
-#[cfg(all(feature = "serde", feature = "tokio"))]
+#[cfg(feature = "config-async")]
 #[tokio::test]
 async fn reads_dotenv_fixture_asynchronously() {
     let value = ConfigUtils::load_value_async(fixture("sample.env"))
@@ -347,7 +350,7 @@ async fn reads_dotenv_fixture_asynchronously() {
     );
 }
 
-#[cfg(all(feature = "serde", feature = "tokio", feature = "serde-saphyr"))]
+#[cfg(all(feature = "config-async", feature = "config-yaml"))]
 #[tokio::test]
 async fn reads_yaml_fixture_asynchronously() {
     let value = ConfigUtils::load_value_async(fixture("valid.yaml"))
@@ -359,7 +362,7 @@ async fn reads_yaml_fixture_asynchronously() {
     );
 }
 
-#[cfg(all(feature = "serde", feature = "tokio", feature = "serde-saphyr"))]
+#[cfg(all(feature = "config-async", feature = "config-yaml"))]
 #[tokio::test]
 async fn reads_typed_yaml_fixture_asynchronously() {
     #[derive(Debug, Deserialize)]
@@ -375,7 +378,7 @@ async fn reads_typed_yaml_fixture_asynchronously() {
     assert!(config.server.tls);
 }
 
-#[cfg(all(feature = "serde", feature = "tokio", feature = "toml"))]
+#[cfg(all(feature = "config-async", feature = "config-toml"))]
 #[tokio::test]
 async fn reads_toml_fixture_asynchronously() {
     let value = ConfigUtils::load_value_async(fixture("valid.toml"))
@@ -387,7 +390,7 @@ async fn reads_toml_fixture_asynchronously() {
     );
 }
 
-#[cfg(all(feature = "serde", feature = "tokio", feature = "rust-ini"))]
+#[cfg(all(feature = "config-async", feature = "config-ini"))]
 #[tokio::test]
 async fn reads_ini_fixture_asynchronously() {
     let value = ConfigUtils::load_value_async(fixture("valid.ini"))
@@ -396,12 +399,12 @@ async fn reads_ini_fixture_asynchronously() {
     assert_eq!(value.get("top").and_then(|v| v.as_str()), Some("1"));
 }
 
-#[cfg(all(feature = "serde", feature = "tokio"))]
+#[cfg(feature = "config-async")]
 struct TempConfigFile {
     path: PathBuf,
 }
 
-#[cfg(all(feature = "serde", feature = "tokio"))]
+#[cfg(feature = "config-async")]
 impl TempConfigFile {
     fn new(name: &str, contents: impl AsRef<[u8]>) -> Self {
         let path = std::env::temp_dir().join(format!(
@@ -417,7 +420,7 @@ impl TempConfigFile {
     }
 }
 
-#[cfg(all(feature = "serde", feature = "tokio"))]
+#[cfg(feature = "config-async")]
 impl Drop for TempConfigFile {
     fn drop(&mut self) {
         let _ = fs::remove_file(&self.path);

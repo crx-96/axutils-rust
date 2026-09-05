@@ -1,10 +1,14 @@
 use std::{fmt, io};
+use tokio::task::JoinError;
 /// Tokio facade 的稳定、脱敏错误分类。
 ///
 /// # Examples
 /// ```rust
+/// # use axutils::tokio::*;
+/// # use axutils::tokio::*;
+/// # use axutils::utils::TokioUtils;
 /// # #[cfg(feature="tokio")] {
-/// assert!(matches!(axutils::TokioUtils::try_current_handle(), Err(axutils::TokioError::RuntimeRequired)));
+/// assert!(matches!(TokioUtils::try_current_handle(), Err(TokioError::RuntimeRequired)));
 /// # }
 /// ```
 #[non_exhaustive]
@@ -21,7 +25,7 @@ pub enum TokioError {
     /// Tokio runtime builder 返回 I/O 错误。
     RuntimeBuild(io::Error),
     /// JoinHandle 报告任务 panic 或取消。
-    Join(::tokio::task::JoinError),
+    Join(JoinError),
     /// future 等待超时。
     Timeout,
     /// 操作系统信号注册或等待失败。

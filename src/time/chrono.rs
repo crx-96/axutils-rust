@@ -1,6 +1,6 @@
 use chrono::{Datelike, NaiveDate, NaiveDateTime, Timelike};
 
-use crate::utils::TimeUtils;
+use super::facade::TimeUtils;
 
 use super::template::{
     render, Fields, TimeFormatError, TimeValueKind, DATETIME_TEMPLATE, DATE_TEMPLATE,
@@ -16,8 +16,10 @@ impl TimeUtils {
     /// # Examples
     ///
     /// ```
-    /// use axutils::TimeUtils;
-    /// let date = chrono::NaiveDate::from_ymd_opt(2024, 2, 29).unwrap();
+    /// use axutils::utils::TimeUtils;
+    /// use chrono::NaiveDate;
+    ///
+    /// let date = NaiveDate::from_ymd_opt(2024, 2, 29).unwrap();
     /// assert_eq!(TimeUtils::format_date_chrono(date, None).unwrap(), "2024-02-29");
     /// ```
     pub fn format_date_chrono(
@@ -40,9 +42,10 @@ impl TimeUtils {
     /// # Examples
     ///
     /// ```
-    /// use axutils::TimeUtils;
+    /// use axutils::utils::TimeUtils;
+    /// use chrono::NaiveDate;
     ///
-    /// let value = chrono::NaiveDate::from_ymd_opt(2024, 2, 29);
+    /// let value = NaiveDate::from_ymd_opt(2024, 2, 29);
     /// assert_eq!(TimeUtils::format_option_date_chrono(value, None), Some("2024-02-29".to_owned()));
     /// ```
     pub fn format_option_date_chrono(
@@ -61,8 +64,10 @@ impl TimeUtils {
     /// # Examples
     ///
     /// ```
-    /// use axutils::TimeUtils;
-    /// let value = chrono::NaiveDate::from_ymd_opt(2024, 2, 29).unwrap().and_hms_opt(1, 2, 3).unwrap();
+    /// use axutils::utils::TimeUtils;
+    /// use chrono::NaiveDate;
+    ///
+    /// let value = NaiveDate::from_ymd_opt(2024, 2, 29).unwrap().and_hms_opt(1, 2, 3).unwrap();
     /// assert_eq!(TimeUtils::format_datetime_chrono(value, Some("yyyy/MM/dd HH:mm:ss")).unwrap(), "2024/02/29 01:02:03");
     /// ```
     pub fn format_datetime_chrono(
@@ -86,7 +91,7 @@ impl TimeUtils {
     /// # Examples
     ///
     /// ```
-    /// use axutils::TimeUtils;
+    /// use axutils::utils::TimeUtils;
     ///
     /// assert_eq!(TimeUtils::format_option_datetime_chrono(None, None), None);
     /// ```
@@ -106,8 +111,10 @@ impl TimeUtils {
     /// # Examples
     ///
     /// ```
-    /// use axutils::TimeUtils;
-    /// let value = chrono::NaiveDate::from_ymd_opt(2024, 2, 29).unwrap().and_hms_opt(1, 2, 3).unwrap();
+    /// use axutils::utils::TimeUtils;
+    /// use chrono::NaiveDate;
+    ///
+    /// let value = NaiveDate::from_ymd_opt(2024, 2, 29).unwrap().and_hms_opt(1, 2, 3).unwrap();
     /// assert_eq!(TimeUtils::format_datetime_with_offset_chrono(value, None, None).unwrap(), "2024-02-29 01:02:03");
     /// ```
     pub fn format_datetime_with_offset_chrono(
@@ -132,7 +139,7 @@ impl TimeUtils {
     /// # Examples
     ///
     /// ```
-    /// use axutils::TimeUtils;
+    /// use axutils::utils::TimeUtils;
     ///
     /// assert_eq!(
     ///     TimeUtils::format_option_datetime_with_offset_chrono(None, None, None),
@@ -149,126 +156,6 @@ impl TimeUtils {
         })
     }
 }
-
-#[cfg(all(feature = "chrono", not(any(feature = "time", feature = "jiff"))))]
-impl TimeUtils {
-    /// Chrono 是唯一日期后端时 [`Self::format_date_chrono`] 的简写。
-    ///
-    /// `None` 使用 `yyyy-MM-dd`；仅可用 `yyyy`、`MM`、`dd`，ASCII 字母字面量须以单引号包围。
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use axutils::TimeUtils;
-    ///
-    /// let date = chrono::NaiveDate::from_ymd_opt(2024, 2, 29).unwrap();
-    /// assert_eq!(TimeUtils::format_date(date, None).unwrap(), "2024-02-29");
-    /// ```
-    pub fn format_date(
-        value: NaiveDate,
-        template: Option<&str>,
-    ) -> Result<String, TimeFormatError> {
-        Self::format_date_chrono(value, template)
-    }
-
-    /// Chrono 是唯一日期后端时 [`Self::format_option_date_chrono`] 的简写。
-    ///
-    /// `None` 使用 `yyyy-MM-dd`；仅可用 `yyyy`、`MM`、`dd`，ASCII 字母字面量须以单引号包围。
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use axutils::TimeUtils;
-    ///
-    /// assert_eq!(TimeUtils::format_option_date(None, None), None);
-    /// ```
-    pub fn format_option_date(value: Option<NaiveDate>, template: Option<&str>) -> Option<String> {
-        Self::format_option_date_chrono(value, template)
-    }
-
-    /// Chrono 是唯一日期后端时 [`Self::format_datetime_chrono`] 的简写。
-    ///
-    /// `None` 使用 `yyyy-MM-dd HH:mm:ss`；可用 `yyyy`、`MM`、`dd`、`HH`、`mm`、`ss`、`SSS`。
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use axutils::TimeUtils;
-    ///
-    /// let value = chrono::NaiveDate::from_ymd_opt(2024, 2, 29).unwrap().and_hms_opt(1, 2, 3).unwrap();
-    /// assert_eq!(TimeUtils::format_datetime(value, None).unwrap(), "2024-02-29 01:02:03");
-    /// ```
-    pub fn format_datetime(
-        value: NaiveDateTime,
-        template: Option<&str>,
-    ) -> Result<String, TimeFormatError> {
-        Self::format_datetime_chrono(value, template)
-    }
-
-    /// Chrono 是唯一日期后端时 [`Self::format_option_datetime_chrono`] 的简写。
-    ///
-    /// `None` 使用 `yyyy-MM-dd HH:mm:ss`；可用 `yyyy`、`MM`、`dd`、`HH`、`mm`、`ss`、`SSS`。
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use axutils::TimeUtils;
-    ///
-    /// assert_eq!(TimeUtils::format_option_datetime(None, None), None);
-    /// ```
-    pub fn format_option_datetime(
-        value: Option<NaiveDateTime>,
-        template: Option<&str>,
-    ) -> Option<String> {
-        Self::format_option_datetime_chrono(value, template)
-    }
-
-    /// Chrono 是唯一日期后端时 [`Self::format_datetime_with_offset_chrono`] 的简写。
-    ///
-    /// `template` 为 `None` 时使用 `yyyy-MM-dd HH:mm:ss`；`offset` 为 `None` 时使用 `+08:00`。
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use axutils::TimeUtils;
-    ///
-    /// let value = chrono::NaiveDate::from_ymd_opt(2024, 2, 29).unwrap().and_hms_opt(1, 2, 3).unwrap();
-    /// assert_eq!(
-    ///     TimeUtils::format_datetime_with_offset(value, None, None).unwrap(),
-    ///     "2024-02-29 01:02:03",
-    /// );
-    /// ```
-    pub fn format_datetime_with_offset(
-        value: NaiveDateTime,
-        offset: Option<TimeZoneOffset>,
-        template: Option<&str>,
-    ) -> Result<String, TimeFormatError> {
-        Self::format_datetime_with_offset_chrono(value, offset, template)
-    }
-
-    /// Chrono 是唯一日期后端时 [`Self::format_option_datetime_with_offset_chrono`] 的简写。
-    ///
-    /// `template` 为 `None` 时使用 `yyyy-MM-dd HH:mm:ss`；`offset` 为 `None` 时使用 `+08:00`。
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use axutils::TimeUtils;
-    ///
-    /// assert_eq!(
-    ///     TimeUtils::format_option_datetime_with_offset(None, None, None),
-    ///     None,
-    /// );
-    /// ```
-    pub fn format_option_datetime_with_offset(
-        value: Option<NaiveDateTime>,
-        offset: Option<TimeZoneOffset>,
-        template: Option<&str>,
-    ) -> Option<String> {
-        Self::format_option_datetime_with_offset_chrono(value, offset, template)
-    }
-}
-
 fn date_fields(value: NaiveDate) -> Fields {
     Fields {
         year: value.year(),
@@ -372,25 +259,28 @@ mod tests {
 
     #[cfg(not(any(feature = "time", feature = "jiff")))]
     #[test]
-    fn single_backend_aliases_forward_to_chrono() {
+    fn chrono_entries_format_dates_and_datetimes() {
         let date = NaiveDate::from_ymd_opt(2024, 2, 29).unwrap();
         let value = date.and_hms_opt(1, 2, 3).unwrap();
-        assert_eq!(TimeUtils::format_date(date, None).unwrap(), "2024-02-29");
         assert_eq!(
-            TimeUtils::format_option_date(Some(date), None),
+            TimeUtils::format_date_chrono(date, None).unwrap(),
+            "2024-02-29"
+        );
+        assert_eq!(
+            TimeUtils::format_option_date_chrono(Some(date), None),
             Some("2024-02-29".to_owned())
         );
         assert_eq!(
-            TimeUtils::format_datetime(value, None).unwrap(),
+            TimeUtils::format_datetime_chrono(value, None).unwrap(),
             "2024-02-29 01:02:03"
         );
-        assert_eq!(TimeUtils::format_option_datetime(None, None), None);
+        assert_eq!(TimeUtils::format_option_datetime_chrono(None, None), None);
         assert_eq!(
-            TimeUtils::format_datetime_with_offset(value, None, None).unwrap(),
+            TimeUtils::format_datetime_with_offset_chrono(value, None, None).unwrap(),
             "2024-02-29 01:02:03"
         );
         assert_eq!(
-            TimeUtils::format_option_datetime_with_offset(Some(value), None, Some("XXX")),
+            TimeUtils::format_option_datetime_with_offset_chrono(Some(value), None, Some("XXX")),
             Some("+08:00".to_owned())
         );
     }

@@ -70,9 +70,9 @@ pub enum EmailError {
     MessageBuild,
     /// SMTP/TLS/网络传输失败。
     Transport(EmailTransportErrorKind),
-    /// 全局 [`crate::EmailUtils`] 尚未初始化。
+    /// 全局 [`crate::utils::EmailUtils`] 尚未初始化。
     NotInitialized,
-    /// 全局 [`crate::EmailUtils`] 已经成功初始化，不能覆盖。
+    /// 全局 [`crate::utils::EmailUtils`] 已经成功初始化，不能覆盖。
     AlreadyInitialized,
 }
 

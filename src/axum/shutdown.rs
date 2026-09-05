@@ -5,11 +5,14 @@ use std::{
 };
 
 use super::AxumError;
+use tokio::sync::Notify;
 
 /// 首个触发 graceful shutdown 的可扩展原因。
 /// # Examples
 /// ```rust
-/// # #[cfg(all(feature="axum",feature="tokio"))] { assert_eq!(axutils::AxumShutdownReason::Programmatic.to_string(),"programmatic"); }
+/// # use axutils::axum::*;
+/// # use axutils::axum::*;
+/// # #[cfg(feature="axum")] { assert_eq!(AxumShutdownReason::Programmatic.to_string(),"programmatic"); }
 /// ```
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[non_exhaustive]
@@ -46,8 +49,12 @@ impl AxumServeOutcome {
     /// 返回实际监听地址，包括端口 0 bind 后的真实端口。
     /// # Examples
     /// ```rust,no_run
-    /// # async fn example(server: axutils::AxumServer, listener: tokio::net::TcpListener)->Result<(),axutils::AxumError>{
-    /// let outcome=server.serve_with_shutdown(listener,async{axutils::AxumShutdownReason::Programmatic}).await?;let _=outcome.local_addr();
+    /// # use axutils::axum::*;
+    /// # use axutils::tokio::*;
+    /// # use tokio::net::TcpListener;
+    /// # use axutils::axum::*;
+    /// # async fn example(server: AxumServer, listener: TcpListener)->Result<(),AxumError>{
+    /// let outcome=server.serve_with_shutdown(listener,async{AxumShutdownReason::Programmatic}).await?;let _=outcome.local_addr();
     /// # Ok(()) }
     /// ```
     pub fn local_addr(&self) -> SocketAddr {
@@ -56,8 +63,12 @@ impl AxumServeOutcome {
     /// 返回首个关闭原因。
     /// # Examples
     /// ```rust,no_run
-    /// # async fn example(server: axutils::AxumServer, listener: tokio::net::TcpListener)->Result<(),axutils::AxumError>{
-    /// let outcome=server.serve_with_shutdown(listener,async{axutils::AxumShutdownReason::Programmatic}).await?;assert_eq!(outcome.reason(),&axutils::AxumShutdownReason::Programmatic);
+    /// # use axutils::axum::*;
+    /// # use axutils::tokio::*;
+    /// # use tokio::net::TcpListener;
+    /// # use axutils::axum::*;
+    /// # async fn example(server: AxumServer, listener: TcpListener)->Result<(),AxumError>{
+    /// let outcome=server.serve_with_shutdown(listener,async{AxumShutdownReason::Programmatic}).await?;assert_eq!(outcome.reason(),&AxumShutdownReason::Programmatic);
     /// # Ok(()) }
     /// ```
     pub fn reason(&self) -> &AxumShutdownReason {
@@ -76,13 +87,13 @@ pub(crate) enum Phase {
 }
 pub(crate) struct Shared {
     pub phase: Mutex<Phase>,
-    pub notify: tokio::sync::Notify,
+    pub notify: Notify,
 }
 impl Shared {
     pub fn new() -> Self {
         Self {
             phase: Mutex::new(Phase::Ready),
-            notify: tokio::sync::Notify::new(),
+            notify: Notify::new(),
         }
     }
 }
@@ -91,7 +102,9 @@ impl Shared {
 ///
 /// # Examples
 /// ```rust
-/// # #[cfg(all(feature="axum",feature="tokio"))] { let server=axutils::AxumApp::new().into_server_builder().build().unwrap();let _handle=server.shutdown_handle(); }
+/// # use axutils::axum::*;
+/// # use axutils::axum::*;
+/// # #[cfg(feature="axum")] { let server=AxumApp::new().into_server_builder().build().unwrap();let _handle=server.shutdown_handle(); }
 /// ```
 #[derive(Clone)]
 pub struct AxumShutdownHandle {
@@ -103,7 +116,9 @@ impl AxumShutdownHandle {
     /// Ready/Starting 返回 NotRunning，Stopped/Abandoned 返回对应终态错误。
     /// # Examples
     /// ```rust
-    /// # #[cfg(all(feature="axum",feature="tokio"))] { let server=axutils::AxumApp::new().into_server_builder().build().unwrap();assert!(matches!(server.shutdown_handle().shutdown(axutils::AxumShutdownReason::Programmatic),Err(axutils::AxumError::NotRunning))); }
+    /// # use axutils::axum::*;
+    /// # use axutils::axum::*;
+    /// # #[cfg(feature="axum")] { let server=AxumApp::new().into_server_builder().build().unwrap();assert!(matches!(server.shutdown_handle().shutdown(AxumShutdownReason::Programmatic),Err(AxumError::NotRunning))); }
     /// ```
     pub fn shutdown(&self, reason: AxumShutdownReason) -> Result<AxumShutdownReason, AxumError> {
         let mut phase = self.shared.phase.lock().expect("Axum phase mutex poisoned");

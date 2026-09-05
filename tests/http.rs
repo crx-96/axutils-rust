@@ -7,10 +7,13 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use axutils::{
+use axutils::http::{
     DeduplicationPolicy, HttpClient, HttpConfig, HttpError, HttpHeaders, HttpMethod, HttpRequest,
-    RetryPolicy,
+    HttpTransportErrorKind, RetryPolicy,
 };
+use axutils::utils::HttpUtils;
+#[cfg(feature = "http-async")]
+use tokio::time as tokio_time;
 
 struct TestResponse {
     status: u16,
@@ -363,7 +366,7 @@ fn retry_wait_timeout_does_not_claim_retry_budget_is_exhausted() {
     assert!(matches!(
         error,
         HttpError::Transport {
-            kind: axutils::HttpTransportErrorKind::Timeout,
+            kind: HttpTransportErrorKind::Timeout,
             attempts: 1,
             exhausted: false,
         }
@@ -399,7 +402,7 @@ fn client_and_global_entry_are_send_and_sync() {
     fn assert_send_sync<T: Send + Sync>() {}
 
     assert_send_sync::<HttpClient>();
-    assert_send_sync::<axutils::HttpUtils>();
+    assert_send_sync::<HttpUtils>();
 }
 
 #[test]
@@ -726,7 +729,7 @@ fn completed_cache_evicts_by_entry_and_body_budgets() {
     server.join().expect("server thread");
 }
 
-#[cfg(feature = "tokio")]
+#[cfg(feature = "http-async")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn sync_entry_rejects_tokio_runtime_and_async_entry_works() {
     let (address, server) = spawn_server(vec![TestResponse {
@@ -745,7 +748,7 @@ async fn sync_entry_rejects_tokio_runtime_and_async_entry_works() {
     server.join().expect("server thread");
 }
 
-#[cfg(feature = "tokio")]
+#[cfg(feature = "http-async")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn async_retry_attempt_count_includes_initial_request() {
     let (address, server) = spawn_server(vec![
@@ -777,7 +780,7 @@ async fn async_retry_attempt_count_includes_initial_request() {
     server.join().expect("server thread");
 }
 
-#[cfg(feature = "tokio")]
+#[cfg(feature = "http-async")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn async_single_flight_merges_safe_requests() {
     let (address, server) = spawn_server(vec![TestResponse {
@@ -802,7 +805,7 @@ async fn async_single_flight_merges_safe_requests() {
     server.join().expect("server thread");
 }
 
-#[cfg(feature = "tokio")]
+#[cfg(feature = "http-async")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn follower_timeout_does_not_cancel_a_longer_leader() {
     let (address, server) = spawn_server(vec![TestResponse {
@@ -822,7 +825,7 @@ async fn follower_timeout_does_not_cancel_a_longer_leader() {
             )
             .await
     });
-    tokio::time::sleep(Duration::from_millis(20)).await;
+    tokio_time::sleep(Duration::from_millis(20)).await;
     let follower = client
         .execute_async(
             HttpRequest::new(HttpMethod::Get, "/follower-timeout")
@@ -838,7 +841,7 @@ async fn follower_timeout_does_not_cancel_a_longer_leader() {
     server.join().expect("server thread");
 }
 
-#[cfg(feature = "tokio")]
+#[cfg(feature = "http-async")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn cancelled_leader_publishes_coalesced_cancellation_to_follower() {
     let (address, server) = spawn_server(vec![TestResponse {
@@ -853,14 +856,14 @@ async fn cancelled_leader_publishes_coalesced_cancellation_to_follower() {
             .execute_async(HttpRequest::new(HttpMethod::Get, "/leader-cancel").expect("request"))
             .await
     });
-    tokio::time::sleep(Duration::from_millis(20)).await;
+    tokio_time::sleep(Duration::from_millis(20)).await;
     let follower_client = Arc::clone(&client);
     let follower = tokio::spawn(async move {
         follower_client
             .execute_async(HttpRequest::new(HttpMethod::Get, "/leader-cancel").expect("request"))
             .await
     });
-    tokio::time::sleep(Duration::from_millis(20)).await;
+    tokio_time::sleep(Duration::from_millis(20)).await;
     leader.abort();
     assert!(leader
         .await

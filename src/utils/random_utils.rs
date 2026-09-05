@@ -72,7 +72,7 @@ impl RandomUtils {
     /// ```
     /// # #[cfg(feature = "rand")]
     /// # {
-    /// use axutils::RandomUtils;
+    /// use axutils::utils::RandomUtils;
     ///
     /// let value = RandomUtils::numeric_string(12).expect("the string should be allocatable");
     /// assert_eq!(value.len(), 12);
@@ -101,7 +101,7 @@ impl RandomUtils {
     /// ```
     /// # #[cfg(feature = "rand")]
     /// # {
-    /// use axutils::{LetterCase, RandomUtils};
+    /// use axutils::utils::{LetterCase, RandomUtils};
     ///
     /// let value = RandomUtils::alphabetic_string(12, LetterCase::Upper)
     ///     .expect("the string should be allocatable");
@@ -136,7 +136,7 @@ impl RandomUtils {
     /// ```
     /// # #[cfg(feature = "rand")]
     /// # {
-    /// use axutils::RandomUtils;
+    /// use axutils::utils::RandomUtils;
     ///
     /// let value = RandomUtils::alphanumeric_string(16)
     ///     .expect("the string should be allocatable");
@@ -163,7 +163,7 @@ impl RandomUtils {
     /// ```
     /// # #[cfg(feature = "rand")]
     /// # {
-    /// use axutils::RandomUtils;
+    /// use axutils::utils::RandomUtils;
     ///
     /// let value = RandomUtils::integer(1..=100).expect("the range should be valid");
     /// assert!((1..=100).contains(&value));
@@ -200,7 +200,7 @@ impl RandomUtils {
     /// ```
     /// # #[cfg(feature = "rand")]
     /// # {
-    /// use axutils::RandomUtils;
+    /// use axutils::utils::RandomUtils;
     ///
     /// let value = RandomUtils::float(-1.0..=1.0).expect("the range should be valid");
     /// assert!((-1.0..=1.0).contains(&value));

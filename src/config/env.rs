@@ -7,7 +7,7 @@
 //! [`ConfigError::UndefinedVariable`]，不会静默替换为空字符串。这些语义与 `dotenv`/`dotenvy`
 //! 存在已知差异，本 crate 不声称与其完全兼容。
 
-use std::{borrow::Cow, collections::BTreeMap};
+use std::{borrow::Cow, collections::BTreeMap, env as process_env};
 
 use super::{error::ConfigError, value::ConfigValue};
 
@@ -371,7 +371,7 @@ fn resolve_variable<'a>(
         return Ok(Cow::Borrowed(value));
     }
     if allow_env_fallback {
-        if let Ok(value) = std::env::var(name) {
+        if let Ok(value) = process_env::var(name) {
             return Ok(Cow::Owned(value));
         }
     }
@@ -422,26 +422,25 @@ fn push_str_bounded(
 /// 序列化所有会读写进程环境变量的测试，避免与同一测试二进制内并行运行的其他测试竞争。
 #[cfg(test)]
 pub(crate) mod env_test_lock {
-    pub(crate) static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    use std::sync::Mutex;
+
+    pub(crate) static LOCK: Mutex<()> = Mutex::new(());
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{env_test_lock::LOCK, parse_value as parse_value_inner};
-    use crate::ConfigError;
+    use std::{collections::BTreeMap, env as process_env};
+
+    use super::{self as env_config, env_test_lock::LOCK};
+    use crate::config::{ConfigError, ConfigValue};
 
     const TEST_MAX_BYTES: usize = 1024 * 1024;
 
-    fn parse_value(
-        text: &str,
-        allow_env_fallback: bool,
-    ) -> Result<crate::ConfigValue, ConfigError> {
-        parse_value_inner(text, allow_env_fallback, TEST_MAX_BYTES)
+    fn parse_value(text: &str, allow_env_fallback: bool) -> Result<ConfigValue, ConfigError> {
+        env_config::parse_value(text, allow_env_fallback, TEST_MAX_BYTES)
     }
 
-    fn table_of(
-        value: &crate::ConfigValue,
-    ) -> &std::collections::BTreeMap<String, crate::ConfigValue> {
+    fn table_of(value: &ConfigValue) -> &BTreeMap<String, ConfigValue> {
         value.as_table().expect("env should parse to a table")
     }
 
@@ -516,7 +515,7 @@ mod tests {
     fn interpolation_prefers_file_value_over_process_env() {
         let _guard = LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         let env_key = "AXUTILS_CONFIG_ENV_TEST_INTERP_FILE_PRIORITY";
-        std::env::set_var(env_key, "from-process-env");
+        process_env::set_var(env_key, "from-process-env");
         let text = format!("BASE=file-value\nDERIVED=\"${{BASE}}\"\nENVVAR=\"${{{env_key}}}\"\n");
         let value = parse_value(&text, true).expect("parse should succeed");
         let table = table_of(&value);
@@ -528,21 +527,21 @@ mod tests {
             table.get("ENVVAR").and_then(|v| v.as_str()),
             Some("from-process-env")
         );
-        std::env::remove_var(env_key);
+        process_env::remove_var(env_key);
     }
 
     #[test]
     fn interpolation_errors_when_fallback_disabled() {
         let _guard = LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         let env_key = "AXUTILS_CONFIG_ENV_TEST_INTERP_FALLBACK_DISABLED";
-        std::env::set_var(env_key, "should-not-be-used");
+        process_env::set_var(env_key, "should-not-be-used");
         let text = format!("DERIVED=\"${{{env_key}}}\"\n");
         let error = parse_value(&text, false).expect_err("fallback disabled should error");
         assert!(matches!(
             error,
             ConfigError::UndefinedVariable { key, .. } if key == env_key
         ));
-        std::env::remove_var(env_key);
+        process_env::remove_var(env_key);
     }
 
     #[test]
@@ -586,7 +585,7 @@ mod tests {
     fn bounds_cumulative_interpolation_output() {
         let text = "A=1234\nB=\"${A}${A}\"\nC=\"${B}${B}\"\n";
         assert!(matches!(
-            parse_value_inner(text, false, 20),
+            env_config::parse_value(text, false, 20),
             Err(ConfigError::ExpandedValueTooLarge { limit: 20 })
         ));
     }

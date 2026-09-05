@@ -9,7 +9,7 @@ use jsonwebtoken::Algorithm;
 /// # Examples
 ///
 /// ```
-/// use axutils::JwtAlgorithm;
+/// use axutils::jwt::JwtAlgorithm;
 ///
 /// let algorithm = JwtAlgorithm::Hs256;
 /// assert_eq!(algorithm, JwtAlgorithm::Hs256);
@@ -22,7 +22,9 @@ pub enum JwtAlgorithm {
     /// # Examples
     ///
     /// ```
-    /// let _algorithm = axutils::JwtAlgorithm::Hs256;
+    /// use axutils::jwt::JwtAlgorithm;
+    ///
+    /// let _algorithm = JwtAlgorithm::Hs256;
     /// ```
     Hs256,
     /// HMAC with SHA-384.
@@ -30,7 +32,9 @@ pub enum JwtAlgorithm {
     /// # Examples
     ///
     /// ```
-    /// let _algorithm = axutils::JwtAlgorithm::Hs384;
+    /// use axutils::jwt::JwtAlgorithm;
+    ///
+    /// let _algorithm = JwtAlgorithm::Hs384;
     /// ```
     Hs384,
     /// HMAC with SHA-512.
@@ -38,7 +42,9 @@ pub enum JwtAlgorithm {
     /// # Examples
     ///
     /// ```
-    /// let _algorithm = axutils::JwtAlgorithm::Hs512;
+    /// use axutils::jwt::JwtAlgorithm;
+    ///
+    /// let _algorithm = JwtAlgorithm::Hs512;
     /// ```
     Hs512,
     /// RSA PKCS#1 v1.5 with SHA-256.
@@ -46,7 +52,9 @@ pub enum JwtAlgorithm {
     /// # Examples
     ///
     /// ```
-    /// let _algorithm = axutils::JwtAlgorithm::Rs256;
+    /// use axutils::jwt::JwtAlgorithm;
+    ///
+    /// let _algorithm = JwtAlgorithm::Rs256;
     /// ```
     Rs256,
     /// RSA PKCS#1 v1.5 with SHA-384.
@@ -54,7 +62,9 @@ pub enum JwtAlgorithm {
     /// # Examples
     ///
     /// ```
-    /// let _algorithm = axutils::JwtAlgorithm::Rs384;
+    /// use axutils::jwt::JwtAlgorithm;
+    ///
+    /// let _algorithm = JwtAlgorithm::Rs384;
     /// ```
     Rs384,
     /// RSA PKCS#1 v1.5 with SHA-512.
@@ -62,7 +72,9 @@ pub enum JwtAlgorithm {
     /// # Examples
     ///
     /// ```
-    /// let _algorithm = axutils::JwtAlgorithm::Rs512;
+    /// use axutils::jwt::JwtAlgorithm;
+    ///
+    /// let _algorithm = JwtAlgorithm::Rs512;
     /// ```
     Rs512,
     /// RSA-PSS with SHA-256.
@@ -70,7 +82,9 @@ pub enum JwtAlgorithm {
     /// # Examples
     ///
     /// ```
-    /// let _algorithm = axutils::JwtAlgorithm::Ps256;
+    /// use axutils::jwt::JwtAlgorithm;
+    ///
+    /// let _algorithm = JwtAlgorithm::Ps256;
     /// ```
     Ps256,
     /// RSA-PSS with SHA-384.
@@ -78,7 +92,9 @@ pub enum JwtAlgorithm {
     /// # Examples
     ///
     /// ```
-    /// let _algorithm = axutils::JwtAlgorithm::Ps384;
+    /// use axutils::jwt::JwtAlgorithm;
+    ///
+    /// let _algorithm = JwtAlgorithm::Ps384;
     /// ```
     Ps384,
     /// RSA-PSS with SHA-512.
@@ -86,7 +102,9 @@ pub enum JwtAlgorithm {
     /// # Examples
     ///
     /// ```
-    /// let _algorithm = axutils::JwtAlgorithm::Ps512;
+    /// use axutils::jwt::JwtAlgorithm;
+    ///
+    /// let _algorithm = JwtAlgorithm::Ps512;
     /// ```
     Ps512,
     /// ECDSA P-256 with SHA-256.
@@ -94,7 +112,9 @@ pub enum JwtAlgorithm {
     /// # Examples
     ///
     /// ```
-    /// let _algorithm = axutils::JwtAlgorithm::Es256;
+    /// use axutils::jwt::JwtAlgorithm;
+    ///
+    /// let _algorithm = JwtAlgorithm::Es256;
     /// ```
     Es256,
     /// ECDSA P-384 with SHA-384.
@@ -102,7 +122,9 @@ pub enum JwtAlgorithm {
     /// # Examples
     ///
     /// ```
-    /// let _algorithm = axutils::JwtAlgorithm::Es384;
+    /// use axutils::jwt::JwtAlgorithm;
+    ///
+    /// let _algorithm = JwtAlgorithm::Es384;
     /// ```
     Es384,
     /// Ed25519 EdDSA. Ed448 is not supported.
@@ -110,7 +132,9 @@ pub enum JwtAlgorithm {
     /// # Examples
     ///
     /// ```
-    /// let _algorithm = axutils::JwtAlgorithm::Ed25519;
+    /// use axutils::jwt::JwtAlgorithm;
+    ///
+    /// let _algorithm = JwtAlgorithm::Ed25519;
     /// ```
     Ed25519,
 }

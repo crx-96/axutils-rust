@@ -102,7 +102,7 @@ impl RetryPolicy {
     /// # Examples
     ///
     /// ```
-    /// use axutils::RetryPolicy;
+    /// use axutils::http::RetryPolicy;
     /// use std::time::Duration;
     ///
     /// let policy = RetryPolicy::new();
@@ -117,7 +117,7 @@ impl RetryPolicy {
     /// # Examples
     ///
     /// ```
-    /// use axutils::RetryPolicy;
+    /// use axutils::http::RetryPolicy;
     /// use std::time::Duration;
     ///
     /// let policy = RetryPolicy::new();
@@ -137,7 +137,7 @@ impl RetryPolicy {
     /// # Examples
     ///
     /// ```
-    /// use axutils::RetryPolicy;
+    /// use axutils::http::RetryPolicy;
     ///
     /// let policy = RetryPolicy::new();
     /// assert!(policy.retry_statuses().any(|status| *status == 503));

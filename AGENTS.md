@@ -35,6 +35,19 @@ Git/工作区操作、测试基础设施调整及其他不改变也不判断 Rus
 能力默认可用，其他能力通过显式 feature 提供。工具类、领域模块、公共导出、feature、依赖和
 适用范围以 [`docs/module-map.md`](docs/module-map.md) 为唯一定位清单。
 
+当前架构基线：
+
+- 保持单 crate 分域；依赖方向为 `utils façade -> domain public API -> domain internals -> dependency`，
+  领域实现不得反向依赖 `utils`；
+- crate 根只公开领域模块，不平铺类型；Client、配置、错误和模型使用
+  `axutils::<domain>::Type`，所有 `*Utils` 使用 `axutils::utils::XxxUtils`；
+- `utils` 叶模块与领域实现模块保持私有，不新增 `prelude` 或兼容别名；
+- 状态型 façade 只负责初始化、状态和实例访问；业务调用通过 Client、codec、scheduler 或 server
+  实例完成；
+- feature 以用户能力命名，单独启用即提供对应 API；provider 依赖名不是公共 feature。单独
+  `tokio` 不开放其他领域异步 API；
+- library 不注册全局 allocator；最终进程的 allocator 由下游 binary 选择。
+
 - `tests/` 和 `tests/fixtures/` 是回归测试与 feature/API/依赖契约的一部分；不得为通过当前测试而删除或放宽；
 - `tests/email_live.rs`、`tests/redis_live.rs` 等真实外部服务测试固定为 ignored，只有用户明确授权、
   受控服务和被忽略的本地配置同时满足时才可运行；
@@ -44,6 +57,21 @@ Git/工作区操作、测试基础设施调整及其他不改变也不判断 Rus
   规则、CI、开发工具、Skill 和文档整理不写入其中；
 - `Cargo.toml` 的 `package.include` 是发布白名单；开发者标准、规则、测试、`docs/skills/` 和本地配置
   不属于发布包；library crate 不将根目录 `Cargo.lock` 作为依赖版本策略提交。
+
+## 重构与验证顺序
+
+跨模块重构先稳定 `src/**`，在不改正式测试语义的前提下让原回归通过；随后才调整
+`tests/**`、fixture 与 harness；公共契约稳定后最后更新 Rustdoc、README、领域文档、本文件和
+审查 Skill。不得以提速为由删除负向、边界或安全契约。
+
+路径调用遵循“短路径但保留来源”：`use` 可写完整来源，表达式和签名通过一个有业务含义的模块
+限定符调用；`execute`、`parse`、`record_client_init` 等通用函数不得裸导入。Clippy 的
+`absolute_paths` 门禁不得放宽。负向编译 fixture 仅可在被验证的旧路径或缺失能力目标表达式中使用
+完整路径，不得把该例外扩展到其他源码、测试或可执行文档示例。
+
+开发命令分为快速、领域、完整非 live 和发布前四级，统一见
+[`docs/develop.md`](docs/develop.md)。feature matrix 与文档示例 harness 是公共契约门禁；真实服务
+测试不属于普通全量验证。
 
 ## 基本工作约定
 

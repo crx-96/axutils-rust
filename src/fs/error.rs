@@ -11,7 +11,7 @@ use std::{fmt, io, path::PathBuf};
 /// # Examples
 ///
 /// ```
-/// use axutils::FsError;
+/// use axutils::fs::FsError;
 ///
 /// fn classify(error: FsError) -> &'static str {
 ///     match error {
@@ -30,7 +30,7 @@ pub enum FsError {
     /// # Examples
     ///
     /// ```rust,no_run
-    /// use axutils::{FsError, FsUtils};
+    /// use axutils::{fs::FsError, utils::FsUtils};
     ///
     /// let error = FsUtils::read_bytes("missing-file", 1).unwrap_err();
     /// assert!(matches!(error, FsError::Io { operation: "read_bytes", .. }));
@@ -48,7 +48,7 @@ pub enum FsError {
     /// # Examples
     ///
     /// ```rust,no_run
-    /// use axutils::{FsError, FsUtils};
+    /// use axutils::{fs::FsError, utils::FsUtils};
     ///
     /// let error = FsUtils::copy_file("missing-source", "destination").unwrap_err();
     /// assert!(matches!(error, FsError::PairIo { operation: "copy_file", .. }));
@@ -68,7 +68,7 @@ pub enum FsError {
     /// # Examples
     ///
     /// ```rust,no_run
-    /// use axutils::{FsError, FsUtils};
+    /// use axutils::{fs::FsError, utils::FsUtils};
     ///
     /// let error = FsUtils::read_to_string("binary-file", 1024).unwrap_err();
     /// if let FsError::NotUtf8 { path } = error {
@@ -84,7 +84,7 @@ pub enum FsError {
     /// # Examples
     ///
     /// ```rust,no_run
-    /// use axutils::{FsError, FsUtils};
+    /// use axutils::{fs::FsError, utils::FsUtils};
     ///
     /// let error = FsUtils::read_bytes("example.bin", 0).unwrap_err();
     /// assert!(matches!(error, FsError::FileTooLarge { limit: 0, .. }));
@@ -100,7 +100,7 @@ pub enum FsError {
     /// # Examples
     ///
     /// ```rust,no_run
-    /// use axutils::{FsError, FsUtils};
+    /// use axutils::{fs::FsError, utils::FsUtils};
     ///
     /// let error = FsUtils::list_dir("example-dir", 0).unwrap_err();
     /// assert!(matches!(
@@ -119,7 +119,7 @@ pub enum FsError {
     /// # Examples
     ///
     /// ```rust,no_run
-    /// use axutils::{FsError, FsUtils};
+    /// use axutils::{fs::FsError, utils::FsUtils};
     ///
     /// let error = FsUtils::read_bytes("unused", usize::MAX).unwrap_err();
     /// assert!(matches!(
@@ -136,7 +136,7 @@ pub enum FsError {
     /// # Examples
     ///
     /// ```rust,no_run
-    /// use axutils::{FsError, FsUtils};
+    /// use axutils::{fs::FsError, utils::FsUtils};
     ///
     /// let error = FsUtils::copy_file("directory", "destination").unwrap_err();
     /// assert!(matches!(
@@ -155,7 +155,7 @@ pub enum FsError {
     /// # Examples
     ///
     /// ```
-    /// use axutils::FsError;
+    /// use axutils::fs::FsError;
     ///
     /// fn is_runtime_required(error: FsError) -> bool {
     ///     matches!(error, FsError::RuntimeRequired)

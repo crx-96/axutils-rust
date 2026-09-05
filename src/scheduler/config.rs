@@ -22,9 +22,11 @@ impl SchedulerConfig {
     /// # Examples
     ///
     /// ```rust
-    /// # #[cfg(all(feature="chrono",feature="chrono_tz",feature="tokio",feature="croner"))]
-    /// # fn example() -> Result<(), axutils::SchedulerError> {
-    /// let config = axutils::SchedulerConfig::new(32)?;
+    /// # use axutils::scheduler::*;
+    /// # use axutils::scheduler::*;
+    /// # #[cfg(feature="scheduler")]
+    /// # fn example() -> Result<(), SchedulerError> {
+    /// let config = SchedulerConfig::new(32)?;
     /// assert_eq!(config.max_tasks, 32);
     /// # Ok(()) }
     /// # fn main() {}
@@ -73,9 +75,11 @@ impl TaskSchedule {
     /// # Examples
     ///
     /// ```rust
-    /// # #[cfg(all(feature="chrono",feature="chrono_tz",feature="tokio",feature="croner"))] {
-    /// let schedule = axutils::TaskSchedule::once(std::time::Duration::ZERO);
-    /// assert!(matches!(schedule, axutils::TaskSchedule::Once(_)));
+    /// # use axutils::scheduler::*;
+    /// # use axutils::scheduler::*;
+    /// # #[cfg(feature="scheduler")] {
+    /// let schedule = TaskSchedule::once(std::time::Duration::ZERO);
+    /// assert!(matches!(schedule, TaskSchedule::Once(_)));
     /// # }
     /// ```
     pub fn once(delay: Duration) -> Self {
@@ -87,9 +91,11 @@ impl TaskSchedule {
     /// # Examples
     ///
     /// ```rust
-    /// # #[cfg(all(feature="chrono",feature="chrono_tz",feature="tokio",feature="croner"))] {
-    /// let schedule = axutils::TaskSchedule::interval(std::time::Duration::from_secs(5));
-    /// assert!(matches!(schedule, axutils::TaskSchedule::Interval(_)));
+    /// # use axutils::scheduler::*;
+    /// # use axutils::scheduler::*;
+    /// # #[cfg(feature="scheduler")] {
+    /// let schedule = TaskSchedule::interval(std::time::Duration::from_secs(5));
+    /// assert!(matches!(schedule, TaskSchedule::Interval(_)));
     /// # }
     /// ```
     pub fn interval(period: Duration) -> Self {
@@ -101,9 +107,11 @@ impl TaskSchedule {
     /// # Examples
     ///
     /// ```rust
-    /// # #[cfg(all(feature="chrono",feature="chrono_tz",feature="tokio",feature="croner"))] {
-    /// let schedule = axutils::TaskSchedule::cron("0 0 0 * * *", "Asia/Shanghai");
-    /// assert!(matches!(schedule, axutils::TaskSchedule::Cron { .. }));
+    /// # use axutils::scheduler::*;
+    /// # use axutils::scheduler::*;
+    /// # #[cfg(feature="scheduler")] {
+    /// let schedule = TaskSchedule::cron("0 0 0 * * *", "Asia/Shanghai");
+    /// assert!(matches!(schedule, TaskSchedule::Cron { .. }));
     /// # }
     /// ```
     pub fn cron(expression: impl Into<String>, timezone: impl Into<String>) -> Self {

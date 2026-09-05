@@ -1,6 +1,7 @@
 #![cfg(feature = "redis")]
 
-use axutils::{RedisConfig, RedisError, RedisTransportErrorKind, RedisUtils};
+use axutils::redis::{RedisConfig, RedisError, RedisTransportErrorKind};
+use axutils::utils::RedisUtils;
 
 #[path = "support/redis_server.rs"]
 mod redis_server;
@@ -10,7 +11,7 @@ use redis_server::{test_config, RedisTestServer};
 fn global_entry_reports_state_without_exposing_a_client() {
     assert!(!RedisUtils::is_initialized());
     assert!(matches!(
-        RedisUtils::get::<_, u8>("missing"),
+        RedisUtils::client().and_then(|client| client.get::<_, u8>("missing")),
         Err(RedisError::NotInitialized)
     ));
     assert!(matches!(
@@ -117,6 +118,7 @@ fn global_entry_reports_state_without_exposing_a_client() {
         Err(RedisError::AlreadyInitialized)
     ));
     assert!(unused.commands.lock().unwrap().is_empty());
-    assert_eq!(RedisUtils::ping().unwrap(), "PONG");
-    assert_eq!(RedisUtils::get_bytes(""), Err(RedisError::InvalidKey));
+    let client = RedisUtils::client().unwrap();
+    assert_eq!(client.ping().unwrap(), "PONG");
+    assert_eq!(client.get_bytes(""), Err(RedisError::InvalidKey));
 }

@@ -4,6 +4,9 @@ use std::{collections::BTreeMap, fmt};
 
 use serde::de::{self, DeserializeSeed, Deserializer, MapAccess, SeqAccess, Visitor};
 
+#[cfg(feature = "config-toml")]
+use toml::value::Datetime;
+
 /// 深度限制安全网，仅在通过标准 [`serde::Deserialize`] trait 构建 [`ConfigValue`]
 /// 时使用（该场景下无法携带调用方在 [`crate::config::ConfigLoader`] 上配置的深度上限）。
 /// 数值对应本 crate 允许配置的深度上限的最大值（见 [`crate::config::ConfigLoader::with_max_depth`]）。
@@ -13,7 +16,7 @@ const MAX_DEPTH_CEILING: usize = 256;
 /// 字段的“伪表”来传递原始字符串表示，而不是直接调用 `visit_str`；本 crate 的 TOML 后端据此
 /// 识别并还原为 [`ConfigValue::String`]，其余后端不做这一特殊处理，避免把恰好使用同名键的
 /// 普通表误判为日期时间。
-#[cfg(feature = "toml")]
+#[cfg(feature = "config-toml")]
 pub(crate) const TOML_DATETIME_FIELD: &str = "$__toml_private_datetime";
 
 const DEPTH_MARKER: &str = "\u{0}axutils:config:depth\u{0}";
@@ -97,14 +100,14 @@ pub enum ConfigValue {
     /// 布尔值。
     Bool(bool),
     /// 64 位有符号整数；解析阶段发现的、超出该范围的整数会返回
-    /// [`crate::ConfigError::ValueOutOfRange`]，不会静默转换为浮点数。**已知限制**：JSON 后端
+    /// [`crate::config::ConfigError::ValueOutOfRange`]，不会静默转换为浮点数。**已知限制**：JSON 后端
     /// （不启用 `serde_json` 的 `arbitrary_precision` feature）对超过 `u64::MAX`
     /// （约 1.8×10¹⁹）且不含小数点/指数的纯整数字面量，会在其自身词法阶段就退化为浮点数，
     /// 本 crate 在这种情况下无法检测到精度丢失；`i64::MAX` 到 `u64::MAX` 之间的整数字面量
     /// 不受影响，仍会被正确拒绝。
     Integer(i64),
     /// 64 位浮点数。YAML 后端的无类型读取默认拒绝 `.inf`/`.nan` 等非有限值（返回
-    /// [`crate::ConfigError::Parse`]），不会产生非有限的 `Float`；JSON/TOML 语法本身不支持
+    /// [`crate::config::ConfigError::Parse`]），不会产生非有限的 `Float`；JSON/TOML 语法本身不支持
     /// 这类字面量。
     Float(f64),
     /// 字符串；TOML 的日期时间、YAML 的时间戳等无原生对应类型的标量统一保留为原始字符串。
@@ -127,7 +130,7 @@ impl ConfigValue {
     /// # Examples
     ///
     /// ```
-    /// use axutils::{ConfigFormat, ConfigUtils, ConfigValue};
+    /// use axutils::{config::{ConfigFormat, ConfigValue}, utils::ConfigUtils};
     ///
     /// let value =
     ///     ConfigUtils::parse_value(r#"{"server": {"port": 8080}}"#, ConfigFormat::Json).unwrap();
@@ -148,7 +151,7 @@ impl ConfigValue {
     /// # Examples
     ///
     /// ```
-    /// use axutils::ConfigValue;
+    /// use axutils::config::ConfigValue;
     ///
     /// assert_eq!(ConfigValue::Bool(true).kind(), "bool");
     /// assert_eq!(ConfigValue::Null.kind(), "null");
@@ -170,7 +173,7 @@ impl ConfigValue {
     /// # Examples
     ///
     /// ```
-    /// use axutils::ConfigValue;
+    /// use axutils::config::ConfigValue;
     ///
     /// assert_eq!(ConfigValue::Bool(true).as_bool(), Some(true));
     /// assert_eq!(ConfigValue::Integer(1).as_bool(), None);
@@ -187,7 +190,7 @@ impl ConfigValue {
     /// # Examples
     ///
     /// ```
-    /// use axutils::ConfigValue;
+    /// use axutils::config::ConfigValue;
     ///
     /// assert_eq!(ConfigValue::Integer(42).as_i64(), Some(42));
     /// assert_eq!(ConfigValue::Float(1.5).as_i64(), None);
@@ -205,7 +208,7 @@ impl ConfigValue {
     /// # Examples
     ///
     /// ```
-    /// use axutils::ConfigValue;
+    /// use axutils::config::ConfigValue;
     ///
     /// assert_eq!(ConfigValue::Float(1.5).as_f64(), Some(1.5));
     /// assert_eq!(ConfigValue::Integer(1).as_f64(), None);
@@ -222,7 +225,7 @@ impl ConfigValue {
     /// # Examples
     ///
     /// ```
-    /// use axutils::ConfigValue;
+    /// use axutils::config::ConfigValue;
     ///
     /// assert_eq!(ConfigValue::String("x".to_owned()).as_str(), Some("x"));
     /// assert_eq!(ConfigValue::Bool(true).as_str(), None);
@@ -239,7 +242,7 @@ impl ConfigValue {
     /// # Examples
     ///
     /// ```
-    /// use axutils::ConfigValue;
+    /// use axutils::config::ConfigValue;
     ///
     /// let array = ConfigValue::Array(vec![ConfigValue::Integer(1)]);
     /// assert_eq!(array.as_array().map(<[_]>::len), Some(1));
@@ -257,7 +260,7 @@ impl ConfigValue {
     /// # Examples
     ///
     /// ```
-    /// use axutils::{ConfigFormat, ConfigUtils};
+    /// use axutils::{config::ConfigFormat, utils::ConfigUtils};
     ///
     /// let value = ConfigUtils::parse_value(r#"{"a": 1}"#, ConfigFormat::Json).unwrap();
     /// assert_eq!(value.as_table().map(|table| table.len()), Some(1));
@@ -274,7 +277,7 @@ impl ConfigValue {
 ///
 /// 用于从 JSON/TOML 等提供底层 `Deserializer` 的后端构建 [`ConfigValue`]，深度计数在
 /// 每次进入数组/表时递减，为零时返回携带 [`DEPTH_MARKER`] 的错误，由调用方在捕获后映射为
-/// [`crate::ConfigError::DepthLimitExceeded`]。
+/// [`crate::config::ConfigError::DepthLimitExceeded`]。
 pub(crate) struct ConfigValueSeed {
     pub(crate) remaining_depth: usize,
     pub(crate) key: String,
@@ -292,7 +295,7 @@ impl ConfigValueSeed {
 
     /// 与 [`ConfigValueSeed::root`] 相同，但额外识别 `toml`/`toml_datetime` 用于传递日期时间
     /// 原始表示的伪表字段（见 [`TOML_DATETIME_FIELD`]），仅供 `src/config/toml.rs` 使用。
-    #[cfg(feature = "toml")]
+    #[cfg(feature = "config-toml")]
     pub(crate) fn root_for_toml(remaining_depth: usize) -> Self {
         Self {
             remaining_depth,
@@ -440,10 +443,10 @@ impl<'de> Visitor<'de> for ConfigValueVisitor {
         // `toml_datetime` exposes a datetime as a one-field pseudo-table. Consume the
         // complete map before converting it so a user table containing the marker together
         // with another field cannot cause the already-read fields to be discarded.
-        #[cfg(feature = "toml")]
+        #[cfg(feature = "config-toml")]
         if self.detect_toml_datetime && table.len() == 1 {
             if let Some(ConfigValue::String(raw)) = table.remove(TOML_DATETIME_FIELD) {
-                if raw.parse::<::toml::value::Datetime>().is_ok() {
+                if raw.parse::<Datetime>().is_ok() {
                     return Ok(ConfigValue::String(raw));
                 }
                 table.insert(TOML_DATETIME_FIELD.to_owned(), ConfigValue::String(raw));

@@ -15,7 +15,9 @@ pub(crate) const MAX_ALLOWLIST_ITEMS: usize = 32;
 /// # Examples
 ///
 /// ```
-/// let _validation = axutils::JwtValidation::new();
+/// use axutils::jwt::JwtValidation;
+///
+/// let _validation = JwtValidation::new();
 /// ```
 pub struct JwtValidation {
     pub(crate) validate_exp: bool,
@@ -65,7 +67,7 @@ impl JwtValidation {
     /// # Examples
     ///
     /// ```
-    /// use axutils::JwtValidation;
+    /// use axutils::jwt::{JwtError, JwtValidation};
     ///
     /// let validation = JwtValidation::new();
     /// let _ = validation;
@@ -93,7 +95,7 @@ impl JwtValidation {
     /// # Examples
     ///
     /// ```
-    /// use axutils::JwtValidation;
+    /// use axutils::jwt::{JwtError, JwtValidation};
     ///
     /// let _validation = JwtValidation::new().with_validate_exp(false);
     /// ```
@@ -107,7 +109,7 @@ impl JwtValidation {
     /// # Examples
     ///
     /// ```
-    /// use axutils::JwtValidation;
+    /// use axutils::jwt::JwtValidation;
     ///
     /// let _validation = JwtValidation::new().with_require_exp(false);
     /// ```
@@ -123,7 +125,7 @@ impl JwtValidation {
     /// # Examples
     ///
     /// ```
-    /// use axutils::JwtValidation;
+    /// use axutils::jwt::JwtValidation;
     ///
     /// let _validation = JwtValidation::new().with_validate_nbf(true);
     /// ```
@@ -137,7 +139,7 @@ impl JwtValidation {
     /// # Examples
     ///
     /// ```
-    /// use axutils::JwtValidation;
+    /// use axutils::jwt::JwtValidation;
     ///
     /// let _validation = JwtValidation::new().with_require_nbf(true);
     /// ```
@@ -153,7 +155,7 @@ impl JwtValidation {
     /// # Examples
     ///
     /// ```
-    /// use axutils::JwtValidation;
+    /// use axutils::jwt::JwtValidation;
     ///
     /// let _validation = JwtValidation::new().with_require_aud(true);
     /// ```
@@ -167,7 +169,7 @@ impl JwtValidation {
     /// # Examples
     ///
     /// ```
-    /// use axutils::JwtValidation;
+    /// use axutils::jwt::JwtValidation;
     ///
     /// let _validation = JwtValidation::new().with_require_iss(true);
     /// ```
@@ -181,7 +183,7 @@ impl JwtValidation {
     /// # Examples
     ///
     /// ```
-    /// use axutils::JwtValidation;
+    /// use axutils::jwt::JwtValidation;
     ///
     /// let _validation = JwtValidation::new().with_require_sub(true);
     /// ```
@@ -197,11 +199,11 @@ impl JwtValidation {
     /// # Examples
     ///
     /// ```
-    /// use axutils::JwtValidation;
+    /// use axutils::jwt::{JwtError, JwtValidation};
     ///
     /// let validation = JwtValidation::new().with_audience("api.example.com")?;
     /// let _ = validation;
-    /// # Ok::<(), axutils::JwtError>(())
+    /// # Ok::<(), JwtError>(())
     /// ```
     pub fn with_audience(self, value: impl AsRef<str>) -> Result<Self, JwtError> {
         self.with_audiences(std::iter::once(value))
@@ -215,11 +217,11 @@ impl JwtValidation {
     /// # Examples
     ///
     /// ```
-    /// use axutils::JwtValidation;
+    /// use axutils::jwt::{JwtError, JwtValidation};
     ///
     /// let validation = JwtValidation::new().with_audiences(["api", "worker"])?;
     /// let _ = validation;
-    /// # Ok::<(), axutils::JwtError>(())
+    /// # Ok::<(), JwtError>(())
     /// ```
     pub fn with_audiences<I, S>(mut self, values: I) -> Result<Self, JwtError>
     where
@@ -235,11 +237,11 @@ impl JwtValidation {
     /// # Examples
     ///
     /// ```
-    /// use axutils::JwtValidation;
+    /// use axutils::jwt::{JwtError, JwtValidation};
     ///
     /// let validation = JwtValidation::new().with_issuer("issuer.example.com")?;
     /// let _ = validation;
-    /// # Ok::<(), axutils::JwtError>(())
+    /// # Ok::<(), JwtError>(())
     /// ```
     pub fn with_issuer(self, value: impl AsRef<str>) -> Result<Self, JwtError> {
         self.with_issuers(std::iter::once(value))
@@ -252,11 +254,11 @@ impl JwtValidation {
     /// # Examples
     ///
     /// ```
-    /// use axutils::JwtValidation;
+    /// use axutils::jwt::{JwtError, JwtValidation};
     ///
     /// let validation = JwtValidation::new().with_issuers(["issuer-a", "issuer-b"])?;
     /// let _ = validation;
-    /// # Ok::<(), axutils::JwtError>(())
+    /// # Ok::<(), JwtError>(())
     /// ```
     pub fn with_issuers<I, S>(mut self, values: I) -> Result<Self, JwtError>
     where
@@ -274,11 +276,11 @@ impl JwtValidation {
     /// # Examples
     ///
     /// ```
-    /// use axutils::JwtValidation;
+    /// use axutils::jwt::{JwtError, JwtValidation};
     ///
     /// let validation = JwtValidation::new().with_subject("user-42")?;
     /// let _ = validation;
-    /// # Ok::<(), axutils::JwtError>(())
+    /// # Ok::<(), JwtError>(())
     /// ```
     pub fn with_subject(mut self, value: impl AsRef<str>) -> Result<Self, JwtError> {
         self.subject = Some(validate_string(value.as_ref(), "subject")?);
@@ -293,11 +295,11 @@ impl JwtValidation {
     /// # Examples
     ///
     /// ```
-    /// use axutils::JwtValidation;
+    /// use axutils::jwt::{JwtError, JwtValidation};
     ///
     /// let validation = JwtValidation::new().with_leeway(120)?;
     /// let _ = validation;
-    /// # Ok::<(), axutils::JwtError>(())
+    /// # Ok::<(), JwtError>(())
     /// ```
     pub fn with_leeway(mut self, leeway: u64) -> Result<Self, JwtError> {
         if leeway > MAX_LEEWAY {
@@ -338,7 +340,7 @@ impl Default for JwtValidation {
 /// # Examples
 ///
 /// ```
-/// use axutils::{JwtAlgorithm, JwtConfig, JwtSigningKey, JwtValidation};
+/// use axutils::jwt::{JwtAlgorithm, JwtConfig, JwtError, JwtSigningKey, JwtValidation};
 ///
 /// let key = JwtSigningKey::from_hmac_secret([0x11; 32])?;
 /// let _config = JwtConfig::new(
@@ -347,7 +349,7 @@ impl Default for JwtValidation {
 ///     None,
 ///     JwtValidation::new(),
 /// )?;
-/// # Ok::<(), axutils::JwtError>(())
+/// # Ok::<(), JwtError>(())
 /// ```
 pub struct JwtConfig {
     pub(crate) algorithm: JwtAlgorithm,
@@ -406,7 +408,7 @@ impl JwtConfig {
     /// # Examples
     ///
     /// ```
-    /// use axutils::{JwtAlgorithm, JwtConfig, JwtSigningKey, JwtValidation, JwtVerificationKey};
+    /// use axutils::jwt::{JwtAlgorithm, JwtConfig, JwtError, JwtSigningKey, JwtValidation, JwtVerificationKey};
     ///
     /// let signing = JwtSigningKey::from_hmac_secret([0x11; 32])?;
     /// let verifying = JwtVerificationKey::from_hmac_secret([0x11; 32])?;
@@ -417,7 +419,7 @@ impl JwtConfig {
     ///     JwtValidation::new(),
     /// )?;
     /// let _ = format!("{config:?}");
-    /// # Ok::<(), axutils::JwtError>(())
+    /// # Ok::<(), JwtError>(())
     /// ```
     pub fn new(
         algorithm: JwtAlgorithm,

@@ -4,6 +4,7 @@
 //! `RedisConfig::max_value_bytes` 仍限制编码和响应字节数，调用方应避免把不可信的深层对象
 //! 直接作为 MessagePack 值交给 Redis。
 
+use rmp_serde::Serializer as MessagePackSerializer;
 use serde::{de::DeserializeOwned, Serialize};
 
 use super::error::RedisError;
@@ -12,7 +13,7 @@ use super::error::RedisError;
 pub(crate) fn encode<T: Serialize>(value: &T, limit: usize) -> Result<Vec<u8>, RedisError> {
     let mut writer = LimitedWriter::new(limit);
     value
-        .serialize(&mut rmp_serde::Serializer::new(&mut writer))
+        .serialize(&mut MessagePackSerializer::new(&mut writer))
         .map_err(|_| {
             if writer.exceeded {
                 RedisError::ValueTooLarge { limit }

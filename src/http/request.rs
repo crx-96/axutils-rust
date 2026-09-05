@@ -191,7 +191,7 @@ impl HttpRequest {
     /// # Examples
     ///
     /// ```
-    /// use axutils::{HttpMethod, HttpRequest};
+    /// use axutils::http::{HttpMethod, HttpRequest};
     ///
     /// let request = HttpRequest::new(HttpMethod::Get, "/health").unwrap();
     /// assert_eq!(request.method(), &HttpMethod::Get);
@@ -205,7 +205,7 @@ impl HttpRequest {
     /// # Examples
     ///
     /// ```
-    /// use axutils::{HttpMethod, HttpRequest};
+    /// use axutils::http::{HttpMethod, HttpRequest};
     ///
     /// let request = HttpRequest::new(HttpMethod::Get, "/health?full=1").unwrap();
     /// assert_eq!(request.url(), "/health?full=1");
@@ -222,7 +222,7 @@ impl HttpRequest {
     /// # Examples
     ///
     /// ```
-    /// use axutils::{HttpMethod, HttpRequest};
+    /// use axutils::http::{HttpMethod, HttpRequest};
     ///
     /// let request = HttpRequest::new(HttpMethod::Get, "/health")
     ///     .unwrap()
@@ -239,7 +239,7 @@ impl HttpRequest {
     /// # Examples
     ///
     /// ```
-    /// use axutils::{HttpMethod, HttpRequest};
+    /// use axutils::http::{HttpMethod, HttpRequest};
     ///
     /// let request = HttpRequest::new(HttpMethod::Post, "/events")
     ///     .unwrap()
@@ -260,7 +260,7 @@ impl HttpRequest {
     /// # Examples
     ///
     /// ```
-    /// use axutils::{HttpMethod, HttpRequest};
+    /// use axutils::http::{HttpMethod, HttpRequest};
     /// use std::time::Duration;
     ///
     /// let request = HttpRequest::new(HttpMethod::Get, "/health")
@@ -278,7 +278,7 @@ impl HttpRequest {
     /// # Examples
     ///
     /// ```
-    /// use axutils::{HttpMethod, HttpRequest, RetryPolicy};
+    /// use axutils::http::{HttpMethod, HttpRequest, RetryPolicy};
     ///
     /// let request = HttpRequest::new(HttpMethod::Get, "/health")
     ///     .unwrap()
@@ -294,7 +294,7 @@ impl HttpRequest {
     /// # Examples
     ///
     /// ```
-    /// use axutils::{DeduplicationPolicy, HttpMethod, HttpRequest};
+    /// use axutils::http::{DeduplicationPolicy, HttpMethod, HttpRequest};
     ///
     /// let request = HttpRequest::new(HttpMethod::Get, "/health")
     ///     .unwrap()

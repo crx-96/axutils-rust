@@ -1,6 +1,8 @@
 use std::fmt;
 use std::io;
 
+use sqlx::Error as BackendError;
+
 /// SQLx 传输失败的稳定分类。
 ///
 /// 该枚举不保存 SQLx 的原始错误、SQL、连接地址、认证信息或数据库响应，适合记录到应用
@@ -62,9 +64,9 @@ pub enum SqlxError {
     },
     /// 异步 API 必须在已有的 Tokio runtime 中调用。
     RuntimeRequired,
-    /// 全局 [`crate::SqlxUtils`] 尚未初始化。
+    /// 全局 [`crate::utils::SqlxUtils`] 尚未初始化。
     NotInitialized,
-    /// 全局 [`crate::SqlxUtils`] 已经成功初始化。
+    /// 全局 [`crate::utils::SqlxUtils`] 已经成功初始化。
     AlreadyInitialized,
     /// 查询要求至少一行，但结果为空。
     RowNotFound,
@@ -88,28 +90,30 @@ pub enum SqlxError {
 impl SqlxError {
     pub(crate) fn from_upstream(error: &sqlx::Error) -> Self {
         match error {
-            sqlx::Error::RowNotFound => Self::RowNotFound,
-            sqlx::Error::PoolTimedOut => Self::PoolAcquireTimeout,
-            sqlx::Error::PoolClosed => Self::PoolClosed,
-            sqlx::Error::BeginFailed | sqlx::Error::InvalidSavePointStatement => {
+            BackendError::RowNotFound => Self::RowNotFound,
+            BackendError::PoolTimedOut => Self::PoolAcquireTimeout,
+            BackendError::PoolClosed => Self::PoolClosed,
+            BackendError::BeginFailed | BackendError::InvalidSavePointStatement => {
                 Self::TransactionFailed
             }
-            sqlx::Error::Io(error) => Self::Transport(if error.kind() == io::ErrorKind::TimedOut {
-                SqlxTransportErrorKind::Timeout
-            } else {
-                SqlxTransportErrorKind::Network
-            }),
-            sqlx::Error::Database(_) => Self::Transport(SqlxTransportErrorKind::Server),
-            sqlx::Error::Tls(_) => Self::Transport(SqlxTransportErrorKind::Tls),
-            sqlx::Error::Protocol(_) => Self::Transport(SqlxTransportErrorKind::Protocol),
-            sqlx::Error::Encode(_) => Self::Transport(SqlxTransportErrorKind::Encode),
-            sqlx::Error::Decode(_) | sqlx::Error::ColumnDecode { .. } => {
+            BackendError::Io(error) => {
+                Self::Transport(if error.kind() == io::ErrorKind::TimedOut {
+                    SqlxTransportErrorKind::Timeout
+                } else {
+                    SqlxTransportErrorKind::Network
+                })
+            }
+            BackendError::Database(_) => Self::Transport(SqlxTransportErrorKind::Server),
+            BackendError::Tls(_) => Self::Transport(SqlxTransportErrorKind::Tls),
+            BackendError::Protocol(_) => Self::Transport(SqlxTransportErrorKind::Protocol),
+            BackendError::Encode(_) => Self::Transport(SqlxTransportErrorKind::Encode),
+            BackendError::Decode(_) | BackendError::ColumnDecode { .. } => {
                 Self::Transport(SqlxTransportErrorKind::Decode)
             }
-            sqlx::Error::Configuration(_) | sqlx::Error::InvalidArgument(_) => {
+            BackendError::Configuration(_) | BackendError::InvalidArgument(_) => {
                 Self::Transport(SqlxTransportErrorKind::Connection)
             }
-            sqlx::Error::AnyDriverError(_) => Self::Transport(SqlxTransportErrorKind::Other),
+            BackendError::AnyDriverError(_) => Self::Transport(SqlxTransportErrorKind::Other),
             _ => Self::Transport(SqlxTransportErrorKind::Other),
         }
     }

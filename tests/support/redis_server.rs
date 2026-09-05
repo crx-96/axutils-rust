@@ -7,7 +7,8 @@ use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
-use axutils::RedisConfig;
+use axutils::redis::RedisConfig;
+use redis::Parser;
 
 pub struct RedisTestServer {
     pub address: SocketAddr,
@@ -46,7 +47,7 @@ impl RedisTestServer {
                         let reply = Arc::clone(&reply);
                         connections.push(thread::spawn(move || {
                             let mut reader = BufReader::new(stream.try_clone().expect("复制连接"));
-                            let mut parser = redis::Parser::new();
+                            let mut parser = Parser::new();
                             while !stop.load(Ordering::Acquire) {
                                 let value = match parser.parse_value(&mut reader) {
                                     Ok(value) => value,

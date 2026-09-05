@@ -6,14 +6,17 @@ use std::{
 };
 
 use axutils::{
-    FsChunkProcessor, FsError, FsTransferError, FsTransferOptions, FsTransferStats, FsUtils,
+    fs::{FsChunkProcessor, FsError, FsTransferError, FsTransferOptions, FsTransferStats},
+    utils::FsUtils,
 };
 
-#[cfg(feature = "tokio")]
-use axutils::FsAsyncChunkProcessor;
+#[cfg(feature = "fs-async")]
+use axutils::fs::FsAsyncChunkProcessor;
+#[cfg(feature = "fs-async")]
+use tokio::time::timeout;
 
-#[cfg(any(feature = "tempfile", feature = "tempfile-async"))]
-use axutils::FsTempConfig;
+#[cfg(any(feature = "fs-temp", feature = "fs-temp-async"))]
+use axutils::fs::{FsTempConfig, FsTempError};
 
 static TEMP_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
@@ -118,10 +121,10 @@ impl FsChunkProcessor for DuplicateProcessor {
     }
 }
 
-#[cfg(feature = "tokio")]
+#[cfg(feature = "fs-async")]
 struct AsyncIdentityProcessor;
 
-#[cfg(feature = "tokio")]
+#[cfg(feature = "fs-async")]
 impl FsAsyncChunkProcessor for AsyncIdentityProcessor {
     type Error = std::convert::Infallible;
     type Future<'a>
@@ -134,10 +137,10 @@ impl FsAsyncChunkProcessor for AsyncIdentityProcessor {
     }
 }
 
-#[cfg(feature = "tokio")]
+#[cfg(feature = "fs-async")]
 struct AsyncDuplicateProcessor;
 
-#[cfg(feature = "tokio")]
+#[cfg(feature = "fs-async")]
 impl FsAsyncChunkProcessor for AsyncDuplicateProcessor {
     type Error = std::convert::Infallible;
     type Future<'a>
@@ -153,12 +156,12 @@ impl FsAsyncChunkProcessor for AsyncDuplicateProcessor {
     }
 }
 
-#[cfg(feature = "tokio")]
+#[cfg(feature = "fs-async")]
 struct AsyncCancelAfterFirst {
     processed: usize,
 }
 
-#[cfg(feature = "tokio")]
+#[cfg(feature = "fs-async")]
 impl FsAsyncChunkProcessor for AsyncCancelAfterFirst {
     type Error = std::convert::Infallible;
     type Future<'a>
@@ -231,17 +234,10 @@ fn public_paths_cover_all_sync_methods() {
     FsUtils::remove_dir_all(root.join("tree")).expect("remove directory tree");
     assert!(!FsUtils::try_exists(root.join("tree")).expect("directory tree should be absent"));
 
-    let _: axutils::fs::FsError = FsError::RuntimeRequired;
-    let _: axutils::utils::FsUtils = axutils::utils::FsUtils;
-    let _: axutils::utils::fs_utils::FsUtils = axutils::utils::fs_utils::FsUtils;
-    assert_same_fs_utils(axutils::utils::fs_utils::FsUtils);
-    assert_same_fs_error(axutils::fs::FsError::RuntimeRequired);
+    let _: FsError = FsError::RuntimeRequired;
+    let _: FsUtils = FsUtils;
     temp.cleanup();
 }
-
-fn assert_same_fs_utils(_: axutils::FsUtils) {}
-
-fn assert_same_fs_error(_: axutils::FsError) {}
 
 #[test]
 fn sync_limits_errors_and_overwrite_contracts_are_explicit() {
@@ -635,7 +631,7 @@ fn symlink_permission_unavailable(error: &io::Error) -> bool {
         || (cfg!(windows) && error.raw_os_error() == Some(1314))
 }
 
-#[cfg(feature = "tokio")]
+#[cfg(feature = "fs-async")]
 #[tokio::test]
 async fn public_paths_cover_all_async_methods() {
     let temp = TempDir::new();
@@ -813,7 +809,7 @@ async fn public_paths_cover_all_async_methods() {
     temp.cleanup();
 }
 
-#[cfg(feature = "tokio")]
+#[cfg(feature = "fs-async")]
 #[tokio::test]
 async fn async_create_dir_all_allows_same_path_concurrency() {
     let temp = TempDir::new();
@@ -831,7 +827,7 @@ async fn async_create_dir_all_allows_same_path_concurrency() {
     temp.cleanup();
 }
 
-#[cfg(feature = "tokio")]
+#[cfg(feature = "fs-async")]
 #[tokio::test]
 async fn async_copy_and_remove_dir_all_respect_final_symlinks() {
     let temp = TempDir::new();
@@ -970,7 +966,7 @@ async fn async_copy_and_remove_dir_all_respect_final_symlinks() {
     temp.cleanup();
 }
 
-#[cfg(feature = "tokio")]
+#[cfg(feature = "fs-async")]
 #[tokio::test]
 async fn async_facade_owns_arguments_before_returning_future() {
     let temp = TempDir::new();
@@ -1001,7 +997,7 @@ async fn async_facade_owns_arguments_before_returning_future() {
     temp.cleanup();
 }
 
-#[cfg(feature = "tokio")]
+#[cfg(feature = "fs-async")]
 #[test]
 fn async_limits_are_checked_before_runtime() {
     use std::{future::Future, pin::pin, task::Context};
@@ -1051,7 +1047,7 @@ fn async_limits_are_checked_before_runtime() {
     assert_runtime_required!(FsUtils::append_async("missing", b"data"));
 }
 
-#[cfg(feature = "tokio")]
+#[cfg(feature = "fs-async")]
 #[tokio::test]
 async fn async_limit_and_utf8_semantics_match_sync() {
     let temp = TempDir::new();
@@ -1201,7 +1197,7 @@ fn sync_stream_transfer_checks_options_and_output_limit_before_writing() {
     temp.cleanup();
 }
 
-#[cfg(feature = "tokio")]
+#[cfg(feature = "fs-async")]
 #[tokio::test]
 async fn async_stream_transfer_owns_arguments_and_uses_caller_runtime() {
     let temp = TempDir::new();
@@ -1232,7 +1228,7 @@ async fn async_stream_transfer_owns_arguments_and_uses_caller_runtime() {
     temp.cleanup();
 }
 
-#[cfg(feature = "tokio")]
+#[cfg(feature = "fs-async")]
 #[tokio::test]
 async fn async_stream_transfer_processes_multiple_chunks_and_preserves_prefix_on_limit() {
     let temp = TempDir::new();
@@ -1291,7 +1287,7 @@ async fn async_stream_transfer_processes_multiple_chunks_and_preserves_prefix_on
     temp.cleanup();
 }
 
-#[cfg(feature = "tokio")]
+#[cfg(feature = "fs-async")]
 #[tokio::test]
 async fn async_stream_transfer_rejects_non_regular_source_and_destination() {
     let temp = TempDir::new();
@@ -1338,7 +1334,7 @@ async fn async_stream_transfer_rejects_non_regular_source_and_destination() {
     temp.cleanup();
 }
 
-#[cfg(feature = "tokio")]
+#[cfg(feature = "fs-async")]
 #[tokio::test]
 async fn async_stream_transfer_cancellation_keeps_written_prefix() {
     let temp = TempDir::new();
@@ -1346,7 +1342,7 @@ async fn async_stream_transfer_cancellation_keeps_written_prefix() {
     let destination = temp.path().join("destination.bin");
     FsUtils::write(&source, [b'x'; 2050]).expect("write cancellation source");
 
-    let result = tokio::time::timeout(
+    let result = timeout(
         std::time::Duration::from_millis(20),
         FsUtils::copy_file_with_async(
             &source,
@@ -1372,7 +1368,7 @@ async fn async_stream_transfer_cancellation_keeps_written_prefix() {
     temp.cleanup();
 }
 
-#[cfg(feature = "tokio")]
+#[cfg(feature = "fs-async")]
 #[test]
 fn async_stream_transfer_checks_validation_before_runtime() {
     use std::{future::Future, pin::pin, task::Context};
@@ -1417,7 +1413,7 @@ fn async_stream_transfer_checks_validation_before_runtime() {
     ));
 }
 
-#[cfg(feature = "tempfile")]
+#[cfg(feature = "fs-temp")]
 #[test]
 fn sync_temp_context_owns_configuration_and_close_reports_cleanup() {
     let temp = TempDir::new();
@@ -1471,7 +1467,7 @@ fn sync_temp_context_owns_configuration_and_close_reports_cleanup() {
         .create_temp_file();
     assert!(matches!(
         result,
-        Err(axutils::FsTempError::Create {
+        Err(FsTempError::Create {
             kind: io::ErrorKind::NotFound,
             ..
         })
@@ -1482,12 +1478,12 @@ fn sync_temp_context_owns_configuration_and_close_reports_cleanup() {
         .create_temp_file();
     assert!(matches!(
         invalid,
-        Err(axutils::FsTempError::InvalidConfig { field: "prefix" })
+        Err(FsTempError::InvalidConfig { field: "prefix" })
     ));
     temp.cleanup();
 }
 
-#[cfg(feature = "tempfile-async")]
+#[cfg(all(feature = "fs-temp-async", feature = "fs-async"))]
 #[tokio::test]
 async fn async_temp_context_supports_drop_async_and_close() {
     let temp = TempDir::new();
@@ -1539,7 +1535,7 @@ async fn async_temp_context_supports_drop_async_and_close() {
     temp.cleanup();
 }
 
-#[cfg(feature = "tempfile-async")]
+#[cfg(feature = "fs-temp-async")]
 #[tokio::test]
 async fn async_temp_drop_cancellation_uses_backend_drop_fallback() {
     use std::{future::Future, pin::Pin, task::Context};
@@ -1576,7 +1572,7 @@ async fn async_temp_drop_cancellation_uses_backend_drop_fallback() {
     temp.cleanup();
 }
 
-#[cfg(feature = "tempfile-async")]
+#[cfg(feature = "fs-temp-async")]
 #[test]
 fn async_temp_creation_requires_runtime_before_filesystem_access() {
     use std::{future::Future, pin::pin, task::Context};
@@ -1589,6 +1585,6 @@ fn async_temp_creation_requires_runtime_before_filesystem_access() {
 
     assert!(matches!(
         poll_once(FsUtils::create_temp_file_async()),
-        std::task::Poll::Ready(Err(axutils::FsTempError::RuntimeRequired))
+        std::task::Poll::Ready(Err(FsTempError::RuntimeRequired))
     ));
 }

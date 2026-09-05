@@ -8,8 +8,12 @@ use std::{
 
 use super::FsError;
 
-#[cfg(feature = "tokio")]
-use tokio::io::AsyncReadExt;
+#[cfg(feature = "fs-async")]
+use tokio::{
+    fs::{self as async_fs, File as AsyncFile, OpenOptions as AsyncOpenOptions},
+    io::{AsyncReadExt, AsyncWriteExt},
+    runtime::Handle,
+};
 
 const OP_TRY_EXISTS: &str = "try_exists";
 const OP_IS_FILE: &str = "is_file";
@@ -69,9 +73,9 @@ fn read_budget(max_bytes: usize) -> Result<u64, FsError> {
         .ok_or(FsError::InvalidLimit { field: "max_bytes" })
 }
 
-#[cfg(feature = "tokio")]
+#[cfg(feature = "fs-async")]
 pub(crate) fn ensure_runtime() -> Result<(), FsError> {
-    tokio::runtime::Handle::try_current()
+    Handle::try_current()
         .map(|_| ())
         .map_err(|_| FsError::RuntimeRequired)
 }
@@ -250,56 +254,56 @@ pub(crate) fn append(path: &Path, contents: &[u8]) -> Result<(), FsError> {
         .map_err(|error| io_error(OP_APPEND, path, &error))
 }
 
-#[cfg(feature = "tokio")]
+#[cfg(feature = "fs-async")]
 pub(crate) async fn try_exists_async(path: PathBuf) -> Result<bool, FsError> {
     ensure_runtime()?;
-    match tokio::fs::metadata(&path).await {
+    match async_fs::metadata(&path).await {
         Ok(_) => Ok(true),
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
         Err(error) => Err(io_error(OP_TRY_EXISTS, &path, &error)),
     }
 }
 
-#[cfg(feature = "tokio")]
+#[cfg(feature = "fs-async")]
 pub(crate) async fn is_file_async(path: PathBuf) -> Result<bool, FsError> {
     ensure_runtime()?;
-    match tokio::fs::metadata(&path).await {
+    match async_fs::metadata(&path).await {
         Ok(metadata) => Ok(metadata.is_file()),
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
         Err(error) => Err(io_error(OP_IS_FILE, &path, &error)),
     }
 }
 
-#[cfg(feature = "tokio")]
+#[cfg(feature = "fs-async")]
 pub(crate) async fn is_dir_async(path: PathBuf) -> Result<bool, FsError> {
     ensure_runtime()?;
-    match tokio::fs::metadata(&path).await {
+    match async_fs::metadata(&path).await {
         Ok(metadata) => Ok(metadata.is_dir()),
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
         Err(error) => Err(io_error(OP_IS_DIR, &path, &error)),
     }
 }
 
-#[cfg(feature = "tokio")]
+#[cfg(feature = "fs-async")]
 pub(crate) async fn metadata_async(path: PathBuf) -> Result<fs::Metadata, FsError> {
     ensure_runtime()?;
-    tokio::fs::metadata(&path)
+    async_fs::metadata(&path)
         .await
         .map_err(|error| io_error(OP_METADATA, &path, &error))
 }
 
-#[cfg(feature = "tokio")]
+#[cfg(feature = "fs-async")]
 pub(crate) async fn symlink_metadata_async(path: PathBuf) -> Result<fs::Metadata, FsError> {
     ensure_runtime()?;
-    tokio::fs::symlink_metadata(&path)
+    async_fs::symlink_metadata(&path)
         .await
         .map_err(|error| io_error(OP_SYMLINK_METADATA, &path, &error))
 }
 
-#[cfg(feature = "tokio")]
+#[cfg(feature = "fs-async")]
 pub(crate) async fn create_file_async(path: PathBuf) -> Result<(), FsError> {
     ensure_runtime()?;
-    tokio::fs::OpenOptions::new()
+    AsyncOpenOptions::new()
         .write(true)
         .create_new(true)
         .open(&path)
@@ -308,23 +312,23 @@ pub(crate) async fn create_file_async(path: PathBuf) -> Result<(), FsError> {
         .map_err(|error| io_error(OP_CREATE_FILE, &path, &error))
 }
 
-#[cfg(feature = "tokio")]
+#[cfg(feature = "fs-async")]
 pub(crate) async fn create_dir_async(path: PathBuf) -> Result<(), FsError> {
     ensure_runtime()?;
-    tokio::fs::create_dir(&path)
+    async_fs::create_dir(&path)
         .await
         .map_err(|error| io_error(OP_CREATE_DIR, &path, &error))
 }
 
-#[cfg(feature = "tokio")]
+#[cfg(feature = "fs-async")]
 pub(crate) async fn create_dir_all_async(path: PathBuf) -> Result<(), FsError> {
     ensure_runtime()?;
-    tokio::fs::create_dir_all(&path)
+    async_fs::create_dir_all(&path)
         .await
         .map_err(|error| io_error(OP_CREATE_DIR_ALL, &path, &error))
 }
 
-#[cfg(feature = "tokio")]
+#[cfg(feature = "fs-async")]
 pub(crate) async fn list_dir_async(
     path: PathBuf,
     max_entries: usize,
@@ -332,7 +336,7 @@ pub(crate) async fn list_dir_async(
     validate_max_entries(max_entries)?;
     ensure_runtime()?;
 
-    let mut entries = tokio::fs::read_dir(&path)
+    let mut entries = async_fs::read_dir(&path)
         .await
         .map_err(|error| io_error(OP_LIST_DIR, &path, &error))?;
     let mut paths = Vec::new();
@@ -352,46 +356,46 @@ pub(crate) async fn list_dir_async(
     Ok(paths)
 }
 
-#[cfg(feature = "tokio")]
+#[cfg(feature = "fs-async")]
 pub(crate) async fn remove_file_async(path: PathBuf) -> Result<(), FsError> {
     ensure_runtime()?;
-    tokio::fs::remove_file(&path)
+    async_fs::remove_file(&path)
         .await
         .map_err(|error| io_error(OP_REMOVE_FILE, &path, &error))
 }
 
-#[cfg(feature = "tokio")]
+#[cfg(feature = "fs-async")]
 pub(crate) async fn remove_dir_async(path: PathBuf) -> Result<(), FsError> {
     ensure_runtime()?;
-    tokio::fs::remove_dir(&path)
+    async_fs::remove_dir(&path)
         .await
         .map_err(|error| io_error(OP_REMOVE_DIR, &path, &error))
 }
 
-#[cfg(feature = "tokio")]
+#[cfg(feature = "fs-async")]
 pub(crate) async fn remove_dir_all_async(path: PathBuf) -> Result<(), FsError> {
     ensure_runtime()?;
-    tokio::fs::remove_dir_all(&path)
+    async_fs::remove_dir_all(&path)
         .await
         .map_err(|error| io_error(OP_REMOVE_DIR_ALL, &path, &error))
 }
 
-#[cfg(feature = "tokio")]
+#[cfg(feature = "fs-async")]
 pub(crate) async fn move_path_async(source: PathBuf, destination: PathBuf) -> Result<(), FsError> {
     ensure_runtime()?;
-    tokio::fs::rename(&source, &destination)
+    async_fs::rename(&source, &destination)
         .await
         .map_err(|error| pair_io_error(OP_MOVE_PATH, &source, &destination, &error))
 }
 
-#[cfg(feature = "tokio")]
+#[cfg(feature = "fs-async")]
 pub(crate) async fn copy_file_async(source: PathBuf, destination: PathBuf) -> Result<u64, FsError> {
     ensure_runtime()?;
 
     let source_is_file = ensure_regular_file(
         OP_COPY_FILE,
         &source,
-        tokio::fs::symlink_metadata(&source).await,
+        async_fs::symlink_metadata(&source).await,
         &source,
         &destination,
         false,
@@ -401,18 +405,18 @@ pub(crate) async fn copy_file_async(source: PathBuf, destination: PathBuf) -> Re
     let _destination_exists = ensure_regular_file(
         OP_COPY_FILE,
         &destination,
-        tokio::fs::symlink_metadata(&destination).await,
+        async_fs::symlink_metadata(&destination).await,
         &source,
         &destination,
         true,
     )?;
 
-    tokio::fs::copy(&source, &destination)
+    async_fs::copy(&source, &destination)
         .await
         .map_err(|error| pair_io_error(OP_COPY_FILE, &source, &destination, &error))
 }
 
-#[cfg(feature = "tokio")]
+#[cfg(feature = "fs-async")]
 async fn read_bytes_with_operation_async(
     path: PathBuf,
     max_bytes: usize,
@@ -421,11 +425,11 @@ async fn read_bytes_with_operation_async(
     let budget = read_budget(max_bytes)?;
     ensure_runtime()?;
 
-    let file = tokio::fs::File::open(&path)
+    let file = AsyncFile::open(&path)
         .await
         .map_err(|error| io_error(operation, &path, &error))?;
     let mut buffer = Vec::new();
-    tokio::io::AsyncReadExt::take(file, budget)
+    file.take(budget)
         .read_to_end(&mut buffer)
         .await
         .map_err(|error| io_error(operation, &path, &error))?;
@@ -439,12 +443,12 @@ async fn read_bytes_with_operation_async(
     Ok(buffer)
 }
 
-#[cfg(feature = "tokio")]
+#[cfg(feature = "fs-async")]
 pub(crate) async fn read_bytes_async(path: PathBuf, max_bytes: usize) -> Result<Vec<u8>, FsError> {
     read_bytes_with_operation_async(path, max_bytes, OP_READ_BYTES).await
 }
 
-#[cfg(feature = "tokio")]
+#[cfg(feature = "fs-async")]
 pub(crate) async fn read_to_string_async(
     path: PathBuf,
     max_bytes: usize,
@@ -456,35 +460,34 @@ pub(crate) async fn read_to_string_async(
     })
 }
 
-#[cfg(feature = "tokio")]
+#[cfg(feature = "fs-async")]
 pub(crate) async fn write_async(path: PathBuf, contents: Vec<u8>) -> Result<(), FsError> {
     ensure_runtime()?;
-    tokio::fs::write(&path, contents)
+    async_fs::write(&path, contents)
         .await
         .map_err(|error| io_error(OP_WRITE, &path, &error))
 }
 
-#[cfg(feature = "tokio")]
+#[cfg(feature = "fs-async")]
 pub(crate) async fn append_async(path: PathBuf, contents: Vec<u8>) -> Result<(), FsError> {
     ensure_runtime()?;
-    let mut file = tokio::fs::OpenOptions::new()
+    let mut file = AsyncOpenOptions::new()
         .create(true)
         .append(true)
         .open(&path)
         .await
         .map_err(|error| io_error(OP_APPEND, &path, &error))?;
-    tokio::io::AsyncWriteExt::write_all(&mut file, &contents)
+    file.write_all(&contents)
         .await
         .map_err(|error| io_error(OP_APPEND, &path, &error))?;
-    tokio::io::AsyncWriteExt::flush(&mut file)
+    file.flush()
         .await
         .map_err(|error| io_error(OP_APPEND, &path, &error))
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{read_budget, validate_max_entries};
-    use crate::FsError;
+    use super::{read_budget, validate_max_entries, FsError};
 
     #[test]
     fn validates_limits_without_io() {

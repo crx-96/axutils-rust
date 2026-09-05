@@ -14,7 +14,7 @@ impl PathUtils {
     /// # Examples
     ///
     /// ```
-    /// use axutils::PathUtils;
+    /// use axutils::utils::PathUtils;
     ///
     /// let current_dir = std::env::current_dir().expect("current directory should be available");
     /// assert!(PathUtils::is_absolute(current_dir));
@@ -35,7 +35,7 @@ impl PathUtils {
     /// # Examples
     ///
     /// ```
-    /// use axutils::PathUtils;
+    /// use axutils::utils::PathUtils;
     ///
     /// let current_dir = PathUtils::current_dir().expect("current directory should be available");
     /// assert!(!current_dir.as_os_str().is_empty());
@@ -52,7 +52,7 @@ impl PathUtils {
     /// # Examples
     ///
     /// ```
-    /// use axutils::PathUtils;
+    /// use axutils::utils::PathUtils;
     ///
     /// let executable =
     ///     PathUtils::executable_path().expect("the current executable should be available");
@@ -76,7 +76,7 @@ impl PathUtils {
     /// # Examples
     ///
     /// ```
-    /// use axutils::PathUtils;
+    /// use axutils::utils::PathUtils;
     /// use std::path::PathBuf;
     ///
     /// let path = PathUtils::join(["project", "src", "..", "./README.md"]);

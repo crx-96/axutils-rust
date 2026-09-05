@@ -7,12 +7,13 @@
 
 use std::collections::BTreeMap;
 
+use ini::{Ini, ParseError, ParseOption};
 use serde::de::DeserializeOwned;
 
 use super::{de, error::ConfigError, value::ConfigValue};
 
-fn parse_options() -> ::ini::ParseOption {
-    ::ini::ParseOption {
+fn parse_options() -> ParseOption {
+    ParseOption {
         enabled_quote: true,
         enabled_escape: true,
         enabled_indented_mutiline_value: false,
@@ -21,7 +22,7 @@ fn parse_options() -> ::ini::ParseOption {
 }
 
 pub(crate) fn parse_value(text: &str, max_depth: usize) -> Result<ConfigValue, ConfigError> {
-    let document = ::ini::Ini::load_from_str_opt(text, parse_options()).map_err(map_parse_error)?;
+    let document = Ini::load_from_str_opt(text, parse_options()).map_err(map_parse_error)?;
 
     let mut root: BTreeMap<String, ConfigValue> = BTreeMap::new();
     for (section_name, properties) in document.iter() {
@@ -66,7 +67,7 @@ pub(crate) fn parse<T: DeserializeOwned>(text: &str, max_depth: usize) -> Result
     de::deserialize(&value)
 }
 
-fn map_parse_error(error: ::ini::ParseError) -> ConfigError {
+fn map_parse_error(error: ParseError) -> ConfigError {
     ConfigError::Parse {
         format: "ini",
         line: Some(error.line),
@@ -76,14 +77,14 @@ fn map_parse_error(error: ::ini::ParseError) -> ConfigError {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse, parse_value};
-    use crate::ConfigError;
+    use super as ini_config;
+    use crate::config::ConfigError;
     use serde::Deserialize;
 
     #[test]
     fn parses_sections_and_top_level_keys() {
         let text = "top = 1\n[server]\nport = 8080\nhost = example.com\n";
-        let value = parse_value(text, 64).expect("parse ini");
+        let value = ini_config::parse_value(text, 64).expect("parse ini");
         assert_eq!(value.get("top").and_then(|v| v.as_str()), Some("1"));
         assert_eq!(
             value.get("server.port").and_then(|v| v.as_str()),
@@ -103,7 +104,7 @@ mod tests {
             server: Server,
         }
         let text = "[server]\nport = 8080\ntls = true\n";
-        let config: Config = parse(text, 64).expect("typed parse");
+        let config: Config = ini_config::parse(text, 64).expect("typed parse");
         assert_eq!(config.server.port, 8080);
         assert!(config.server.tls);
     }
@@ -111,7 +112,7 @@ mod tests {
     #[test]
     fn rejects_duplicate_keys_within_a_section() {
         let text = "[server]\nport = 1\nport = 2\n";
-        let error = parse_value(text, 64).expect_err("duplicate key should fail");
+        let error = ini_config::parse_value(text, 64).expect_err("duplicate key should fail");
         assert!(matches!(
             error,
             ConfigError::DuplicateKey { key } if key == "port"
@@ -122,7 +123,7 @@ mod tests {
     fn rejects_invalid_syntax_with_location_and_no_value_leak() {
         let secret = "s3cr3t-should-not-leak";
         let text = format!("[server\npassword = {secret}\n");
-        let error = parse_value(&text, 64).expect_err("invalid ini should fail");
+        let error = ini_config::parse_value(&text, 64).expect_err("invalid ini should fail");
         assert!(matches!(
             error,
             ConfigError::Parse {
@@ -136,25 +137,26 @@ mod tests {
 
     #[test]
     fn empty_document_parses_to_empty_table() {
-        let value = parse_value("", 64).expect("parse empty document");
+        let value = ini_config::parse_value("", 64).expect("parse empty document");
         assert_eq!(value.as_table().map(|table| table.len()), Some(0));
     }
 
     #[test]
     fn comment_only_document_parses_to_empty_table() {
         let text = "; just a comment\n# another comment\n";
-        let value = parse_value(text, 64).expect("parse comment-only document");
+        let value = ini_config::parse_value(text, 64).expect("parse comment-only document");
         assert_eq!(value.as_table().map(|table| table.len()), Some(0));
     }
 
     #[test]
     fn enforces_depth_limit_for_section_tables() {
         let text = "[server]\nport = 8080\n";
-        let error = parse_value(text, 1).expect_err("section table should exceed depth 1");
+        let error =
+            ini_config::parse_value(text, 1).expect_err("section table should exceed depth 1");
         assert!(matches!(
             error,
             ConfigError::DepthLimitExceeded { limit: 1 }
         ));
-        assert!(parse_value(text, 2).is_ok());
+        assert!(ini_config::parse_value(text, 2).is_ok());
     }
 }

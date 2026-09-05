@@ -3,6 +3,9 @@
 use std::fmt;
 use std::sync::Arc;
 
+#[cfg(feature = "http-json")]
+use serde::de::DeserializeOwned;
+
 use super::headers::HttpHeaders;
 use super::HttpError;
 
@@ -30,10 +33,11 @@ impl HttpResponse {
     /// # Examples
     ///
     /// ```no_run
-    /// # fn main() -> Result<(), axutils::HttpError> {
-    /// let client = axutils::HttpClient::new(axutils::HttpConfig::default())?;
-    /// let response = client.execute(axutils::HttpRequest::new(
-    ///     axutils::HttpMethod::Get,
+    /// use axutils::http::{HttpClient, HttpConfig, HttpError, HttpMethod, HttpRequest};
+    /// # fn main() -> Result<(), HttpError> {
+    /// let client = HttpClient::new(HttpConfig::default())?;
+    /// let response = client.execute(HttpRequest::new(
+    ///     HttpMethod::Get,
     ///     "https://example.com/health",
     /// )?)?;
     /// let _status = response.status();
@@ -49,10 +53,11 @@ impl HttpResponse {
     /// # Examples
     ///
     /// ```no_run
-    /// # fn main() -> Result<(), axutils::HttpError> {
-    /// let client = axutils::HttpClient::new(axutils::HttpConfig::default())?;
-    /// let response = client.execute(axutils::HttpRequest::new(
-    ///     axutils::HttpMethod::Get,
+    /// use axutils::http::{HttpClient, HttpConfig, HttpError, HttpMethod, HttpRequest};
+    /// # fn main() -> Result<(), HttpError> {
+    /// let client = HttpClient::new(HttpConfig::default())?;
+    /// let response = client.execute(HttpRequest::new(
+    ///     HttpMethod::Get,
     ///     "https://example.com/health",
     /// )?)?;
     /// let _is_success = response.is_success();
@@ -68,10 +73,11 @@ impl HttpResponse {
     /// # Examples
     ///
     /// ```no_run
-    /// # fn main() -> Result<(), axutils::HttpError> {
-    /// let client = axutils::HttpClient::new(axutils::HttpConfig::default())?;
-    /// let response = client.execute(axutils::HttpRequest::new(
-    ///     axutils::HttpMethod::Get,
+    /// use axutils::http::{HttpClient, HttpConfig, HttpError, HttpMethod, HttpRequest};
+    /// # fn main() -> Result<(), HttpError> {
+    /// let client = HttpClient::new(HttpConfig::default())?;
+    /// let response = client.execute(HttpRequest::new(
+    ///     HttpMethod::Get,
     ///     "https://example.com/health",
     /// )?)?;
     /// let _headers = response.headers();
@@ -87,10 +93,11 @@ impl HttpResponse {
     /// # Examples
     ///
     /// ```no_run
-    /// # fn main() -> Result<(), axutils::HttpError> {
-    /// let client = axutils::HttpClient::new(axutils::HttpConfig::default())?;
-    /// let response = client.execute(axutils::HttpRequest::new(
-    ///     axutils::HttpMethod::Get,
+    /// use axutils::http::{HttpClient, HttpConfig, HttpError, HttpMethod, HttpRequest};
+    /// # fn main() -> Result<(), HttpError> {
+    /// let client = HttpClient::new(HttpConfig::default())?;
+    /// let response = client.execute(HttpRequest::new(
+    ///     HttpMethod::Get,
     ///     "https://example.com/health",
     /// )?)?;
     /// let _content_type = response.header("content-type");
@@ -106,10 +113,11 @@ impl HttpResponse {
     /// # Examples
     ///
     /// ```no_run
-    /// # fn main() -> Result<(), axutils::HttpError> {
-    /// let client = axutils::HttpClient::new(axutils::HttpConfig::default())?;
-    /// let response = client.execute(axutils::HttpRequest::new(
-    ///     axutils::HttpMethod::Get,
+    /// use axutils::http::{HttpClient, HttpConfig, HttpError, HttpMethod, HttpRequest};
+    /// # fn main() -> Result<(), HttpError> {
+    /// let client = HttpClient::new(HttpConfig::default())?;
+    /// let response = client.execute(HttpRequest::new(
+    ///     HttpMethod::Get,
     ///     "https://example.com/bytes",
     /// )?)?;
     /// let _body: &[u8] = response.body();
@@ -128,11 +136,12 @@ impl HttpResponse {
     /// # Examples
     ///
     /// ```no_run
+    /// use axutils::http::{HttpClient, HttpConfig, HttpError, HttpMethod, HttpRequest};
     /// # #[cfg(feature = "http")]
-    /// # fn main() -> Result<(), axutils::HttpError> {
-    /// let client = axutils::HttpClient::new(axutils::HttpConfig::default())?;
-    /// let response = client.execute(axutils::HttpRequest::new(
-    ///     axutils::HttpMethod::Get,
+    /// # fn main() -> Result<(), HttpError> {
+    /// let client = HttpClient::new(HttpConfig::default())?;
+    /// let response = client.execute(HttpRequest::new(
+    ///     HttpMethod::Get,
     ///     "https://example.com/bytes",
     /// )?)?;
     /// let bytes: Vec<u8> = response.into_body();
@@ -150,10 +159,11 @@ impl HttpResponse {
     /// # Examples
     ///
     /// ```no_run
-    /// # fn main() -> Result<(), axutils::HttpError> {
-    /// let client = axutils::HttpClient::new(axutils::HttpConfig::default())?;
-    /// let response = client.execute(axutils::HttpRequest::new(
-    ///     axutils::HttpMethod::Get,
+    /// use axutils::http::{HttpClient, HttpConfig, HttpError, HttpMethod, HttpRequest};
+    /// # fn main() -> Result<(), HttpError> {
+    /// let client = HttpClient::new(HttpConfig::default())?;
+    /// let response = client.execute(HttpRequest::new(
+    ///     HttpMethod::Get,
     ///     "https://example.com/text",
     /// )?)?;
     /// let _text = response.text()?;
@@ -172,10 +182,11 @@ impl HttpResponse {
     /// # Examples
     ///
     /// ```no_run
-    /// # fn main() -> Result<(), axutils::HttpError> {
-    /// let client = axutils::HttpClient::new(axutils::HttpConfig::default())?;
-    /// let response = client.execute(axutils::HttpRequest::new(
-    ///     axutils::HttpMethod::Get,
+    /// use axutils::http::{HttpClient, HttpConfig, HttpError, HttpMethod, HttpRequest};
+    /// # fn main() -> Result<(), HttpError> {
+    /// let client = HttpClient::new(HttpConfig::default())?;
+    /// let response = client.execute(HttpRequest::new(
+    ///     HttpMethod::Get,
     ///     "https://example.com/health",
     /// )?)?;
     /// let _attempts = response.attempts();
@@ -188,14 +199,15 @@ impl HttpResponse {
 
     /// 将响应体按 JSON 反序列化为调用方类型。
     ///
-    /// 该方法需要同时启用 `http` 与 `serde` feature；解析失败只返回稳定的
+    /// 该方法需要启用 `http-json` feature；解析失败只返回稳定的
     /// [`HttpError::JsonDeserialize`]，不会暴露 Serde 的原始错误文本。
     ///
     /// # Examples
     ///
     /// ```no_run
-    /// # #[cfg(all(feature = "http", feature = "serde"))]
-    /// # fn main() -> Result<(), axutils::HttpError> {
+    /// use axutils::http::{HttpClient, HttpConfig, HttpError, HttpMethod, HttpRequest};
+    /// # #[cfg(feature = "http-json")]
+    /// # fn main() -> Result<(), HttpError> {
     /// use serde::Deserialize;
     ///
     /// #[derive(Deserialize)]
@@ -203,20 +215,20 @@ impl HttpResponse {
     ///     ok: bool,
     /// }
     ///
-    /// let client = axutils::HttpClient::new(axutils::HttpConfig::default())?;
-    /// let response = client.execute(axutils::HttpRequest::new(
-    ///     axutils::HttpMethod::Get,
+    /// let client = HttpClient::new(HttpConfig::default())?;
+    /// let response = client.execute(HttpRequest::new(
+    ///     HttpMethod::Get,
     ///     "https://example.com/health",
     /// )?)?;
     /// let health: Health = response.json()?;
     /// assert!(health.ok);
     /// # Ok(())
     /// # }
-    /// # #[cfg(not(all(feature = "http", feature = "serde")))]
+    /// # #[cfg(not(feature = "http-json"))]
     /// # fn main() {}
     /// ```
-    #[cfg(feature = "serde")]
-    pub fn json<T: serde::de::DeserializeOwned>(&self) -> Result<T, HttpError> {
+    #[cfg(feature = "http-json")]
+    pub fn json<T: DeserializeOwned>(&self) -> Result<T, HttpError> {
         serde_json::from_slice(&self.body).map_err(|_| HttpError::JsonDeserialize)
     }
 }

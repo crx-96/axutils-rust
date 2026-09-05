@@ -1,18 +1,28 @@
-#![cfg(all(feature = "axum", feature = "tokio"))]
+#![cfg(feature = "axum")]
 
-use axum::{routing::get, Router};
-use axutils::{AxumApp, AxumError, AxumShutdownReason};
+#[cfg(feature = "axum-tower-http")]
+use axum::http::{HeaderName, Method};
+use axum::{extract::Request, middleware, routing::get, Router};
+#[cfg(feature = "axum-tower-http")]
+use axutils::axum::AxumTimeoutStatus;
+use axutils::axum::{AxumApp, AxumConfig, AxumError, AxumServer, AxumShutdownReason};
+use axutils::utils::AxumUtils;
 use std::{
     net::{IpAddr, Ipv4Addr, SocketAddr},
     time::Duration,
 };
+#[cfg(feature = "axum-governor")]
+use tokio::runtime::Builder as RuntimeBuilder;
+#[cfg(feature = "axum-tower")]
+use tokio::sync::Notify;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream},
     sync::oneshot,
+    task as tokio_task, time as tokio_time,
 };
 
-fn server() -> axutils::AxumServer {
+fn server() -> AxumServer {
     AxumApp::from_router(Router::new().route("/health", get(|| async { "ok" })))
         .into_server_builder()
         .build()
@@ -24,9 +34,6 @@ fn factories_create_empty_router_and_app() {
     let router: Router = AxumApp::create_router();
     assert!(!router.has_routes());
 
-    let router: Router = axutils::AxumUtils::create_router();
-    assert!(!router.has_routes());
-
     let router: Router<String> = AxumApp::<String>::create_router();
     assert!(!router.has_routes());
     assert!(AxumApp::from_router(router)
@@ -34,14 +41,7 @@ fn factories_create_empty_router_and_app() {
         .build()
         .is_ok());
 
-    let router: Router<String> = axutils::AxumUtils::create_router();
-    assert!(!router.has_routes());
-    assert!(AxumApp::from_router(router)
-        .with_state("utils-state".to_owned())
-        .build()
-        .is_ok());
-
-    let app: AxumApp = axutils::AxumUtils::create_app();
+    let app: AxumApp = AxumApp::new();
     assert!(app.into_server_builder().build().is_ok());
 }
 
@@ -119,7 +119,7 @@ async fn shutdown_is_idempotent_and_first_reason_wins() {
         let server = server.clone();
         tokio::spawn(async move { server.serve(listener).await })
     };
-    tokio::time::sleep(Duration::from_millis(20)).await;
+    tokio_time::sleep(Duration::from_millis(20)).await;
     assert_eq!(
         handle
             .shutdown(AxumShutdownReason::Programmatic)
@@ -151,12 +151,12 @@ async fn programmatic_shutdown_stops_custom_serve_and_preserves_first_reason() {
                 .await
         })
     };
-    tokio::time::sleep(Duration::from_millis(20)).await;
+    tokio_time::sleep(Duration::from_millis(20)).await;
     assert_eq!(
         handle.shutdown(AxumShutdownReason::Programmatic).unwrap(),
         AxumShutdownReason::Programmatic
     );
-    let outcome = tokio::time::timeout(Duration::from_secs(1), running)
+    let outcome = tokio_time::timeout(Duration::from_secs(1), running)
         .await
         .unwrap()
         .unwrap()
@@ -178,7 +178,7 @@ async fn concurrent_serve_is_rejected_and_aborted_future_is_abandoned() {
                 .await
         })
     };
-    tokio::time::sleep(Duration::from_millis(20)).await;
+    tokio_time::sleep(Duration::from_millis(20)).await;
     let other = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
         .await
         .expect("bind other");
@@ -188,7 +188,7 @@ async fn concurrent_serve_is_rejected_and_aborted_future_is_abandoned() {
     ));
     task.abort();
     let _ = task.await;
-    tokio::task::yield_now().await;
+    tokio_task::yield_now().await;
     assert!(matches!(
         server
             .serve_addr(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0))
@@ -200,13 +200,13 @@ async fn concurrent_serve_is_rejected_and_aborted_future_is_abandoned() {
 #[test]
 fn config_rejects_unbounded_values() {
     assert!(matches!(
-        axutils::AxumConfig::new().with_max_body_bytes(0),
+        AxumConfig::new().with_max_body_bytes(0),
         Err(AxumError::InvalidConfig {
             field: "max_body_bytes"
         })
     ));
     assert!(matches!(
-        axutils::AxumConfig::new().with_max_concurrency(0),
+        AxumConfig::new().with_max_concurrency(0),
         Err(AxumError::InvalidConfig {
             field: "max_concurrency"
         })
@@ -215,16 +215,16 @@ fn config_rejects_unbounded_values() {
 
 #[test]
 fn global_axum_utils_initializes_only_once() {
-    let first = axutils::AxumUtils::init(server());
+    let first = AxumUtils::init(server());
     assert!(first.is_ok(), "fresh test process must initialize once");
-    assert!(axutils::AxumUtils::is_initialized());
+    assert!(AxumUtils::is_initialized());
     assert!(matches!(
-        axutils::AxumUtils::init(server()),
+        AxumUtils::init(server()),
         Err(AxumError::AlreadyInitialized)
     ));
 }
 
-#[cfg(feature = "tower-http")]
+#[cfg(feature = "axum-tower-http")]
 #[tokio::test]
 async fn request_id_removes_spoofed_input_and_overwrites_handler_response() {
     use axum::{
@@ -278,21 +278,18 @@ async fn request_id_removes_spoofed_input_and_overwrites_handler_response() {
     task.await.expect("join").expect("serve");
 }
 
-#[cfg(feature = "tower-http")]
+#[cfg(feature = "axum-tower-http")]
 #[tokio::test]
 async fn timeout_returns_configured_408() {
     let server = AxumApp::from_router(Router::new().route(
         "/slow",
         get(|| async {
-            tokio::time::sleep(Duration::from_secs(1)).await;
+            tokio_time::sleep(Duration::from_secs(1)).await;
             "late"
         }),
     ))
     .into_server_builder()
-    .with_timeout(
-        Duration::from_millis(10),
-        axutils::AxumTimeoutStatus::RequestTimeout,
-    )
+    .with_timeout(Duration::from_millis(10), AxumTimeoutStatus::RequestTimeout)
     .expect("timeout")
     .build()
     .expect("build");
@@ -325,14 +322,14 @@ async fn http_request(addr: SocketAddr, path: &str, headers: &str) -> String {
     String::from_utf8(response).expect("utf8")
 }
 
-#[cfg(feature = "tower")]
+#[cfg(feature = "axum-tower")]
 #[tokio::test]
 async fn concurrency_limit_fails_fast_with_503() {
     use axum::extract::State;
     use std::sync::Arc;
     struct Gate {
-        entered: tokio::sync::Notify,
-        release: tokio::sync::Notify,
+        entered: Notify,
+        release: Notify,
     }
     async fn held(State(gate): State<Arc<Gate>>) -> &'static str {
         gate.entered.notify_one();
@@ -340,8 +337,8 @@ async fn concurrency_limit_fails_fast_with_503() {
         "ok"
     }
     let gate = Arc::new(Gate {
-        entered: tokio::sync::Notify::new(),
-        release: tokio::sync::Notify::new(),
+        entered: Notify::new(),
+        release: Notify::new(),
     });
     let router = Router::new()
         .route("/held", get(held))
@@ -367,7 +364,7 @@ async fn concurrency_limit_fails_fast_with_503() {
     });
     let first = tokio::spawn(http_request(addr, "/held", ""));
     gate.entered.notified().await;
-    let second = tokio::time::timeout(Duration::from_millis(200), http_request(addr, "/held", ""))
+    let second = tokio_time::timeout(Duration::from_millis(200), http_request(addr, "/held", ""))
         .await
         .expect("fail fast");
     assert!(second.starts_with("HTTP/1.1 503"));
@@ -382,21 +379,19 @@ async fn deferred_layers_keep_declaration_order_and_matched_scope() {
     use std::sync::{Arc, Mutex};
     let events = Arc::new(Mutex::new(Vec::new()));
     let layer = |name: &'static str, events: Arc<Mutex<Vec<&'static str>>>| {
-        axum::middleware::from_fn(
-            move |request: axum::extract::Request, next: axum::middleware::Next| {
-                let events = events.clone();
-                async move {
-                    events.lock().expect("events").push(name);
-                    let response = next.run(request).await;
-                    events.lock().expect("events").push(match name {
-                        "a" => "A",
-                        "b" => "B",
-                        _ => "M",
-                    });
-                    response
-                }
-            },
-        )
+        middleware::from_fn(move |request: Request, next: middleware::Next| {
+            let events = events.clone();
+            async move {
+                events.lock().expect("events").push(name);
+                let response = next.run(request).await;
+                events.lock().expect("events").push(match name {
+                    "a" => "A",
+                    "b" => "B",
+                    _ => "M",
+                });
+                response
+            }
+        })
     };
     let server = AxumApp::new()
         .route("/ok", get(|| async { "ok" }))
@@ -438,10 +433,8 @@ async fn deferred_layers_keep_declaration_order_and_matched_scope() {
 #[test]
 fn matched_layer_on_empty_router_returns_error_instead_of_panicking() {
     let result = AxumApp::new()
-        .with_matched_route_layer(axum::middleware::from_fn(
-            |request: axum::extract::Request, next: axum::middleware::Next| async move {
-                next.run(request).await
-            },
+        .with_matched_route_layer(middleware::from_fn(
+            |request: Request, next: middleware::Next| async move { next.run(request).await },
         ))
         .into_server_builder()
         .build();
@@ -453,11 +446,11 @@ fn matched_layer_on_empty_router_returns_error_instead_of_panicking() {
     ));
 }
 
-#[cfg(feature = "tower-http")]
+#[cfg(feature = "axum-tower-http")]
 #[test]
 fn tower_http_config_rejects_unbounded_or_unsafe_values() {
     use axum::http::HeaderValue;
-    use axutils::{AxumCorsConfig, AxumCorsOrigin, AxumTimeoutStatus};
+    use axutils::axum::{AxumCorsConfig, AxumCorsOrigin, AxumTimeoutStatus};
     assert!(AxumApp::new()
         .into_server_builder()
         .with_timeout(Duration::ZERO, AxumTimeoutStatus::GatewayTimeout)
@@ -488,7 +481,7 @@ fn tower_http_config_rejects_unbounded_or_unsafe_values() {
         .with_cors(wildcard_list)
         .is_err());
     let wildcard_method = AxumCorsConfig {
-        methods: vec![axum::http::Method::from_bytes(b"*").unwrap()],
+        methods: vec![Method::from_bytes(b"*").unwrap()],
         allow_credentials: true,
         ..Default::default()
     };
@@ -497,7 +490,7 @@ fn tower_http_config_rejects_unbounded_or_unsafe_values() {
         .with_cors(wildcard_method)
         .is_err());
     let wildcard_header = AxumCorsConfig {
-        headers: vec![axum::http::HeaderName::from_bytes(b"*").unwrap()],
+        headers: vec![HeaderName::from_bytes(b"*").unwrap()],
         allow_credentials: true,
         ..Default::default()
     };
@@ -506,7 +499,7 @@ fn tower_http_config_rejects_unbounded_or_unsafe_values() {
         .with_cors(wildcard_header)
         .is_err());
     let wildcard_expose = AxumCorsConfig {
-        expose_headers: vec![axum::http::HeaderName::from_bytes(b"*").unwrap()],
+        expose_headers: vec![HeaderName::from_bytes(b"*").unwrap()],
         allow_credentials: true,
         ..Default::default()
     };
@@ -524,12 +517,12 @@ fn tower_http_config_rejects_unbounded_or_unsafe_values() {
         .is_err());
 }
 
-#[cfg(feature = "tower-http")]
+#[cfg(feature = "axum-tower-http")]
 async fn sensitive_panic_handler() -> &'static str {
     panic!("sensitive-panic-payload")
 }
 
-#[cfg(feature = "tower-http")]
+#[cfg(feature = "axum-tower-http")]
 #[tokio::test]
 async fn catch_panic_returns_sanitized_500() {
     let server = AxumApp::new()
@@ -556,7 +549,7 @@ async fn catch_panic_returns_sanitized_500() {
     running.await.unwrap().unwrap();
 }
 
-#[cfg(feature = "tower_governor")]
+#[cfg(feature = "axum-governor")]
 #[test]
 fn governor_rejects_excessive_burst() {
     assert!(AxumApp::new()
@@ -568,7 +561,7 @@ fn governor_rejects_excessive_burst() {
         .is_err());
 }
 
-#[cfg(feature = "tower_governor")]
+#[cfg(feature = "axum-governor")]
 #[tokio::test]
 async fn governor_peer_limits_loopback_and_sanitizes_429() {
     use std::num::NonZeroU32;
@@ -603,7 +596,7 @@ async fn governor_peer_limits_loopback_and_sanitizes_429() {
     tx.send(()).expect("stop");
     serving.await.expect("join").expect("serve");
 }
-#[cfg(feature = "tower-http")]
+#[cfg(feature = "axum-tower-http")]
 #[tokio::test]
 async fn timeout_and_catch_panic_responses_keep_internal_request_id() {
     use axum::routing::get;
@@ -611,10 +604,7 @@ async fn timeout_and_catch_panic_responses_keep_internal_request_id() {
         AxumApp::from_router(Router::new().route("/slow", get(std::future::pending::<()>)))
             .into_server_builder()
             .with_request_id()
-            .with_timeout(
-                Duration::from_millis(5),
-                axutils::AxumTimeoutStatus::RequestTimeout,
-            )
+            .with_timeout(Duration::from_millis(5), AxumTimeoutStatus::RequestTimeout)
             .unwrap()
             .build()
             .unwrap();
@@ -623,7 +613,7 @@ async fn timeout_and_catch_panic_responses_keep_internal_request_id() {
     let timeout_task = tokio::spawn(async move {
         timeout_server
             .serve_with_shutdown(timeout_listener, async {
-                tokio::time::sleep(Duration::from_millis(100)).await;
+                tokio_time::sleep(Duration::from_millis(100)).await;
                 AxumShutdownReason::Programmatic
             })
             .await
@@ -647,7 +637,7 @@ async fn timeout_and_catch_panic_responses_keep_internal_request_id() {
     let panic_task = tokio::spawn(async move {
         panic_server
             .serve_with_shutdown(panic_listener, async {
-                tokio::time::sleep(Duration::from_millis(100)).await;
+                tokio_time::sleep(Duration::from_millis(100)).await;
                 AxumShutdownReason::Programmatic
             })
             .await
@@ -658,7 +648,7 @@ async fn timeout_and_catch_panic_responses_keep_internal_request_id() {
     panic_task.await.unwrap().unwrap();
 }
 
-#[cfg(feature = "tower-http")]
+#[cfg(feature = "axum-tower-http")]
 async fn raw_http(addr: SocketAddr, request: &[u8]) -> String {
     let mut stream = TcpStream::connect(addr).await.unwrap();
     stream.write_all(request).await.unwrap();
@@ -667,7 +657,7 @@ async fn raw_http(addr: SocketAddr, request: &[u8]) -> String {
     String::from_utf8(response).unwrap()
 }
 
-#[cfg(feature = "tower-http")]
+#[cfg(feature = "axum-tower-http")]
 #[tokio::test]
 async fn body_limit_rejects_content_length_and_streaming_overflow() {
     use axum::routing::post;
@@ -698,11 +688,11 @@ async fn body_limit_rejects_content_length_and_streaming_overflow() {
     task.await.unwrap().unwrap();
 }
 
-#[cfg(feature = "tower-http")]
+#[cfg(feature = "axum-tower-http")]
 #[tokio::test]
 async fn cors_handles_simple_and_preflight_requests() {
     use axum::http::{HeaderValue, Method};
-    use axutils::{AxumCorsConfig, AxumCorsOrigin};
+    use axutils::axum::{AxumCorsConfig, AxumCorsOrigin};
     let cors = AxumCorsConfig {
         origins: AxumCorsOrigin::List(vec![HeaderValue::from_static("https://example.test")]),
         methods: vec![Method::GET],
@@ -738,7 +728,7 @@ async fn cors_handles_simple_and_preflight_requests() {
     task.await.unwrap().unwrap();
 }
 
-#[cfg(feature = "tower_governor")]
+#[cfg(feature = "axum-governor")]
 #[tokio::test]
 async fn unchecked_forwarded_governor_uses_forwarded_client_key() {
     use std::num::NonZeroU32;
@@ -775,13 +765,15 @@ async fn unchecked_forwarded_governor_uses_forwarded_client_key() {
     task.await.unwrap().unwrap();
 }
 
-#[cfg(all(feature = "tower-http", feature = "tracing"))]
+#[cfg(all(feature = "axum-tower-http", feature = "tracing"))]
 #[tokio::test(flavor = "current_thread")]
 async fn trace_uses_matched_route_and_redacts_raw_request_data() {
     use std::{
         io::Write,
         sync::{Arc, Mutex},
     };
+    use tracing::subscriber;
+    use tracing_subscriber::{fmt as tracing_fmt, fmt::MakeWriter};
     #[derive(Clone)]
     struct Buffer(Arc<Mutex<Vec<u8>>>);
     struct BufferWriter(Arc<Mutex<Vec<u8>>>);
@@ -794,19 +786,19 @@ async fn trace_uses_matched_route_and_redacts_raw_request_data() {
             Ok(())
         }
     }
-    impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for Buffer {
+    impl<'a> MakeWriter<'a> for Buffer {
         type Writer = BufferWriter;
         fn make_writer(&'a self) -> Self::Writer {
             BufferWriter(self.0.clone())
         }
     }
     let bytes = Arc::new(Mutex::new(Vec::new()));
-    let subscriber = tracing_subscriber::fmt()
+    let subscriber = tracing_fmt()
         .without_time()
         .with_ansi(false)
         .with_writer(Buffer(bytes.clone()))
         .finish();
-    let _guard = tracing::subscriber::set_default(subscriber);
+    let _guard = subscriber::set_default(subscriber);
     let server = AxumApp::from_router(Router::new().route("/items/{id}", get(|| async { "ok" })))
         .into_server_builder()
         .with_http_trace()
@@ -843,7 +835,7 @@ async fn trace_uses_matched_route_and_redacts_raw_request_data() {
     assert!(!output.contains("header-secret"));
 }
 
-#[cfg(feature = "tower")]
+#[cfg(feature = "axum-tower")]
 #[tokio::test]
 async fn concurrency_permit_is_released_when_request_is_cancelled() {
     use axum::extract::State;
@@ -857,14 +849,14 @@ async fn concurrency_permit_is_released_when_request_is_cancelled() {
             self.0.store(true, Ordering::SeqCst);
         }
     }
-    type TestState = (Arc<tokio::sync::Notify>, Arc<AtomicBool>);
+    type TestState = (Arc<Notify>, Arc<AtomicBool>);
     async fn slow(State((started, dropped)): State<TestState>) -> &'static str {
         let _guard = DropFlag(dropped);
         started.notify_one();
         std::future::pending::<()>().await;
         "never"
     }
-    let started = Arc::new(tokio::sync::Notify::new());
+    let started = Arc::new(Notify::new());
     let dropped = Arc::new(AtomicBool::new(false));
     let router = Router::new()
         .route("/slow", get(slow))
@@ -894,9 +886,9 @@ async fn concurrency_permit_is_released_when_request_is_cancelled() {
         .unwrap();
     started.notified().await;
     drop(stream);
-    tokio::time::timeout(Duration::from_secs(1), async {
+    tokio_time::timeout(Duration::from_secs(1), async {
         while !dropped.load(Ordering::SeqCst) {
-            tokio::task::yield_now().await;
+            tokio_task::yield_now().await;
         }
     })
     .await
@@ -908,14 +900,17 @@ async fn concurrency_permit_is_released_when_request_is_cancelled() {
     task.await.unwrap().unwrap();
 }
 
-#[cfg(feature = "tower_governor")]
+#[cfg(feature = "axum-governor")]
 #[test]
 fn governor_cleanup_runs_on_runtime_without_tokio_time_driver() {
+    use futures_timer::Delay;
     use std::{num::NonZeroU32, panic::catch_unwind};
     let result = catch_unwind(|| {
-        axutils::TokioUtils::run(
-            &axutils::TokioConfig::new().with_time_enabled(false),
-            async {
+        RuntimeBuilder::new_current_thread()
+            .enable_io()
+            .build()
+            .unwrap()
+            .block_on(async {
                 let server = AxumApp::from_router(Router::new().route("/", get(|| async { "ok" })))
                     .into_server_builder()
                     .with_governor_peer(Duration::from_secs(1), NonZeroU32::new(1).unwrap())
@@ -925,14 +920,13 @@ fn governor_cleanup_runs_on_runtime_without_tokio_time_driver() {
                 let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
                 server
                     .serve_with_shutdown(listener, async {
-                        futures_timer::Delay::new(Duration::from_millis(5)).await;
+                        Delay::new(Duration::from_millis(5)).await;
                         AxumShutdownReason::Programmatic
                     })
                     .await
                     .unwrap();
-            },
-        )
+            })
     });
     assert!(result.is_ok());
-    result.unwrap().unwrap();
+    result.unwrap();
 }

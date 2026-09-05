@@ -1,47 +1,18 @@
-#![cfg(all(feature = "aes", feature = "base64"))]
+#![cfg(feature = "aes")]
 
 use std::sync::{Arc, Barrier};
 use std::thread;
 
-use axutils::{AesCipher, AesKey, AesMode, Base64Options, CryptoError, CryptoUtils};
+use axutils::{
+    crypto::{AesKey, AesMode, CryptoError},
+    utils::CryptoUtils,
+};
 
 #[test]
-fn global_aes_initializes_once_and_interoperates_with_instances() {
+fn global_aes_lifecycle_exposes_the_initialized_cipher() {
     assert!(!CryptoUtils::aes_is_initialized());
     assert!(matches!(
-        CryptoUtils::aes_mode(),
-        Err(CryptoError::NotInitialized)
-    ));
-    assert!(matches!(
-        CryptoUtils::aes_encrypt("valid plaintext"),
-        Err(CryptoError::NotInitialized)
-    ));
-    assert!(matches!(
-        CryptoUtils::aes_decrypt([]),
-        Err(CryptoError::NotInitialized)
-    ));
-    assert!(matches!(
-        CryptoUtils::aes_encrypt_with_iv("plaintext", &[]),
-        Err(CryptoError::NotInitialized)
-    ));
-    assert!(matches!(
-        CryptoUtils::aes_decrypt_with_iv([], &[]),
-        Err(CryptoError::NotInitialized)
-    ));
-    assert!(matches!(
-        CryptoUtils::aes_encrypt_hex("plaintext"),
-        Err(CryptoError::NotInitialized)
-    ));
-    assert!(matches!(
-        CryptoUtils::aes_decrypt_hex("not-hex"),
-        Err(CryptoError::NotInitialized)
-    ));
-    assert!(matches!(
-        CryptoUtils::aes_encrypt_base64("plaintext", Base64Options::STANDARD),
-        Err(CryptoError::NotInitialized)
-    ));
-    assert!(matches!(
-        CryptoUtils::aes_decrypt_base64("!", Base64Options::STANDARD),
+        CryptoUtils::cipher(),
         Err(CryptoError::NotInitialized)
     ));
 
@@ -73,73 +44,19 @@ fn global_aes_initializes_once_and_interoperates_with_instances() {
         1
     );
 
-    let (mode, key_bytes) = if first_result.is_ok() {
-        (AesMode::Gcm, [0x11; 16])
+    let mode = if first_result.is_ok() {
+        AesMode::Gcm
     } else {
-        (AesMode::CbcPkcs7, [0x22; 16])
+        AesMode::CbcPkcs7
     };
-    assert_eq!(CryptoUtils::aes_mode().unwrap(), mode);
     assert!(CryptoUtils::aes_is_initialized());
     assert!(matches!(
         CryptoUtils::aes_init(AesKey::from_bytes([0x55; 16]).unwrap(), AesMode::Gcm),
         Err(CryptoError::AlreadyInitialized)
     ));
-    assert_eq!(CryptoUtils::aes_mode().unwrap(), mode);
-
-    let cipher = AesCipher::from_key_bytes(key_bytes, mode).unwrap();
+    let cipher = CryptoUtils::cipher().expect("the winning initializer installs a cipher");
+    assert_eq!(cipher.mode(), mode);
     let debug = format!("{cipher:?}");
     assert!(!debug.contains("17"));
     assert!(!debug.contains("34"));
-
-    let container = CryptoUtils::aes_encrypt("global container").unwrap();
-    assert_eq!(cipher.decrypt(&container).unwrap(), b"global container");
-    let instance_container = cipher.encrypt("instance container").unwrap();
-    assert_eq!(
-        CryptoUtils::aes_decrypt(&instance_container).unwrap(),
-        b"instance container"
-    );
-
-    let iv = vec![0u8; mode.iv_length()];
-    let explicit = CryptoUtils::aes_encrypt_with_iv("global explicit", &iv).unwrap();
-    assert_eq!(
-        cipher.decrypt_with_iv(&explicit, &iv).unwrap(),
-        b"global explicit"
-    );
-    let instance_explicit = cipher.encrypt_with_iv("instance explicit", &iv).unwrap();
-    assert_eq!(
-        CryptoUtils::aes_decrypt_with_iv(&instance_explicit, &iv).unwrap(),
-        b"instance explicit"
-    );
-
-    let hex = CryptoUtils::aes_encrypt_hex("global hex").unwrap();
-    assert_eq!(cipher.decrypt_hex(&hex).unwrap(), b"global hex");
-    let instance_hex = cipher.encrypt_hex("instance hex").unwrap();
-    assert_eq!(
-        CryptoUtils::aes_decrypt_hex(&instance_hex).unwrap(),
-        b"instance hex"
-    );
-
-    let standard =
-        CryptoUtils::aes_encrypt_base64("global base64", Base64Options::STANDARD).unwrap();
-    assert_eq!(
-        cipher
-            .decrypt_base64(&standard, Base64Options::STANDARD)
-            .unwrap(),
-        b"global base64"
-    );
-    let instance_base64 = cipher
-        .encrypt_base64("instance base64", Base64Options::URL_SAFE_NO_PAD)
-        .unwrap();
-    assert_eq!(
-        CryptoUtils::aes_decrypt_base64(&instance_base64, Base64Options::URL_SAFE_NO_PAD).unwrap(),
-        b"instance base64"
-    );
-
-    let sentinel = b"SENTINEL_GLOBAL_AES_PLAINTEXT";
-    let mut tampered = CryptoUtils::aes_encrypt(sentinel).unwrap();
-    let last = tampered.len() - 1;
-    tampered[last] ^= 1;
-    let error = CryptoUtils::aes_decrypt(&tampered).unwrap_err();
-    assert!(!format!("{error}").contains("SENTINEL_GLOBAL_AES_PLAINTEXT"));
-    assert!(!format!("{error:?}").contains("SENTINEL_GLOBAL_AES_PLAINTEXT"));
 }

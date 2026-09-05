@@ -254,7 +254,7 @@ fn write_offset(output: &mut String, offset: TimeZoneOffset) -> fmt::Result {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::TimeZoneOffsetError;
+    use crate::time::TimeZoneOffsetError;
 
     const FIELDS: Fields = Fields {
         year: -1,

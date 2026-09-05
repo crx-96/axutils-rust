@@ -4,9 +4,11 @@ use std::{error::Error, fmt, io};
 ///
 /// # Examples
 /// ```rust
-/// # #[cfg(all(feature="axum",feature="tokio"))] {
-/// let error=axutils::AxumConfig::new().with_max_body_bytes(0).unwrap_err();
-/// assert!(matches!(error,axutils::AxumError::InvalidConfig{field:"max_body_bytes"}));
+/// # use axutils::axum::*;
+/// # use axutils::axum::*;
+/// # #[cfg(feature="axum")] {
+/// let error=AxumConfig::new().with_max_body_bytes(0).unwrap_err();
+/// assert!(matches!(error,AxumError::InvalidConfig{field:"max_body_bytes"}));
 /// # }
 /// ```
 #[non_exhaustive]

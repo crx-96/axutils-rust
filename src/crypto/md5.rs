@@ -10,8 +10,8 @@ pub(crate) fn digest(input: &[u8]) -> [u8; 16] {
 
 #[cfg(test)]
 mod tests {
-    use super::digest;
-    use crate::CryptoUtils;
+    use super as md5_digest;
+    use crate::crypto::facade::CryptoUtils;
 
     // RFC 1321 §A.5 test suite (all 7 official vectors).
     #[test]
@@ -35,13 +35,13 @@ mod tests {
             ),
         ];
         for (input, expected_hex) in cases {
-            let hex = CryptoUtils::hex_encode(digest(input)).unwrap();
+            let hex = CryptoUtils::hex_encode(md5_digest::digest(input)).unwrap();
             assert_eq!(hex, expected_hex, "input = {input:?}");
         }
     }
 
     #[test]
     fn digest_returns_16_bytes() {
-        assert_eq!(digest(b"anything").len(), 16);
+        assert_eq!(md5_digest::digest(b"anything").len(), 16);
     }
 }

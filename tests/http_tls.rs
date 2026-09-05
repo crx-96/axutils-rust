@@ -6,11 +6,21 @@ use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use axutils::{
+use axutils::http::{
     HttpClient, HttpConfig, HttpError, HttpMethod, HttpRequest, HttpTransportErrorKind, RetryPolicy,
 };
+#[cfg(feature = "http-async")]
+use reqwest::{Certificate as ReqwestCertificate, Client as ReqwestClient, StatusCode};
+use rustls::crypto::ring as rustls_ring;
 use rustls::pki_types::{pem::PemObject, CertificateDer, PrivateKeyDer, PrivateSec1KeyDer};
 use rustls::{ServerConfig, ServerConnection, StreamOwned};
+use ureq::{
+    tls::{
+        Certificate as UreqCertificate, RootCerts as UreqRootCerts, TlsConfig as UreqTlsConfig,
+        TlsProvider as UreqTlsProvider,
+    },
+    Agent as UreqAgent, Error as UreqError,
+};
 
 const FIXTURE_CERT_PEM: &[u8] = include_bytes!("fixtures/http_tls/server.crt");
 const FIXTURE_CA_PEM: &[u8] = include_bytes!("fixtures/http_tls/ca.crt");
@@ -57,7 +67,7 @@ fn server_config() -> ServerConfig {
         .into_owned();
     let key =
         PrivateSec1KeyDer::from_pem_slice(FIXTURE_KEY_PEM).expect("valid TLS fixture private key");
-    let provider = Arc::new(rustls::crypto::ring::default_provider());
+    let provider = Arc::new(rustls_ring::default_provider());
 
     ServerConfig::builder_with_provider(provider)
         .with_safe_default_protocol_versions()
@@ -96,16 +106,16 @@ fn serve_tls(stream: TcpStream, config: Arc<ServerConfig>) {
     stream.flush().expect("flush TLS fixture response");
 }
 
-fn fixture_ureq_agent() -> ureq::Agent {
+fn fixture_ureq_agent() -> UreqAgent {
     // 仅用于 loopback fixture；生产 HttpClient 不暴露自定义根证书配置。
-    let certificate = ureq::tls::Certificate::from_pem(FIXTURE_CA_PEM)
-        .expect("valid ureq TLS fixture certificate");
-    let roots = ureq::tls::RootCerts::new_with_certs(std::slice::from_ref(&certificate));
-    ureq::Agent::config_builder()
+    let certificate =
+        UreqCertificate::from_pem(FIXTURE_CA_PEM).expect("valid ureq TLS fixture certificate");
+    let roots = UreqRootCerts::new_with_certs(std::slice::from_ref(&certificate));
+    UreqAgent::config_builder()
         .proxy(None)
         .tls_config(
-            ureq::tls::TlsConfig::builder()
-                .provider(ureq::tls::TlsProvider::Rustls)
+            UreqTlsConfig::builder()
+                .provider(UreqTlsProvider::Rustls)
                 .root_certs(roots)
                 .build(),
         )
@@ -113,15 +123,15 @@ fn fixture_ureq_agent() -> ureq::Agent {
         .new_agent()
 }
 
-#[cfg(feature = "tokio")]
-fn fixture_reqwest_certificate() -> reqwest::Certificate {
-    reqwest::Certificate::from_pem(FIXTURE_CA_PEM).expect("valid reqwest TLS fixture root")
+#[cfg(feature = "http-async")]
+fn fixture_reqwest_certificate() -> ReqwestCertificate {
+    ReqwestCertificate::from_pem(FIXTURE_CA_PEM).expect("valid reqwest TLS fixture root")
 }
 
-#[cfg(feature = "tokio")]
-fn fixture_reqwest_client() -> reqwest::Client {
+#[cfg(feature = "http-async")]
+fn fixture_reqwest_client() -> ReqwestClient {
     // 仅用于 loopback fixture；生产 HttpClient 不暴露自定义根证书配置。
-    reqwest::Client::builder()
+    ReqwestClient::builder()
         .no_proxy()
         .tls_certs_only([fixture_reqwest_certificate()])
         .build()
@@ -190,14 +200,15 @@ fn ureq_fixture_root_still_checks_hostname() {
 
     assert!(matches!(
         error,
-        ureq::Error::Io(error) if error.kind() == std::io::ErrorKind::InvalidData
+        UreqError::Io(error) if error.kind() == std::io::ErrorKind::InvalidData
     ));
     server.join().expect("TLS fixture server thread");
 }
 
+#[cfg(feature = "http-async")]
 #[test]
 fn reqwest_builder_does_not_panic_without_a_preinstalled_provider() {
-    let result = std::panic::catch_unwind(|| reqwest::Client::builder().no_proxy().build());
+    let result = std::panic::catch_unwind(|| ReqwestClient::builder().no_proxy().build());
     assert!(
         result.is_ok(),
         "reqwest TLS client construction must not panic"
@@ -208,7 +219,7 @@ fn reqwest_builder_does_not_panic_without_a_preinstalled_provider() {
     );
 }
 
-#[cfg(feature = "tokio")]
+#[cfg(feature = "http-async")]
 #[tokio::test(flavor = "current_thread")]
 async fn async_http_client_uses_platform_verifier_and_redacts_untrusted_tls_errors() {
     let (url, _, server) = spawn_tls_server();
@@ -228,7 +239,7 @@ async fn async_http_client_uses_platform_verifier_and_redacts_untrusted_tls_erro
     server.join().expect("TLS fixture server thread");
 }
 
-#[cfg(feature = "tokio")]
+#[cfg(feature = "http-async")]
 #[tokio::test(flavor = "current_thread")]
 async fn reqwest_fixture_root_allows_verified_loopback_tls() {
     let (url, _, server) = spawn_tls_server();
@@ -238,11 +249,11 @@ async fn reqwest_fixture_root_allows_verified_loopback_tls() {
         .await
         .expect("explicit fixture root should be trusted by reqwest");
 
-    assert_eq!(response.status(), reqwest::StatusCode::OK);
+    assert_eq!(response.status(), StatusCode::OK);
     server.join().expect("TLS fixture server thread");
 }
 
-#[cfg(feature = "tokio")]
+#[cfg(feature = "http-async")]
 #[tokio::test(flavor = "current_thread")]
 async fn reqwest_fixture_root_still_checks_hostname() {
     let (_, ip_url, server) = spawn_tls_server();

@@ -1,8 +1,8 @@
 use std::fmt;
 
-use super::{AesKey, AesKeyBits, AesMode, CryptoError};
+use super::{aes, hex, AesKey, AesKeyBits, AesMode, CryptoError};
 #[cfg(feature = "base64")]
-use crate::Base64Options;
+use super::{base64 as base64_codec, Base64Options};
 use ::zeroize::Zeroize;
 
 /// 可独立构建和销毁的 AES 加解密实例。
@@ -11,14 +11,14 @@ use ::zeroize::Zeroize;
 /// 多模式或需要可控密钥生命周期的场景。实例之间互不覆盖；实例被丢弃时，内部密钥由
 /// [`AesKey`] 的 `Drop` 实现清零。
 ///
-/// 这与 [`crate::CryptoUtils`] 的进程级 AES 单例不同：全局单例会与进程同寿命，正常进程退出前
+/// 这与 [`crate::utils::CryptoUtils`] 的进程级 AES 单例不同：全局单例会与进程同寿命，正常进程退出前
 /// 不会触发 `Drop`。`AesCipher` 不提供读取、复制或轮换密钥的方法，也不实现 `Clone`、`Copy`、
 /// `Display` 或序列化 trait。
 ///
 /// # Examples
 ///
 /// ```
-/// use axutils::{AesCipher, AesMode};
+/// use axutils::crypto::{AesCipher, AesMode};
 ///
 /// let cipher = AesCipher::from_key_bytes([0x00; 32], AesMode::Gcm).unwrap();
 /// assert_eq!(cipher.key_bits().bit_length(), 256);
@@ -38,7 +38,7 @@ impl AesCipher {
     /// # Examples
     ///
     /// ```
-    /// use axutils::{AesCipher, AesKey, AesMode};
+    /// use axutils::crypto::{AesCipher, AesKey, AesMode};
     ///
     /// let key = AesKey::from_bytes([0x00; 16]).unwrap();
     /// let cipher = AesCipher::new(key, AesMode::CbcPkcs7);
@@ -61,7 +61,7 @@ impl AesCipher {
     /// # Examples
     ///
     /// ```
-    /// use axutils::{AesCipher, AesMode, CryptoError};
+    /// use axutils::crypto::{AesCipher, AesMode, CryptoError};
     ///
     /// let cipher = AesCipher::from_key_bytes([0x00; 24], AesMode::Gcm).unwrap();
     /// assert_eq!(cipher.key_bits().bit_length(), 192);
@@ -81,7 +81,7 @@ impl AesCipher {
     /// # Examples
     ///
     /// ```
-    /// use axutils::{AesCipher, AesMode};
+    /// use axutils::crypto::{AesCipher, AesMode};
     ///
     /// let cipher = AesCipher::from_key_bytes([0x00; 16], AesMode::Gcm).unwrap();
     /// assert_eq!(cipher.mode(), AesMode::Gcm);
@@ -96,7 +96,7 @@ impl AesCipher {
     /// # Examples
     ///
     /// ```
-    /// use axutils::{AesCipher, AesKeyBits, AesMode};
+    /// use axutils::crypto::{AesCipher, AesKeyBits, AesMode};
     ///
     /// let cipher = AesCipher::from_key_bytes([0x00; 32], AesMode::Gcm).unwrap();
     /// assert_eq!(cipher.key_bits(), AesKeyBits::Aes256);
@@ -120,14 +120,14 @@ impl AesCipher {
     /// # Examples
     ///
     /// ```
-    /// use axutils::{AesCipher, AesMode};
+    /// use axutils::crypto::{AesCipher, AesMode};
     ///
     /// let cipher = AesCipher::from_key_bytes([0x00; 16], AesMode::Gcm).unwrap();
     /// let ciphertext = cipher.encrypt("hello").unwrap();
     /// assert_eq!(cipher.decrypt(&ciphertext).unwrap(), b"hello");
     /// ```
     pub fn encrypt(&self, plaintext: impl AsRef<[u8]>) -> Result<Vec<u8>, CryptoError> {
-        crate::crypto::aes_encrypt_container(plaintext.as_ref(), &self.key, self.mode)
+        aes::encrypt(plaintext.as_ref(), &self.key, self.mode)
     }
 
     /// 解密 [`Self::encrypt`] 返回的包含前置 IV/nonce 的容器。
@@ -141,7 +141,7 @@ impl AesCipher {
     /// # Examples
     ///
     /// ```
-    /// use axutils::{AesCipher, AesMode, CryptoError};
+    /// use axutils::crypto::{AesCipher, AesMode, CryptoError};
     ///
     /// let cipher = AesCipher::from_key_bytes([0x00; 16], AesMode::Gcm).unwrap();
     /// assert!(matches!(
@@ -150,7 +150,7 @@ impl AesCipher {
     /// ));
     /// ```
     pub fn decrypt(&self, input: impl AsRef<[u8]>) -> Result<Vec<u8>, CryptoError> {
-        crate::crypto::aes_decrypt_container(input.as_ref(), &self.key, self.mode)
+        aes::decrypt(input.as_ref(), &self.key, self.mode)
     }
 
     /// 使用调用方提供的 IV/nonce 加密，返回不包含 IV/nonce 的密文。
@@ -165,7 +165,7 @@ impl AesCipher {
     /// # Examples
     ///
     /// ```
-    /// use axutils::{AesCipher, AesMode};
+    /// use axutils::crypto::{AesCipher, AesMode};
     ///
     /// let cipher = AesCipher::from_key_bytes([0x00; 16], AesMode::Gcm).unwrap();
     /// let nonce = [0x00; 12];
@@ -177,7 +177,7 @@ impl AesCipher {
         plaintext: impl AsRef<[u8]>,
         iv: &[u8],
     ) -> Result<Vec<u8>, CryptoError> {
-        crate::crypto::aes_encrypt_explicit_iv(plaintext.as_ref(), &self.key, iv, self.mode)
+        aes::encrypt_explicit_iv(plaintext.as_ref(), &self.key, iv, self.mode)
     }
 
     /// 使用调用方提供的 IV/nonce 解密不包含 IV/nonce 的密文。
@@ -191,7 +191,7 @@ impl AesCipher {
     /// # Examples
     ///
     /// ```
-    /// use axutils::{AesCipher, AesMode};
+    /// use axutils::crypto::{AesCipher, AesMode};
     ///
     /// let cipher = AesCipher::from_key_bytes([0x00; 16], AesMode::Gcm).unwrap();
     /// let nonce = [0x00; 12];
@@ -203,7 +203,7 @@ impl AesCipher {
         ciphertext: impl AsRef<[u8]>,
         iv: &[u8],
     ) -> Result<Vec<u8>, CryptoError> {
-        crate::crypto::aes_decrypt_explicit_iv(ciphertext.as_ref(), &self.key, iv, self.mode)
+        aes::decrypt_explicit_iv(ciphertext.as_ref(), &self.key, iv, self.mode)
     }
 
     /// 使用随机 IV/nonce 加密并将完整容器编码为小写十六进制。
@@ -216,7 +216,7 @@ impl AesCipher {
     /// # Examples
     ///
     /// ```
-    /// use axutils::{AesCipher, AesMode};
+    /// use axutils::crypto::{AesCipher, AesMode};
     ///
     /// let cipher = AesCipher::from_key_bytes([0x00; 16], AesMode::Gcm).unwrap();
     /// let encoded = cipher.encrypt_hex("hello").unwrap();
@@ -224,7 +224,7 @@ impl AesCipher {
     /// ```
     pub fn encrypt_hex(&self, plaintext: impl AsRef<[u8]>) -> Result<String, CryptoError> {
         let mut ciphertext = self.encrypt(plaintext)?;
-        let result = crate::crypto::hex_encode_lower(&ciphertext);
+        let result = hex::encode_lower(&ciphertext);
         ciphertext.as_mut_slice().zeroize();
         result
     }
@@ -240,7 +240,7 @@ impl AesCipher {
     /// # Examples
     ///
     /// ```
-    /// use axutils::{AesCipher, AesMode, CryptoError};
+    /// use axutils::crypto::{AesCipher, AesMode, CryptoError};
     ///
     /// let cipher = AesCipher::from_key_bytes([0x00; 16], AesMode::CbcPkcs7).unwrap();
     /// let encoded = cipher.encrypt_hex("hello").unwrap();
@@ -248,7 +248,7 @@ impl AesCipher {
     /// assert!(matches!(cipher.decrypt_hex("abc"), Err(CryptoError::OddHexLength { .. })));
     /// ```
     pub fn decrypt_hex(&self, input: &str) -> Result<Vec<u8>, CryptoError> {
-        let mut ciphertext = crate::crypto::hex_decode(input)?;
+        let mut ciphertext = hex::decode(input)?;
         let result = self.decrypt(&ciphertext);
         ciphertext.as_mut_slice().zeroize();
         result
@@ -267,7 +267,7 @@ impl AesCipher {
     /// # Examples
     ///
     /// ```
-    /// use axutils::{AesCipher, AesMode, Base64Options};
+    /// use axutils::crypto::{AesCipher, AesMode, Base64Options};
     ///
     /// let cipher = AesCipher::from_key_bytes([0x00; 16], AesMode::Gcm).unwrap();
     /// let encoded = cipher.encrypt_base64("hello", Base64Options::URL_SAFE_NO_PAD).unwrap();
@@ -283,7 +283,7 @@ impl AesCipher {
         options: Base64Options,
     ) -> Result<String, CryptoError> {
         let mut ciphertext = self.encrypt(plaintext)?;
-        let result = crate::crypto::base64_encode(&ciphertext, options);
+        let result = base64_codec::encode(&ciphertext, options);
         ciphertext.as_mut_slice().zeroize();
         result
     }
@@ -301,7 +301,7 @@ impl AesCipher {
     /// # Examples
     ///
     /// ```
-    /// use axutils::{AesCipher, AesMode, Base64Options};
+    /// use axutils::crypto::{AesCipher, AesMode, Base64Options};
     ///
     /// let cipher = AesCipher::from_key_bytes([0x00; 16], AesMode::Gcm).unwrap();
     /// let encoded = cipher.encrypt_base64("hello", Base64Options::STANDARD).unwrap();
@@ -316,7 +316,7 @@ impl AesCipher {
         input: &str,
         options: Base64Options,
     ) -> Result<Vec<u8>, CryptoError> {
-        let mut ciphertext = crate::crypto::base64_decode(input, options)?;
+        let mut ciphertext = base64_codec::decode(input, options)?;
         let result = self.decrypt(&ciphertext);
         ciphertext.as_mut_slice().zeroize();
         result

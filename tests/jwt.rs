@@ -1,6 +1,6 @@
 #![cfg(feature = "jwt")]
 
-use axutils::{
+use axutils::jwt::{
     JwtAlgorithm, JwtConfig, JwtError, JwtSigningKey, JwtValidation, JwtVerificationKey,
 };
 

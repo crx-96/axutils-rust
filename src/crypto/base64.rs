@@ -1,10 +1,10 @@
 //! Base64 编解码后端（`base64` crate，feature = `base64`）。
 
-use crate::CryptoError;
-use ::base64::{
-    alphabet,
+use crate::crypto::CryptoError;
+use base64::{
+    self as base64_backend, alphabet,
     engine::{DecodePaddingMode, GeneralPurpose, GeneralPurposeConfig},
-    Engine,
+    DecodeError, DecodeSliceError, Engine,
 };
 
 /// Base64 字母表选择。
@@ -53,7 +53,7 @@ impl Base64Options {
     /// # Examples
     ///
     /// ```
-    /// use axutils::{Base64Alphabet, Base64Options};
+    /// use axutils::crypto::{Base64Alphabet, Base64Options};
     ///
     /// let options = Base64Options::new(Base64Alphabet::UrlSafe, false);
     /// assert_eq!(options, Base64Options::URL_SAFE_NO_PAD);
@@ -68,7 +68,7 @@ impl Base64Options {
     /// # Examples
     ///
     /// ```
-    /// use axutils::{Base64Alphabet, Base64Options};
+    /// use axutils::crypto::{Base64Alphabet, Base64Options};
     ///
     /// assert_eq!(Base64Options::STANDARD.alphabet(), Base64Alphabet::Standard);
     /// ```
@@ -82,7 +82,7 @@ impl Base64Options {
     /// # Examples
     ///
     /// ```
-    /// use axutils::Base64Options;
+    /// use axutils::crypto::Base64Options;
     ///
     /// assert!(!Base64Options::STANDARD_NO_PAD.padding());
     /// ```
@@ -111,7 +111,7 @@ impl Base64Options {
 
 pub(crate) fn encode(input: &[u8], options: Base64Options) -> Result<String, CryptoError> {
     let engine = options.engine();
-    let encoded_len = ::base64::encoded_len(input.len(), options.padding()).ok_or(
+    let encoded_len = base64_backend::encoded_len(input.len(), options.padding()).ok_or(
         CryptoError::OutputTooLarge {
             operation: "base64_encode",
         },
@@ -134,7 +134,7 @@ pub(crate) fn encode(input: &[u8], options: Base64Options) -> Result<String, Cry
 
 pub(crate) fn decode(input: &str, options: Base64Options) -> Result<Vec<u8>, CryptoError> {
     let engine = options.engine();
-    let estimate = ::base64::decoded_len_estimate(input.len());
+    let estimate = base64_backend::decoded_len_estimate(input.len());
     let mut out = Vec::new();
     out.try_reserve_exact(estimate)
         .map_err(|_| CryptoError::OutputTooLarge {
@@ -146,26 +146,27 @@ pub(crate) fn decode(input: &str, options: Base64Options) -> Result<Vec<u8>, Cry
             out.truncate(written);
             Ok(out)
         }
-        Err(::base64::DecodeSliceError::OutputSliceTooSmall) => Err(CryptoError::OutputTooLarge {
+        Err(DecodeSliceError::OutputSliceTooSmall) => Err(CryptoError::OutputTooLarge {
             operation: "base64_decode",
         }),
-        Err(::base64::DecodeSliceError::DecodeError(e)) => Err(CryptoError::Base64Decode {
+        Err(DecodeSliceError::DecodeError(e)) => Err(CryptoError::Base64Decode {
             position: decode_error_position(&e),
         }),
     }
 }
 
-fn decode_error_position(error: &::base64::DecodeError) -> Option<usize> {
+fn decode_error_position(error: &DecodeError) -> Option<usize> {
     match error {
-        ::base64::DecodeError::InvalidByte(position, _) => Some(*position),
-        ::base64::DecodeError::InvalidLastSymbol { offset, .. } => Some(*offset),
-        ::base64::DecodeError::InvalidLength(_) | ::base64::DecodeError::InvalidPadding => None,
+        DecodeError::InvalidByte(position, _) => Some(*position),
+        DecodeError::InvalidLastSymbol { offset, .. } => Some(*offset),
+        DecodeError::InvalidLength(_) | DecodeError::InvalidPadding => None,
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super as base64_codec;
+    use super::Base64Options;
 
     #[test]
     fn rfc4648_test_vectors_standard_padded() {
@@ -179,17 +180,23 @@ mod tests {
             (b"foobar", "Zm9vYmFy"),
         ];
         for (input, expected) in cases {
-            assert_eq!(encode(input, Base64Options::STANDARD).unwrap(), expected);
-            assert_eq!(decode(expected, Base64Options::STANDARD).unwrap(), input);
+            assert_eq!(
+                base64_codec::encode(input, Base64Options::STANDARD).unwrap(),
+                expected
+            );
+            assert_eq!(
+                base64_codec::decode(expected, Base64Options::STANDARD).unwrap(),
+                input
+            );
         }
     }
 
     #[test]
     fn no_pad_roundtrip() {
-        let encoded = encode(b"foob", Base64Options::STANDARD_NO_PAD).unwrap();
+        let encoded = base64_codec::encode(b"foob", Base64Options::STANDARD_NO_PAD).unwrap();
         assert_eq!(encoded, "Zm9vYg");
         assert_eq!(
-            decode(&encoded, Base64Options::STANDARD_NO_PAD).unwrap(),
+            base64_codec::decode(&encoded, Base64Options::STANDARD_NO_PAD).unwrap(),
             b"foob"
         );
     }
@@ -197,43 +204,43 @@ mod tests {
     #[test]
     fn url_safe_distinguishes_plus_slash() {
         let input: &[u8] = &[0xfb, 0xff, 0xfe];
-        let std_encoded = encode(input, Base64Options::STANDARD).unwrap();
-        let url_encoded = encode(input, Base64Options::URL_SAFE).unwrap();
+        let std_encoded = base64_codec::encode(input, Base64Options::STANDARD).unwrap();
+        let url_encoded = base64_codec::encode(input, Base64Options::URL_SAFE).unwrap();
         assert!(std_encoded.contains('+') || std_encoded.contains('/'));
         assert!(!url_encoded.contains('+') && !url_encoded.contains('/'));
         assert_eq!(
-            decode(&url_encoded, Base64Options::URL_SAFE).unwrap(),
+            base64_codec::decode(&url_encoded, Base64Options::URL_SAFE).unwrap(),
             input
         );
     }
 
     #[test]
     fn cross_alphabet_decode_is_rejected() {
-        let encoded = encode(&[0xfb, 0xff, 0xfe], Base64Options::STANDARD).unwrap();
-        assert!(decode(&encoded, Base64Options::URL_SAFE).is_err());
+        let encoded = base64_codec::encode(&[0xfb, 0xff, 0xfe], Base64Options::STANDARD).unwrap();
+        assert!(base64_codec::decode(&encoded, Base64Options::URL_SAFE).is_err());
     }
 
     #[test]
     fn missing_required_padding_is_rejected() {
-        assert!(decode("Zm9vYg", Base64Options::STANDARD).is_err());
+        assert!(base64_codec::decode("Zm9vYg", Base64Options::STANDARD).is_err());
     }
 
     #[test]
     fn unexpected_padding_in_no_pad_mode_is_rejected() {
-        assert!(decode("Zm9vYg==", Base64Options::STANDARD_NO_PAD).is_err());
+        assert!(base64_codec::decode("Zm9vYg==", Base64Options::STANDARD_NO_PAD).is_err());
     }
 
     #[test]
     fn illegal_characters_and_nonzero_trailing_bits_are_rejected() {
-        assert!(decode("Zm9v!g==", Base64Options::STANDARD).is_err());
-        assert!(decode("Zm9vYh==", Base64Options::STANDARD).is_err());
+        assert!(base64_codec::decode("Zm9v!g==", Base64Options::STANDARD).is_err());
+        assert!(base64_codec::decode("Zm9vYh==", Base64Options::STANDARD).is_err());
     }
 
     #[test]
     fn whitespace_and_misplaced_padding_are_rejected() {
-        assert!(decode(" Zg==", Base64Options::STANDARD).is_err());
-        assert!(decode("Zg==\n", Base64Options::STANDARD).is_err());
-        assert!(decode("=Zg==", Base64Options::STANDARD).is_err());
-        assert!(decode("Z=g=", Base64Options::STANDARD).is_err());
+        assert!(base64_codec::decode(" Zg==", Base64Options::STANDARD).is_err());
+        assert!(base64_codec::decode("Zg==\n", Base64Options::STANDARD).is_err());
+        assert!(base64_codec::decode("=Zg==", Base64Options::STANDARD).is_err());
+        assert!(base64_codec::decode("Z=g=", Base64Options::STANDARD).is_err());
     }
 }

@@ -1,8 +1,13 @@
-#![cfg(all(feature = "redis", feature = "tokio"))]
+#![cfg(feature = "redis-async")]
 
-use axutils::{RedisError, RedisTransportErrorKind, RedisUtils};
+use axutils::redis::{RedisError, RedisTransportErrorKind};
+use axutils::utils::RedisUtils;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+use tokio::{
+    sync::{oneshot, Barrier},
+    time as tokio_time,
+};
 
 #[path = "support/redis_server.rs"]
 mod redis_server;
@@ -73,7 +78,7 @@ async fn async_init_checks_before_installing_and_can_retry_after_failure_or_canc
     assert!(!RedisUtils::is_initialized());
     drop(rejected);
 
-    let (sent, received) = tokio::sync::oneshot::channel();
+    let (sent, received) = oneshot::channel();
     let sent = Mutex::new(Some(sent));
     let waiting = RedisTestServer::start(move |command| {
         if command[0] == "PING" {
@@ -87,7 +92,7 @@ async fn async_init_checks_before_installing_and_can_retry_after_failure_or_canc
     });
     let config = test_config(&format!("redis://{}/0", waiting.address));
     let attempt = tokio::spawn(RedisUtils::init_async(config));
-    tokio::time::timeout(Duration::from_secs(2), received)
+    tokio_time::timeout(Duration::from_secs(2), received)
         .await
         .unwrap()
         .unwrap();
@@ -108,7 +113,7 @@ async fn async_init_checks_before_installing_and_can_retry_after_failure_or_canc
         })
     });
     let url = format!("redis://{}/0", server.address);
-    let barrier = Arc::new(tokio::sync::Barrier::new(8));
+    let barrier = Arc::new(Barrier::new(8));
     let attempts = (0..8)
         .map(|_| {
             let barrier = Arc::clone(&barrier);
@@ -128,7 +133,10 @@ async fn async_init_checks_before_installing_and_can_retry_after_failure_or_canc
     }
     assert_eq!(successes, 1);
     assert!(RedisUtils::is_initialized());
-    assert_eq!(RedisUtils::ping_async().await.unwrap(), "PONG");
+    assert_eq!(
+        RedisUtils::client().unwrap().ping_async().await.unwrap(),
+        "PONG"
+    );
     let unused = RedisTestServer::start(|_| panic!("重复初始化不应访问新目标"));
     let url = format!("redis://{}/0", unused.address);
     assert_eq!(

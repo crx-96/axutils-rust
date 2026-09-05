@@ -5,7 +5,8 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::sync::{Arc, Barrier};
 
-use axutils::{LogConfig, LogError, LogFileConfig, LogLevel, LogRotation, LogUtils};
+use axutils::logging::{LogConfig, LogError, LogFileConfig, LogLevel, LogRotation};
+use axutils::utils::LogUtils;
 
 const EVENT_SENTINEL: &str = "AXUTILS_LOG_EVENT_SENTINEL";
 const TRACE_SENTINEL: &str = "AXUTILS_LOG_TRACE_SENTINEL";
@@ -249,17 +250,17 @@ fn stdout_case() {
 }
 
 fn silent_case() {
-    LogUtils::info(EVENT_SENTINEL);
+    tracing::info!(target: "axutils::log", "{EVENT_SENTINEL}");
     assert!(!LogUtils::is_initialized());
 }
 
 fn methods_case() {
     LogUtils::init(LogConfig::new().with_level(LogLevel::Trace)).expect("methods init");
-    LogUtils::trace(TRACE_SENTINEL);
-    LogUtils::debug(DEBUG_SENTINEL);
-    LogUtils::info(INFO_SENTINEL);
-    LogUtils::warn(WARN_SENTINEL);
-    LogUtils::error(ERROR_SENTINEL);
+    tracing::trace!(target: "axutils::log", "{TRACE_SENTINEL}");
+    tracing::debug!(target: "axutils::log", "{DEBUG_SENTINEL}");
+    tracing::info!(target: "axutils::log", "{INFO_SENTINEL}");
+    tracing::warn!(target: "axutils::log", "{WARN_SENTINEL}");
+    tracing::error!(target: "axutils::log", "{ERROR_SENTINEL}");
 }
 
 fn file_case(root: &Path, dual: bool) {
@@ -458,7 +459,7 @@ fn selective_directives_case() {
             .with_directives("off,axutils=info,axutils::http=debug,axutils::crypto=warn"),
     )
     .expect("selective directive init");
-    LogUtils::info(SELECTIVE_LOG_INFO_SENTINEL);
+    tracing::info!(target: "axutils::log", "{SELECTIVE_LOG_INFO_SENTINEL}");
     tracing::debug!(
         target: "axutils::http::request",
         message = SELECTIVE_HTTP_DEBUG_SENTINEL

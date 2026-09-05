@@ -9,15 +9,16 @@ mod clock;
 mod codec;
 mod config;
 mod error;
+pub(crate) mod global;
 mod header;
 mod key;
 
 pub use algorithm::JwtAlgorithm;
+pub use codec::JwtCodec;
 pub use config::{JwtConfig, JwtValidation};
 pub use error::JwtError;
 pub use key::{JwtSigningKey, JwtVerificationKey};
 
 pub(crate) use algorithm::EcCurve;
 pub(crate) use algorithm::KeyFamily;
-pub(crate) use codec::JwtCodec;
 pub(crate) use config::JwtConfigParts;

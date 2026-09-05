@@ -1,13 +1,22 @@
 #![cfg(feature = "tokio")]
 
-use axutils::{TokioConfig, TokioError, TokioRuntimeFlavor, TokioUtils};
+use axutils::{
+    tokio::{TokioConfig, TokioError, TokioRuntimeFlavor},
+    utils::TokioUtils,
+};
 use std::{panic::catch_unwind, time::Duration};
+
+#[cfg(feature = "axum")]
+use axutils::axum::AxumError;
+#[cfg(feature = "task-group")]
+use axutils::tokio::TokioTaskGroup;
+#[cfg(feature = "task-group")]
+use tokio::{sync::Barrier, task::yield_now};
 
 #[test]
 fn public_paths_and_config_boundaries_are_stable() {
-    let _: axutils::tokio::TokioConfig = TokioConfig::new();
-    let _: &str = std::any::type_name::<axutils::utils::TokioUtils>();
-    let _: &str = std::any::type_name::<axutils::utils::tokio_utils::TokioUtils>();
+    let _: TokioConfig = TokioConfig::new();
+    let _: &str = std::any::type_name::<TokioUtils>();
     assert!(matches!(
         TokioConfig::new().with_worker_threads(Some(0)),
         Err(TokioError::InvalidConfig {
@@ -103,20 +112,19 @@ async fn spawn_timeout_and_channel_use_current_runtime() {
     ));
 }
 
-#[cfg(feature = "tokio-util")]
+#[cfg(feature = "task-group")]
 #[test]
 fn open_task_group_rejects_spawn_without_runtime() {
-    let group = axutils::TokioTaskGroup::new();
+    let group = TokioTaskGroup::new();
     assert!(matches!(
         group.spawn(async {}),
         Err(TokioError::RuntimeRequired)
     ));
 }
 
-#[cfg(feature = "tokio-util")]
+#[cfg(feature = "task-group")]
 #[test]
 fn task_group_timeout_works_without_tokio_time_driver() {
-    use axutils::TokioTaskGroup;
     let config = TokioConfig::new().with_time_enabled(false);
     let result = TokioUtils::run(&config, async {
         let group = TokioTaskGroup::new();
@@ -137,16 +145,15 @@ fn provider_errors_have_redacted_debug() {
     assert!(!format!("{runtime:?}").contains(sensitive));
     #[cfg(feature = "axum")]
     {
-        let io = axutils::AxumError::Io(std::io::Error::other(sensitive));
+        let io = AxumError::Io(std::io::Error::other(sensitive));
         assert!(!format!("{io:?}").contains(sensitive));
     }
 }
 
-#[cfg(feature = "tokio-util")]
+#[cfg(feature = "task-group")]
 #[tokio::test]
 async fn task_group_close_is_linearized_and_shutdown_is_bounded() {
-    use axutils::TokioTaskGroup;
-    let _: axutils::tokio::TokioTaskGroup = TokioTaskGroup::new();
+    let _: TokioTaskGroup = TokioTaskGroup::new();
     let group = TokioTaskGroup::new();
     let token = group.cancellation_token();
     group.spawn(async move { token.cancelled().await }).unwrap();
@@ -171,10 +178,9 @@ async fn task_group_close_is_linearized_and_shutdown_is_bounded() {
     ));
 }
 
-#[cfg(feature = "tokio-util")]
+#[cfg(feature = "task-group")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn task_group_close_race_and_drop_abort_semantics_are_explicit() {
-    use axutils::TokioTaskGroup;
     use std::sync::Arc;
     let group = TokioTaskGroup::new();
     let clone = group.clone();
@@ -194,7 +200,7 @@ async fn task_group_close_race_and_drop_abort_semantics_are_explicit() {
     group.shutdown(Duration::from_secs(1)).await.unwrap();
 
     let racing = TokioTaskGroup::new();
-    let barrier = Arc::new(tokio::sync::Barrier::new(2));
+    let barrier = Arc::new(Barrier::new(2));
     let spawn_task = {
         let racing = racing.clone();
         let barrier = barrier.clone();
@@ -215,7 +221,7 @@ async fn task_group_close_race_and_drop_abort_semantics_are_explicit() {
     let handle = aborted.spawn(std::future::pending::<()>()).unwrap();
     handle.abort();
     let _ = handle.await;
-    tokio::task::yield_now().await;
+    yield_now().await;
     aborted.shutdown(Duration::from_secs(1)).await.unwrap();
     assert_eq!(aborted.remaining_tasks(), 0);
 }

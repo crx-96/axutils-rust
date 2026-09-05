@@ -12,7 +12,7 @@ use super::{
 /// 单机 Redis 原子事务的本地排队上下文。
 ///
 /// 该类型不持有连接，排队方法只做参数校验和 MessagePack 编码；网络操作在
-/// [`crate::RedisClient::transaction`] 或 `transaction_async` 的 callback 返回后才发生。
+/// [`crate::redis::RedisClient::transaction`] 或 `transaction_async` 的 callback 返回后才发生。
 /// 第一阶段不提供读取、`WATCH`、CAS、自动重试或 callback 重放语义。
 pub struct RedisTransaction {
     commands: Vec<::redis::Cmd>,
@@ -40,7 +40,7 @@ impl RedisTransaction {
     /// # Examples
     ///
     /// ```
-    /// use axutils::RedisTransaction;
+    /// use axutils::redis::RedisTransaction;
     ///
     /// let _ = RedisTransaction::set::<&str, u8>;
     /// ```
@@ -59,7 +59,7 @@ impl RedisTransaction {
     /// # Examples
     ///
     /// ```
-    /// use axutils::RedisTransaction;
+    /// use axutils::redis::RedisTransaction;
     ///
     /// let _ = RedisTransaction::set_with_expiry::<&str, u8>;
     /// ```
@@ -82,7 +82,7 @@ impl RedisTransaction {
     /// # Examples
     ///
     /// ```
-    /// use axutils::RedisTransaction;
+    /// use axutils::redis::RedisTransaction;
     ///
     /// let _ = RedisTransaction::set_bytes::<&str, Vec<u8>>;
     /// ```
@@ -101,7 +101,7 @@ impl RedisTransaction {
     /// # Examples
     ///
     /// ```
-    /// use axutils::RedisTransaction;
+    /// use axutils::redis::RedisTransaction;
     ///
     /// let _ = RedisTransaction::set_bytes_with_expiry::<&str, Vec<u8>>;
     /// ```
@@ -124,7 +124,7 @@ impl RedisTransaction {
     /// # Examples
     ///
     /// ```
-    /// use axutils::RedisTransaction;
+    /// use axutils::redis::RedisTransaction;
     ///
     /// let _ = RedisTransaction::delete::<&str>;
     /// ```
@@ -137,7 +137,7 @@ impl RedisTransaction {
     /// # Examples
     ///
     /// ```
-    /// use axutils::RedisTransaction;
+    /// use axutils::redis::RedisTransaction;
     ///
     /// let _ = RedisTransaction::hset::<&str, &str, u8>;
     /// ```
@@ -158,7 +158,7 @@ impl RedisTransaction {
     /// # Examples
     ///
     /// ```
-    /// use axutils::RedisTransaction;
+    /// use axutils::redis::RedisTransaction;
     ///
     /// let _ = RedisTransaction::hset_bytes::<&str, &str, Vec<u8>>;
     /// ```
@@ -179,7 +179,7 @@ impl RedisTransaction {
     /// # Examples
     ///
     /// ```
-    /// use axutils::RedisTransaction;
+    /// use axutils::redis::RedisTransaction;
     ///
     /// let _ = RedisTransaction::hdel::<&str, &str>;
     /// ```
@@ -199,7 +199,7 @@ impl RedisTransaction {
     /// # Examples
     ///
     /// ```
-    /// use axutils::RedisTransaction;
+    /// use axutils::redis::RedisTransaction;
     ///
     /// let _ = RedisTransaction::expire::<&str>;
     /// ```
@@ -219,7 +219,7 @@ impl RedisTransaction {
     /// # Examples
     ///
     /// ```
-    /// use axutils::RedisTransaction;
+    /// use axutils::redis::RedisTransaction;
     ///
     /// let _ = RedisTransaction::persist::<&str>;
     /// ```
