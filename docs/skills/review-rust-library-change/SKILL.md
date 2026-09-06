@@ -11,16 +11,9 @@ description: 当任务需要设计、实现、审查或验收 axutils 的 Rust �
 
 ## 1. 触发范围与证据
 
-在首次作出相关设计、实现、审查或验收判断前完整读取本 Skill，适用情形包括：
-
-- 修改或判断 `src/**` 的实现、公共 API、错误、运行时行为或安全边界；
-- 新增、删除、改名或移动公共模块、类型、方法、trait、枚举、常量、宏或导出；
-- 修改 feature、依赖、MSRV、docs.rs 配置、发布白名单或其他 crate 元数据；
-- 用测试、fixture、API doc、README 或 `docs/examples/**` 定义或验证上述契约；
-- 做跨领域重构、发布前检查或 library 级回归审查。
-
-纯翻译、格式调整、规则或 Skill 自身维护、CI/开发工具维护、Git 操作，以及不判断 library
-契约的测试基础设施调整不自动触发本 Skill；任务中一旦需要作出上述库级判断，再完整读取。
+适用于库实现、公共契约、feature/依赖、发布内容及其测试和文档一致性判断；具体触发入口见
+[`AGENTS.md`](../../../AGENTS.md)。首次作出库级判断前完整读取；纯规则或 Skill 维护只检查指令
+本身，不因此启动源码审查或 Rust 全量验证。
 
 本文用词：
 
@@ -31,18 +24,18 @@ description: 当任务需要设计、实现、审查或验收 axutils 的 Rust �
 交付必须区分“成功”“预期失败”“未运行”“环境阻塞”，并说明适用范围，不能把局部检查
 描述成全量验收。
 
-## 2. 读取顺序与权威来源
+## 2. 上下文与证据处理
 
 1. 读取适用的 `AGENTS.md`；
 2. 完整读取本 Skill；
 3. 涉及模块归属、公共路径、feature 或跨领域调用时完整读取 `docs/module-map.md`；
-4. 读取 `Cargo.toml` 的 package、features、dependencies、docs.rs 和 lint 配置，确认版本与 MSRV；
-5. 读取目标源码、领域入口、调用方、相关测试/fixture、API doc、对应示例和当前 CHANGELOG；
-6. 只有命令或开发工作流变化时才读取并更新 `docs/develop.md`。
+4. 读取 `Cargo.toml` 确认版本与 MSRV，并检查受影响的 feature、依赖、docs.rs 和 lint 配置；
+5. 按影响范围读取目标源码、领域入口、调用方、测试/fixture、API doc、示例和 CHANGELOG；
+6. 选择验证命令时读取 `docs/develop.md` 对应层级；仅命令或开发工作流变化时更新它。
 
-当前行为发生冲突时，权威顺序是：用户明确要求与更具体规则；源码、manifest 和可复现结果；
-本 Skill 的设计/验收标准；module map、API doc、示例、README、develop 和历史记录。旧文档不能
-覆盖当前源码事实，发现漂移必须在同一任务中收口。
+遵循适用指令的优先级。源码、manifest 和可复现结果说明当前行为；本 Skill 规定设计与验收
+要求，不能因现有实现不符合标准就降低标准。文档不能覆盖源码事实，源码也不自动证明行为正确。
+冲突时列明证据，在授权范围内修正；无关漂移单独报告，超出已有授权的核心契约或范围变更先澄清。
 
 ## 3. 当前架构基线
 
@@ -88,11 +81,11 @@ description: 当任务需要设计、实现、审查或验收 axutils 的 Rust �
 
 1. 记录基线和迁移表，冻结正式测试与用户文档；
 2. 在行为不变前提下拆分源码、修正依赖方向；
-3. 建立 canonical API；若任务要求兼容阶段，先以 shim 验证新旧路径；
-4. 保持原测试不变完成源码验收；
+3. 建立 canonical API；仅在用户明确要求兼容阶段时使用临时 shim 验证新旧路径；
+4. 先通过原回归；若已授权的 API 迁移使旧调用无法编译，记录迁移对应关系，保留原断言语义；
 5. 再迁移测试、fixture 和测试性能结构；
 6. 只删除预先列明并已有负向契约的兼容路径；
-7. 最后更新 API doc、用户文档、规则、Skill 和 CHANGELOG。
+7. 最后同步受影响的 API doc、用户文档和 CHANGELOG；规则或 Skill 仅在用户明确要求维护时修改。
 
 普通局部改动不必机械套用全部波次，但必须保持“实现契约先稳定，再让测试和文档反映契约”。
 不得为让测试通过而删除或放宽既有安全、错误或负向契约。
@@ -103,6 +96,7 @@ description: 当任务需要设计、实现、审查或验收 axutils 的 Rust �
 
 - 新能力放入负责其完整生命周期和领域语义的模块；`utils` 只提供明确的便利入口。
 - `src/lib.rs` 不新增具体项重导出，也不创建 `prelude`。
+- 不新增兼容别名；仅用户明确要求的临时兼容阶段可按第 4 节处理。
 - 无状态 `ConfigUtils`、`FsUtils`、`ConvertUtils`、`FormatUtils`、`PathUtils` 等可以提供便利操作，
   但只能从 `axutils::utils` 导入。
 - 状态型 façade 只保留初始化、初始化状态和实例访问器。业务方法在领域实例上调用。
@@ -200,25 +194,15 @@ Markdown harness 使用“文档默认 feature/直接依赖 + 邻接 fence overr
 feature 和直接依赖组合的正向代码块合并到同一 scratch crate；`compile_fail` 独立运行并核对
 诊断。新增 fence 必须被双向枚举，未闭合 fence、未声明的活动 `cfg` 和敏感值必须失败。
 
-最小充分验证按影响范围选择；跨模块、公共路径、feature/依赖或发布级变化执行完整非 live 门禁：
+验证命令统一维护在 [`docs/develop.md`](../../develop.md)，按影响选择：
 
-```powershell
-cargo fmt --all -- --check
-cargo check --no-default-features
-cargo test --no-default-features
-cargo check --all-features
-cargo test --all-features
-cargo clippy --all-targets --all-features -- -D warnings
-cargo doc --no-deps --all-features
-cargo test --no-default-features --test feature_matrix -- --ignored --test-threads=1
-cargo test --no-default-features --test docs_examples
-cargo test --no-default-features --test docs_examples -- --ignored --test-threads=1
-cargo package --list
-git diff --check
-```
+- 局部实现或单领域行为：快速门禁及相关领域检查，覆盖受影响的错误、资源和安全边界。
+- 跨模块、公共路径、feature/依赖：快速及完整非 live 门禁，包括完整 feature matrix、Markdown
+  示例 harness，并补充受影响领域的最小 feature 组合、依赖树断言和发布清单检查。
+- 发布级变化：在上述检查基础上执行发布前门禁；检查通过不等于获得发布授权。
 
-再按具体领域执行最小 feature 组合和依赖树断言。MSRV 需在 Rust 1.95 工具链验证；当前工具链
-不是 1.95 时必须如实报告，不能用更高版本结果冒充 MSRV 证据。
+相关检查通过后，仅因新改动、失败或未解决疑点扩大或重复验证。MSRV 以 `Cargo.toml` 为准，
+使用更高工具链的结果不能冒充 MSRV 证据；缺少对应工具链时报告未验证，不擅自安装或切换。
 
 ## 9. 文档、CHANGELOG 与发布包
 
@@ -243,10 +227,10 @@ git diff --check
 
 可以声明完成的条件：
 
-1. 架构依赖方向、canonical path、薄 façade、语义 feature 和 allocator 边界均有源码证据；
+1. 受影响的架构依赖方向、canonical path、薄 façade、语义 feature 和 allocator 边界有源码证据；
 2. 每项公共/feature 变化同时有正向和必要的负向契约；
 3. 适用测试、Clippy、rustdoc、文档 harness、依赖树和发布清单通过；
-4. API doc、README、领域文档、module map、develop、规则、Skill 和 CHANGELOG 已按职责同步；
+4. 受影响的文档与 CHANGELOG 按职责同步；发现的规则/Skill 漂移已在授权范围内修正或单独报告；
 5. 无未处理的行为回归、安全弱化、敏感信息、外部副作用或无关改动；
 6. 最终报告列明实际命令、结果、未运行项和剩余风险，另一位维护者可据此复核。
 

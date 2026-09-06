@@ -1,83 +1,35 @@
 # axutils 项目协作规则
 
-项目实现、公共 API、feature/依赖、测试、文档和发布的详细设计、工作流与验收要求，统一维护在
-[`review-rust-library-change`](docs/skills/review-rust-library-change/SKILL.md) Skill；本文件不重复其细则。
+本项目是单一 Rust library crate `axutils`，入口为 `src/lib.rs`，默认 feature 为空。
+本文件维护任务入口与仓库边界；库级设计和验收要求集中在项目 Skill，避免重复维护。
 
-## 按需入口与文档职责
+## 按需入口
 
-[`review-rust-library-change`](docs/skills/review-rust-library-change/SKILL.md) 是项目级、工具无关的
-Rust library 变更工作流与权威审查验收标准，不包含特定 Agent 工具调用语法。它不是进入仓库后的
-默认前置读物；读取本文件后，应先根据任务实际需要判断是否命中以下条件。命中时，必须在首次进行
-相关设计、实现、审查或验收判断前完整读取并使用该 Skill，不得只依据本文件摘要：
+- **库级变更或判断**：在首次设计、实现、审查或验收前完整读取
+  [`review-rust-library-change`](docs/skills/review-rust-library-change/SKILL.md)。适用于源码实现、
+  公共 API、错误/运行时/安全语义、feature/依赖、发布元数据，以及测试、fixture、用户文档与这些
+  契约的一致性判断；用户明确要求按本项目 Rust library 标准审查时也适用。
+- **纯维护**：翻译、措辞、格式、规则/Skill、CI/开发工具、Git 和不判断库契约的测试基础设施维护，
+  不触发库级工作流。维护 Skill 时仍须完整读取目标文件；后续涉及库级判断时再启用该工作流。
+- **模块定位**：确定工具类、领域模块、公共路径、feature 或跨模块 API 的归属与边界时，完整读取
+  [`docs/module-map.md`](docs/module-map.md)，它是唯一定位清单。
+- **开发与验证**：选择或执行检查时读取 [`docs/develop.md`](docs/develop.md) 对应层级；只有命令或
+  开发工作流变化时才更新它。纯规则、措辞和格式维护检查文档结构、链接及 diff，无需运行 Rust 门禁。
 
-- 会改变或需要判断 `src/` 中的实现、公共 API、错误语义、运行时行为或安全边界；
-- 新增、删除、重命名或调整工具类、领域模块、公开导出、类型、方法、trait、枚举、常量、类型别名、
-  静态项、宏、feature、依赖、发布白名单或发布元数据；
-- 需要用本项目标准判断测试、fixture、API doc、README、`docs/examples/`、module map 或 CHANGELOG
-  是否与库的实现、公共契约、feature/依赖边界或发布内容一致；
-- 对上述库级内容进行实现就绪性审查、回归排查或发布前检查，或用户明确要求按本项目的 Rust library
-  标准审查或验收。
+## 执行与仓库边界
 
-不得仅因任务提到“审查”“验收”，或仅因目标位于 `tests/`、README、文档、CHANGELOG、项目规则或
-Skill 中就触发该 Skill。纯翻译、简单措辞或格式调整、规则或 Skill 自身维护、CI/开发工具维护、
-Git/工作区操作、测试基础设施调整及其他不改变也不判断 Rust library 实现或契约的任务无需读取；
-如果执行过程中实际需要作出上述库级判断，则在作出判断前再完整读取。
-
-任务需要确定具体工具类、领域模块、跨模块 API 或新增方法的归属与边界时，再完整读取
-[`docs/module-map.md`](docs/module-map.md)，无需仅因已读取上述 Skill 而预读。只有任务新增、删除、
-修改开发/发布命令，或需向开发人员同步命令变化时，才读取并更新 [`docs/develop.md`](docs/develop.md)
-对应章节。任务已命中上述 Skill 且源码、规则、标准或文档描述不一致时，按 Skill 规定的权威来源
-顺序收集证据并处理，不得静默采用较宽松解释。
-
-## 项目定位与仓库边界
-
-这是 Rust library crate `axutils`，入口为 `src/lib.rs`；默认 feature 为空，不依赖第三方 crate 的
-能力默认可用，其他能力通过显式 feature 提供。工具类、领域模块、公共导出、feature、依赖和
-适用范围以 [`docs/module-map.md`](docs/module-map.md) 为唯一定位清单。
-
-当前架构基线：
-
-- 保持单 crate 分域；依赖方向为 `utils façade -> domain public API -> domain internals -> dependency`，
-  领域实现不得反向依赖 `utils`；
-- crate 根只公开领域模块，不平铺类型；Client、配置、错误和模型使用
-  `axutils::<domain>::Type`，所有 `*Utils` 使用 `axutils::utils::XxxUtils`；
-- `utils` 叶模块与领域实现模块保持私有，不新增 `prelude` 或兼容别名；
-- 状态型 façade 只负责初始化、状态和实例访问；业务调用通过 Client、codec、scheduler 或 server
-  实例完成；
-- feature 以用户能力命名，单独启用即提供对应 API；provider 依赖名不是公共 feature。单独
-  `tokio` 不开放其他领域异步 API；
-- library 不注册全局 allocator；最终进程的 allocator 由下游 binary 选择。
-
-- `tests/` 和 `tests/fixtures/` 是回归测试与 feature/API/依赖契约的一部分；不得为通过当前测试而删除或放宽；
-- `tests/email_live.rs`、`tests/redis_live.rs` 等真实外部服务测试固定为 ignored，只有用户明确授权、
-  受控服务和被忽略的本地配置同时满足时才可运行；
-- `config/` 仅存本地测试配置；禁止提交密码、授权码、邮箱、节点地址或其他凭据，也不得写入命令行、
-  日志、测试输出或文档；
-- `CHANGELOG.md` 仅记录源码、公共 API、运行时行为、错误/安全边界及直接面向使用者的兼容性变化；
-  规则、CI、开发工具、Skill 和文档整理不写入其中；
-- `Cargo.toml` 的 `package.include` 是发布白名单；开发者标准、规则、测试、`docs/skills/` 和本地配置
-  不属于发布包；library crate 不将根目录 `Cargo.lock` 作为依赖版本策略提交。
-
-## 重构与验证顺序
-
-跨模块重构先稳定 `src/**`，在不改正式测试语义的前提下让原回归通过；随后才调整
-`tests/**`、fixture 与 harness；公共契约稳定后最后更新 Rustdoc、README、领域文档、本文件和
-审查 Skill。不得以提速为由删除负向、边界或安全契约。
-
-路径调用遵循“短路径但保留来源”：`use` 可写完整来源，表达式和签名通过一个有业务含义的模块
-限定符调用；`execute`、`parse`、`record_client_init` 等通用函数不得裸导入。Clippy 的
-`absolute_paths` 门禁不得放宽。负向编译 fixture 仅可在被验证的旧路径或缺失能力目标表达式中使用
-完整路径，不得把该例外扩展到其他源码、测试或可执行文档示例。
-
-开发命令分为快速、领域、完整非 live 和发布前四级，统一见
-[`docs/develop.md`](docs/develop.md)。feature matrix 与文档示例 harness 是公共契约门禁；真实服务
-测试不属于普通全量验证。
-
-## 基本工作约定
-
-说明、审查意见、提交信息、注释和文档默认使用中文；Rust 标识符、API、命令和标准技术术语保留
-原文。修改前须读取相关规则、标准、源码、测试和 Cargo 配置，确认根因与影响范围并保持最小变更；
-不得顺带重构无关代码，或擅自切换工具链、修改全局环境、发布、推送、运行真实外部服务。
-
-版本号以 `Cargo.toml` 的 `[package].version` 为唯一来源。源码、公共 API、运行时行为、错误或安全
-边界变更前，必须读取当前版本并按标准判断 CHANGELOG；任务期间不得自行提升版本号。
+- 说明、审查意见、提交信息、注释和文档默认使用中文，标识符、API 和标准技术术语保留原文。
+- 按任务读取相关上下文并保持最小变更；目标和授权明确时持续完成，常规选择依据现有约定处理。
+  仅对实质影响范围、接口、数据、成本、风险或验收的未决问题询问，不因 Skill 的常规步骤重复确认。
+- 架构、公共路径、feature、代码风格、重构顺序和测试契约遵循项目 Skill；不得通过删除或放宽
+  `tests/`、fixture 中的负向、边界或安全契约让检查通过。
+- 真实外部服务测试保持 ignored，不属于普通全量验证。仅在用户明确授权、服务受控、一次性
+  opt-in 开关和被忽略的本地配置均满足时运行。
+- `config/` 仅存本地测试配置。密码、授权码、邮箱、节点地址等敏感配置不得进入提交、命令行、
+  日志、测试输出或文档。
+- `Cargo.toml` 是版本号的唯一来源；源码、公共 API、运行时、错误或安全边界变更前读取当前版本，
+  按 Skill 判断 CHANGELOG。规则、CI、开发工具、Skill 和纯文档整理不写 CHANGELOG。
+- `package.include` 是发布白名单；规则、测试、开发文档、Skill 和本地配置不进入发布包。
+  根目录 `Cargo.lock` 不作为 library 依赖版本策略提交。
+- 不擅自改版本、切换工具链、修改全局环境、发布或推送。完成时说明变更、验证结果及未验证项，
+  不将局部检查描述成全量验收。

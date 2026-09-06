@@ -22,7 +22,8 @@ cargo --version
 
 ## 一级：快速门禁
 
-适用于默认能力、文档小改或提交前快速反馈：
+适用于默认能力、可执行文档示例变化或提交前快速反馈。纯规则、措辞和格式维护只检查文档结构、
+链接及 `git diff --check`；涉及库契约判断时使用项目审查 Skill 选择验证范围。
 
 ```bash
 cargo fmt --all -- --check
@@ -109,7 +110,9 @@ cargo test --no-default-features --features tokio,task-group --test tokio
 
 ## 三级：完整非 live 门禁
 
-源码、公共 API、feature、依赖或共享行为变化完成后运行：
+跨模块、公共路径、feature/依赖或发布级变化完成后，在快速门禁基础上运行本节全部检查，
+包括完整 feature matrix 和 Markdown 示例验证。局部实现或单领域行为按项目 Skill 选择直接
+相关的检查；适用检查通过后，仅因新改动、失败或未解决疑点追加验证。
 
 ```bash
 cargo check --all-features
@@ -238,8 +241,8 @@ $elapsed.TotalSeconds
 - Cargo 子进程或唯一依赖树调用数；
 - 是否存在并发任务。
 
-本轮 harness 的目标是：文档编译 Cargo 子进程较逐 block 模型减少至少 50%，feature matrix 的重复
-Cargo/依赖树调用减少至少 30%。不得靠删除安全、边界或负向契约达成。
+性能目标按当前任务与可复核基线确定，不沿用历史任务的固定降幅；不得靠删除安全、边界或负向
+契约达成。
 
 ## Live 测试
 
