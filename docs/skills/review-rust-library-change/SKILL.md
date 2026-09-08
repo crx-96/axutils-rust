@@ -1,239 +1,197 @@
 ---
 name: review-rust-library-change
-description: 当任务需要设计、实现、审查或验收 axutils 的 Rust 源码、公共 API、feature/依赖、契约测试、用户文档或发布内容时使用；纯规则、工具、格式和措辞维护不适用。
+description: 为 axutils 的 Rust 实现、公共契约、feature/依赖及相关测试、用户文档和发布内容提供设计与验收依据；纯规则、工具、格式和措辞维护通常无需库级审查。
 ---
 
 # axutils Rust library 变更审查与验收
 
-本 Skill 定义 `axutils` 库级变更的架构约束、工作顺序和“完成”标准。具体模块、feature、文档
-映射以 [`docs/module-map.md`](../../module-map.md) 为准；分层验证命令以
-[`docs/develop.md`](../../develop.md) 为准。
+本 Skill 提供库级设计、实施和质量判断依据。协作方式、按需阅读与授权边界见
+[`AGENTS.md`](../../../AGENTS.md)；具体模块、公共路径和 feature 映射见
+[`docs/module-map.md`](../../module-map.md)；验证命令与范围选择见
+[`docs/develop.md`](../../develop.md)。按当前问题选用相关主题，章节顺序用于查找。
 
-## 1. 触发范围与证据
+## 1. 适用范围与证据
 
-适用于库实现、公共契约、feature/依赖、发布内容及其测试和文档一致性判断；具体触发入口见
-[`AGENTS.md`](../../../AGENTS.md)。首次作出库级判断前完整读取；纯规则或 Skill 维护只检查指令
-本身，不因此启动源码审查或 Rust 全量验证。
+适用于库实现、公共契约、feature/依赖、发布内容及其测试和文档的一致性判断。纯规则或 Skill
+维护检查指令本身及受影响引用，不因此启动源码审查或 Rust 全量验证。
 
-本文用词：
+以可复核的源码、diff、编译/测试结果、诊断、依赖树或发布清单支持结论；推断说明依据，待验证
+假设与已确认事实分开。设计建议可根据任务采用等效方案，涉及契约或剩余风险的取舍说明理由和
+替代证据；普通实现选择无需另写例外报告。
 
-- **必须**：未满足就不能声明完成；
-- **应**：默认要求；例外必须记录理由、替代证据和剩余风险；
-- **证据**：可复核的源码、diff、编译/测试结果、诊断、依赖树或发布清单。主观判断不是证据。
+## 2. 上下文与影响分析
 
-交付必须区分“成功”“预期失败”“未运行”“环境阻塞”，并说明适用范围，不能把局部检查
-描述成全量验收。
+按需要补充以下信息，已有上下文足够时可直接推进：
 
-## 2. 上下文与证据处理
+- 目标源码、领域入口、调用方，以及受影响的测试/fixture、API doc、示例和 CHANGELOG。
+- 涉及版本、MSRV、feature、依赖或发布时，核对 `Cargo.toml` 中相关配置，包括 docs.rs 和 lint。
+- 调整模块归属、公共路径或跨领域调用时，结合 module map 理解依赖与生命周期。
+- 复杂任务关注目标及范围、公共契约、外部副作用和可观察验收条件；利用调用链、输入、状态、
+  错误或基准检验关键假设，再据结果决定改动位置。局部修补反复失败时扩大到相关系统关系分析。
 
-1. 读取适用的 `AGENTS.md`；
-2. 完整读取本 Skill；
-3. 涉及模块归属、公共路径、feature 或跨领域调用时完整读取 `docs/module-map.md`；
-4. 读取 `Cargo.toml` 确认版本与 MSRV，并检查受影响的 feature、依赖、docs.rs 和 lint 配置；
-5. 按影响范围读取目标源码、领域入口、调用方、测试/fixture、API doc、示例和 CHANGELOG；
-6. 选择验证命令时读取 `docs/develop.md` 对应层级；仅命令或开发工作流变化时更新它。
+源码、manifest 和可复现结果说明当前行为，设计依据和用户目标用于判断行为是否正确。文档与
+实现不一致时查明原因，在授权范围内修正；无关漂移单独报告，涉及未授权的核心契约取舍时按
+AGENTS 的协作方式处理，继续不依赖该决定的工作。
 
-遵循适用指令的优先级。源码、manifest 和可复现结果说明当前行为；本 Skill 规定设计与验收
-要求，不能因现有实现不符合标准就降低标准。文档不能覆盖源码事实，源码也不自动证明行为正确。
-冲突时列明证据，在授权范围内修正；无关漂移单独报告，超出已有授权的核心契约或范围变更先澄清。
+下表用于寻找受影响的契约与证据；跨类别变化合并相关关注点，不需要为每个任务填写分类报告。
 
-## 3. 当前架构基线
-
-- 本项目是单一 Rust library crate `axutils`，入口为 `src/lib.rs`；不得为分域而拆 workspace。
-- `default = []`；不依赖第三方 crate 的基础工具默认可用。
-- crate 根只声明公开领域模块，不重导出具体类型、错误或 `*Utils`。
-- 领域类型、配置、错误和自由函数的 canonical path 是 `axutils::<domain>::Item`。
-- 所有 `*Utils` 和工具支持类型的 canonical path 是 `axutils::utils::Item`；`utils` 叶实现模块私有。
-- 领域实现内部可以继续按 `client`、`config`、`codec`、`policy`、`sync`、`async`、`global`
-  等职责拆分，但不得形成外部可达的实现路径。
-- 私有观测适配层是 `telemetry`；不得命名成会与外部 `tracing` crate 淆义的公开模块。
-- 依赖方向固定为：
-
-  ```text
-  utils façade -> domain public API -> domain internals -> third-party crates
-                                  -> private telemetry
-  ```
-
-  领域模块不得反向依赖 `utils`。
-
-- 普通生产源码应以单一职责组织，约 600 行触发拆分评估；超过 800 行必须记录不可再拆的理由。
-  不按行数机械切割，也不创建没有独立职责的碎片。
-- library 不注册或选择进程全局 allocator；最终 binary 自行声明唯一 `#[global_allocator]`。
-- 当前版本、edition 和 MSRV 始终以 `Cargo.toml` 为准；任务期间不得自行提升版本。
-
-## 4. 影响分析与实施顺序
-
-变更至少归入以下一类，验证范围取并集：
-
-| 类别 | 典型内容 | 必查项 |
+| 影响面 | 典型内容 | 对应证据与关注点 |
 | --- | --- | --- |
-| L 局部实现 | 私有算法、行为不变拆分 | 相关单元/集成测试、错误与资源边界 |
-| B 行为 | 返回值、错误、默认值、I/O、并发 | API doc、边界/回归测试、CHANGELOG |
-| P 公共 API | 路径、签名、可见性、trait | 正负 fixture、doctest、文档、兼容性 |
-| F feature/依赖 | manifest、cfg、runtime、TLS、MSRV | 单 feature、组合、负向诊断、依赖树 |
-| S 安全/资源 | 密钥、网络、文件、全局状态、解析预算 | 脱敏、上限、失败语义、隔离 |
-| R 发布 | package、版本、发布元数据 | package 清单、版本、CHANGELOG、授权 |
+| 局部实现 | 私有算法、行为不变拆分 | 相关单元/集成测试、错误与资源边界 |
+| 行为 | 返回值、错误、默认值、I/O、并发 | API doc、边界/回归测试、CHANGELOG |
+| 公共 API | 路径、签名、可见性、trait | 正负 fixture、doctest、文档、兼容性 |
+| feature/依赖 | manifest、cfg、runtime、TLS、MSRV | 单 feature、组合、负向诊断、依赖树 |
+| 安全/资源 | 密钥、网络、文件、全局状态、解析预算 | 脱敏、上限、失败语义、隔离 |
+| 发布 | package、版本、发布元数据 | package 清单、版本、CHANGELOG、授权 |
 
-修改前必须明确目标、非目标、公共契约、受影响 feature/依赖、外部副作用、测试范围和可观察
-验收条件。先用调用链、输入、状态、错误或基准定位问题，不用试错替代根因分析。
+## 3. 架构基线与职责
 
-大型结构重构按以下顺序执行：
+沿用单 library crate、空默认 feature、领域公开 API 与薄 `utils` façade 的结构；领域内部按职责
+拆分即可。canonical path、单向依赖、私有 `telemetry` 和状态型入口的具体对应关系集中在
+module map 的架构、公开领域模块、状态型 façade 和私有实现章节。
 
-1. 记录基线和迁移表，冻结正式测试与用户文档；
-2. 在行为不变前提下拆分源码、修正依赖方向；
-3. 建立 canonical API；仅在用户明确要求兼容阶段时使用临时 shim 验证新旧路径；
-4. 先通过原回归；若已授权的 API 迁移使旧调用无法编译，记录迁移对应关系，保留原断言语义；
-5. 再迁移测试、fixture 和测试性能结构；
-6. 只删除预先列明并已有负向契约的兼容路径；
-7. 最后同步受影响的 API doc、用户文档和 CHANGELOG；规则或 Skill 仅在用户明确要求维护时修改。
+生产源码按职责、耦合和维护难度组织。文件较长是检查职责的线索，拆分以形成清晰边界为依据，
+综合调用关系、测试隔离和阅读成本决定；避免机械按行数切割或创建缺乏独立职责的碎片。
+生成代码、声明、配置和映射按自身特点处理。
 
-普通局部改动不必机械套用全部波次，但必须保持“实现契约先稳定，再让测试和文档反映契约”。
-不得为让测试通过而删除或放宽既有安全、错误或负向契约。
+library 将进程全局 allocator 的选择交给最终 binary；`#[global_allocator]` 在 binary 中声明，
+库实现保留调用方的进程级选择权。
+
+## 4. 实施与迁移
+
+局部变更围绕受影响契约实施。结构重构可按依赖和风险分阶段，下列做法用于保留可复核的迁移
+过程，可以合并或调整先后，不构成额外审批：
+
+- 用现有实现、测试和用户文档建立基线；跨路径迁移较多时记录对应关系，保留原断言语义。
+- 将行为不变的职责拆分、依赖方向修正与行为/API 迁移区分，便于发现回归和判断差异来源。
+- 建立 canonical API，优先运行原回归；已授权的 API 迁移使旧调用无法编译时，可同步迁移调用
+  并用对应关系证明原行为仍被覆盖。测试、fixture、性能 harness 和文档随稳定的契约同步。
+- 兼容别名和 shim 用于用户已要求的兼容目标，不因重构顺带引入。清理兼容路径时核对授权的
+  迁移范围，并保留对应的负向契约。
+- API doc、用户文档和 CHANGELOG 反映最终行为；规则或 Skill 的维护按用户请求范围处理。
+
+测试失败用于检验实现和假设；保留既有负向、边界、错误与安全契约，避免通过删除断言、放宽
+预期或额外启用 feature 掩盖问题。用户已授权改变契约时，说明前后行为并验证新的适用边界。
 
 ## 5. 模块、公共 API 与代码风格
 
 ### 5.1 归属与可见性
 
-- 新能力放入负责其完整生命周期和领域语义的模块；`utils` 只提供明确的便利入口。
-- `src/lib.rs` 不新增具体项重导出，也不创建 `prelude`。
-- 不新增兼容别名；仅用户明确要求的临时兼容阶段可按第 4 节处理。
-- 无状态 `ConfigUtils`、`FsUtils`、`ConvertUtils`、`FormatUtils`、`PathUtils` 等可以提供便利操作，
-  但只能从 `axutils::utils` 导入。
-- 状态型 façade 只保留初始化、初始化状态和实例访问器。业务方法在领域实例上调用。
-- 状态型基线包括 Email/HTTP/Redis/SQLx/JWT/Scheduler/Axum/Logging/Crypto；Crypto 仍可保留
-  Hex/Base64/MD5 等无状态便利方法，Logging 只负责 subscriber 初始化/状态。
-- JWT 的实例入口是公开 `axutils::jwt::JwtCodec`；不得迫使调用方依赖全局状态。
-- 不新增公开 `utils::*_utils`、`domain::client`、`domain::global` 等叶实现路径。
+- 新能力归属于负责其生命周期和领域语义的模块；`utils` 提供明确的便利入口。
+- 公共入口沿用 module map 的规范路径，保持 crate 根、领域私有实现和 façade 的职责边界。
+- 无状态工具可提供便利操作；状态型 façade 负责初始化、初始化状态和实例访问，业务操作
+  通过领域实例完成。多配置、测试隔离或可控销毁场景优先直接构造实例。
+- JWT 通过公开的 `axutils::jwt::JwtCodec` 支持实例使用；Crypto 保留 Hex/Base64/MD5 等无状态
+  便利方法，Logging 负责 subscriber 初始化/状态。这些职责差异在扩展入口时一并考虑。
 
-新增、删除、改名或改变职责时，同步更新领域入口、module map、fixture 和用户文档。
+新增、删除、改名或改变职责时，核对领域入口、module map、fixture 和用户文档的受影响部分。
 
 ### 5.2 路径与命名
 
-- 类型在无歧义时可直接 `use`；`execute`、`parse`、`record_client_init` 等通用函数不能裸导入。
-- 跨模块函数通过有业务含义的模块限定符调用，例如 `sqlx_trace::record_client_init`、
-  `transfer::copy_file_with`。
-- 遇到 `sqlx`、`redis` 等名称冲突时使用 `sqlx_trace`、`redis_trace` 等明确别名。
-- `use` 可以写完整来源；普通表达式和签名路径最多两个 segment。
-- 负向编译 fixture 为验证旧路径或缺失能力而写出的目标表达式可以使用完整路径；该例外只覆盖
-  被验证的契约，不扩展到 fixture 的其他代码、普通测试、源码或可执行文档示例。
-- `clippy::absolute_paths` 必须为 deny；`clippy.toml` 的 segment 上限和标准库豁免不得被绕过。
-- 错误用 `Result`/`Option` 显式传播。对不可信输入、配置、网络或文件不得使用未记录的 panic。
-- `unsafe` 只允许最小范围使用，并紧邻说明安全不变量、平台条件和验证证据。
+- 类型无歧义时可直接 `use`；`execute`、`parse`、`record_client_init` 等通用函数通过有业务含义
+  的模块限定符调用，例如 `sqlx_trace::record_client_init`、`transfer::copy_file_with`。
+- `sqlx`、`redis` 等名称冲突可用 `sqlx_trace`、`redis_trace` 等明确别名区分。
+- `use` 写明来源，普通表达式与签名使用简短路径。当前 `clippy::absolute_paths = deny`，
+  segment 上限和标准库豁免以 `clippy.toml` 为准；适配代码时保留这项 lint 的检查作用。
+- 负向编译 fixture 可在验证旧路径或缺失能力的目标表达式中使用完整路径；其余 fixture 代码、
+  普通测试、源码和可执行文档示例沿用正常路径风格。
+- 错误通过 `Result`/`Option` 显式传播；不可信输入、配置、网络或文件失败按 API 契约返回错误，
+  panic 语义在存在的接口中说明原因与触发条件。
+- 使用 `unsafe` 时收敛作用范围，并就近说明安全不变量、平台条件和验证依据。
 
 ## 6. Feature 与依赖
 
-公共 feature 以用户可获得的能力命名，不以内部 provider crate 命名。每个可独立选择的 feature
-单独启用后都必须提供可使用的公共 API；具体清单和依赖映射以 manifest/module map 为准。
+公共 feature 按用户可获得的能力命名，每个独立可选 feature 对应可用公共 API。能力与 provider
+映射集中在 module map 的能力 feature 表，判断时结合 manifest 核对相关行及依赖方向。
 
-固定契约：
+能力分层、后端聚合与时间方法的稳定后缀沿用该映射；`--all-features` 共同构建成功是兼容性契约。
 
-- `phone-validation` 包含正则基础和国际号码 provider。
-- `template-strfmt`、`template-minijinja` 各自聚合所需 Serde 与模板后端。
-- `fs-async`、`fs-temp`、`fs-temp-async` 分别控制异步 FS、同步临时资源和异步临时资源。
-- `config` 提供 JSON/`.env` 基础；YAML/TOML/INI/async 由对应 `config-*` feature 增量开启。
-- `email` 与 `email-async`、`http` 与 `http-async`/`http-json` 明确分层；同步 `http` 依赖树
-  不得包含 `reqwest`。
-- Redis 由 `redis`、`redis-cluster`、`redis-async`、`redis-cluster-async` 表达四层能力。
-- `sqlx-postgres`、`sqlx-mysql`、`sqlx-sqlite` 支持单 driver；`sqlx` 是三 driver 聚合入口。
-- `tokio` 只提供 Tokio 工具，不自动打开 FS、Config、Email、HTTP、Redis 或 SQLx 异步 API。
-- `task-group` 增加任务组；`scheduler` 单 feature 即提供完整调度能力。
-- `axum` 提供基础 server；Tower、Tower HTTP 和 Governor 扩展使用各自 `axum-*` 能力 feature。
-- `chrono`、`time`、`jiff` 后端方法始终保留明确后缀；API 名称不随启用后端数量改变。
-- 所有最终 feature 必须可以共同构建，`--all-features` 是成功契约。
+设计与验证关注：
 
-设计和验收要求：
-
-- 可选第三方依赖保持 `optional = true`，使用 `dep:name` 和必要的上游 feature 转发；
-- 不公开 `serde`、`lettre`、`croner`、`tower-http`、`tempfile` 等 provider-only feature；
-- 不在当前任务中顺带升级依赖、edition 或 MSRV；
-- `cfg` 使用最窄的能力守卫；模块、类型、方法、测试、fixture 和文档必须一致；
-- 同时验证 API “应存在”和“不应存在”两侧，并检查负向诊断中的目标符号；
-- 验证无 feature 的正常依赖树为空，验证 runtime/TLS/provider 没有跨能力泄漏；
-- feature 变化必须同步 docs.rs feature 清单、module map、相关文档、matrix 和 CHANGELOG 判断。
+- 可选第三方依赖使用 `optional = true`、`dep:name` 和相关上游 feature 转发。
+- `serde`、`lettre`、`croner`、`tower-http`、`tempfile` 等内部 provider 通过能力 feature 聚合，
+  避免作为缺少独立用户能力的公开开关。
+- 依赖、edition 和 MSRV 的升级按当前任务范围处理；普通实现修改沿用现有版本策略。
+- `cfg` 对应实际能力，模块、类型、方法、测试、fixture 和文档保持一致。
+- 按受影响能力检验 API 存在与缺失两侧，负向用例核对目标符号的诊断。
+- 核对默认正常依赖为空，以及 runtime、TLS、provider 在相关 feature 间的隔离。
+- feature 变化时核对 docs.rs 清单、module map、相关文档和 matrix，并判断 CHANGELOG 的同步范围。
 
 ## 7. 性能、资源、安全与全局状态
 
-结构复用优先使用普通泛型和共享纯逻辑；没有测量证据时不为消除少量重复引入 trait object、
-`async_trait`、boxing 或新的缓存。性能结论必须记录同工具链、相同冷/热缓存条件和命令。
+结构复用优先考虑普通泛型和共享纯逻辑；trait object、`async_trait`、boxing 或缓存以当前设计
+需求和收益为依据。性能驱动的改动用测量检验，不因少量重复引入额外间接层；性能比较方法见
+develop 的性能测量章节。
 
-解析、网络、加密、缓存、锁、任务和全局状态变更必须评估：
+解析、网络、加密、缓存、锁、任务和全局状态发生变化时，沿受影响路径评估相关问题：
 
-- 时间/空间复杂度、临时分配和复制；
-- 输入、文件、递归、模板展开、批量、缓存、重试、超时和并发上限；
-- 锁竞争、跨 await 持有资源、取消、关闭和租约语义；
-- 错误/日志是否泄露密钥、token、凭据、配置、Header、明文或原始响应。
+- 时间/空间复杂度、临时分配和复制。
+- 输入、文件、递归、模板展开、批量、缓存、重试、超时和并发上限。
+- 锁竞争、跨 await 持有资源、取消、关闭和租约语义。
+- 错误/日志中密钥、token、凭据、配置、Header、明文和原始响应的泄露风险。
 
-`OnceLock` 等单例必须覆盖成功、重复初始化、并发竞争、失败不占位、不可替换、实例访问和关闭后
-行为。普通异步 API 不隐式创建 runtime 或 `block_on`；runtime 由调用方提供。构造纯配置/客户端
-默认不访问网络，任何例外必须在 API doc 和测试中明确。
+`OnceLock` 等单例的生命周期验证关注成功、重复初始化、并发竞争、失败不占位、成功后不可替换、
+实例访问和关闭后行为。普通异步 API 使用调用方提供的 runtime，避免隐式创建 runtime 或
+`block_on`。配置/客户端构造默认不访问网络；接口确实设计为访问网络时，在 API doc 和测试中
+说明副作用。
 
-领域安全底线：
+领域安全语义：
 
-- AES 密钥、明文、IV/nonce 不进入错误或日志；MD5 不用于密码/签名；CBC 不是认证加密。
-- `RandomUtils` 不是密码学安全随机源；安全密钥和 nonce 使用操作系统随机源。
-- JWT payload 不是加密内容；算法、key、时间和解析预算边界必须明确。
-- 配置错误不回显原始配置；网络能力需审查代理、重定向、TLS、SSRF、重试与大小限制。
-- 不在缺少证据时改变 Config/JWT 安全预检、HTTP 顺序/缓存、Redis 锁/事务、Scheduler 锁或
-  Crypto 临时 buffer 等既有语义。
+- 错误和日志省略 AES 密钥、明文、IV/nonce 的实际值；MD5 用于非安全摘要，不适用于密码或签名，
+  CBC 不提供认证加密。
+- `RandomUtils` 是非密码学随机工具；安全密钥和 nonce 使用操作系统随机源。
+- JWT payload 是可读取内容；算法、key、时间和解析预算边界在接口与测试中明确。
+- 配置错误使用脱敏诊断；网络能力按影响审查代理、重定向、TLS、SSRF、重试与大小限制。
+- Config/JWT 安全预检、HTTP 顺序/缓存、Redis 锁/事务、Scheduler 锁和 Crypto 临时 buffer 等
+  既有语义，以问题证据、已授权目标和对应回归为变更依据。
 
 ## 8. 测试与验证
 
-测试覆盖以行为和契约为准：
+选择能检验原问题和受影响契约的验证：单元测试关注正常、边界、错误、资源上限和平台分支；
+集成测试通过 canonical 公共路径覆盖跨模块、错误传播与全局并发；编译 fixture 检验可见性和
+能力隔离；`cargo tree` 检验依赖边界；doctest 和 Markdown harness 检验公开示例。
+现有测试已覆盖的行为可复用，新增用例以捕获回归或缺失契约为目的，避免复述实现。
 
-- 单元测试覆盖正常、边界、错误、资源上限和平台分支；
-- 集成测试只通过 canonical 公共路径调用，覆盖跨模块、错误传播和全局并发语义；
-- 编译 fixture 验证成功路径、旧路径/旧 feature/缺能力 API 的稳定失败诊断；
-- `cargo tree` 验证 optional 依赖、runtime、TLS 和 provider 边界；
-- doctest 和 Markdown harness 覆盖公开示例；
-- live 测试不属于默认验收。
+快速、领域、完整非 live 和发布前检查的命令及适用范围集中在 develop。公共 API 或 feature
+变化时关注正向与相关负向证据；跨模块、共享边界或影响难以收敛时扩大到组合和完整验证。
+检查范围服务于实际风险，不为节省步骤省略关键回归，也不把每次局部变化扩展为全库审计。
+适用检查通过后，有新改动、失败或未解决疑点时再扩大或重复。
 
-Feature matrix 使用声明式 case、共享 runner、统一领域 fixture 和依赖树缓存。同一 feature 集的
-`cargo tree` 只执行一次；正向场景尽量批量检查，只有需要独立诊断的负向场景单独运行。
+Feature matrix 采用声明式 case、共享 runner、统一领域 fixture 和依赖树缓存。同一 feature
+及查询参数下复用仍有效的 `cargo tree` 结果；正向场景尽量批量，负向场景保留独立诊断。
 
-Markdown harness 使用“文档默认 feature/直接依赖 + 邻接 fence override”描述契约。完全相同
-feature 和直接依赖组合的正向代码块合并到同一 scratch crate；`compile_fail` 独立运行并核对
-诊断。新增 fence 必须被双向枚举，未闭合 fence、未声明的活动 `cfg` 和敏感值必须失败。
+Markdown harness 用“文档默认 feature/直接依赖 + 邻接 fence override”描述契约。相同 feature
+和直接依赖语义的正向代码块合并到同一 scratch crate；`compile_fail` 独立运行并核对诊断。
+新增 fence 纳入双向枚举；未闭合 fence、未声明的活动 `cfg` 和敏感值作为 harness 失败处理。
 
-验证命令统一维护在 [`docs/develop.md`](../../develop.md)，按影响选择：
-
-- 局部实现或单领域行为：快速门禁及相关领域检查，覆盖受影响的错误、资源和安全边界。
-- 跨模块、公共路径、feature/依赖：快速及完整非 live 门禁，包括完整 feature matrix、Markdown
-  示例 harness，并补充受影响领域的最小 feature 组合、依赖树断言和发布清单检查。
-- 发布级变化：在上述检查基础上执行发布前门禁；检查通过不等于获得发布授权。
-
-相关检查通过后，仅因新改动、失败或未解决疑点扩大或重复验证。MSRV 以 `Cargo.toml` 为准，
-使用更高工具链的结果不能冒充 MSRV 证据；缺少对应工具链时报告未验证，不擅自安装或切换。
+MSRV 证据对应 manifest 指定的工具链。高版本工具链的通过结果按实际版本报告；本地缺少对应
+工具链时说明验证缺口，继续可完成的检查，安装或切换按已有授权处理。
 
 ## 9. 文档、CHANGELOG 与发布包
 
-- 公共项必须有中文 API doc，说明用途、参数、返回、错误、feature、限制和副作用。
-- `docs/examples/<domain>.md` 只使用 canonical path 和语义 feature，覆盖领域模型、典型流程、
-  错误/安全/runtime 边界；不公开私有实现路径。
-- README 只保留定位、短示例、feature 概览和文档链接，不复制完整方法清单。
-- module map 只维护模块、职责、canonical path、feature 和文档映射，不复制所有方法。
-- 开发命令按快速、领域、完整、发布四级维护在 `docs/develop.md`。
-- 外部 I/O 示例必须用保留域名/占位凭据，并标为 `no_run` 或只构造不产生副作用的对象。
-- 当前版本的用户可见路径、feature、运行时、错误、安全与 allocator 移除写入 CHANGELOG；
-  测试组织、性能 harness、规则和纯文档整理不写入。
-- `package.include` 只包含库源码和用户文档；测试、fixture、规则、Skill、develop、module map、
-  本地配置和凭据不得进入发布包。
-- 未经用户明确授权不得改版本、发布、推送或连接真实外部服务。
+- 公共项提供中文 API doc，按接口需要说明用途、参数、返回、错误、feature、限制和副作用；
+  简单接口以清晰说明为主，复杂接口展开非直观契约。
+- `docs/examples/<domain>.md` 使用 canonical path 和语义 feature，覆盖领域模型、典型流程、
+  错误/安全/runtime 边界，保持私有实现路径的封装。
+- README 提供定位、短示例、feature 概览和文档链接；module map 维护职责、路径、feature 和
+  文档映射，方法细节留在 API doc，减少重复维护。
+- 开发命令和流程变化时更新 develop 对应层级，普通实现修改沿用现有命令文档。
+- 外部 I/O 示例使用保留域名/占位凭据，以 `no_run` 或无副作用的构造示例避免执行真实 I/O。
+- 当前版本的用户可见路径、feature、运行时、错误、安全与 allocator 移除记入 CHANGELOG；
+  测试组织、性能 harness、规则和纯文档整理通常不记入。
+- 发布包以 `package.include` 中的库源码、用户文档及发布元数据为准；包含与排除项在 develop
+  的发布前检查维护，发布及版本操作的授权边界见 AGENTS。
 
-## 10. Live、敏感信息与完成定义
+## 10. 完成与维护
 
-`tests/email_live.rs`、Redis/Redis Cluster live 测试保持 ignored。只有用户明确授权、受控服务、
-一次性 opt-in 开关和被忽略的本地配置同时满足时才能运行；缺配置不能伪装成成功。错误、命令、
-日志、fixture 和文档只输出最少必要信息并使用占位符。
+交付时把用户目标与实际成果对照：受影响的依赖方向、canonical path、薄 façade、语义 feature
+和 allocator 边界有源码依据；公共/feature 变化有对应的正向及相关负向契约；适用测试、Clippy、
+rustdoc、文档 harness、依赖树和发布清单提供验证结果；受影响文档与 CHANGELOG 已按职责同步。
+这些是质量判断维度，按当前任务选择证据，不要求无关检查或另建交付报告。
 
-可以声明完成的条件：
+核对 diff 中的行为回归、安全弱化、敏感信息、外部副作用和无关改动。发现范围内问题时继续处理；
+受环境或输入限制的部分准确说明，区分已完成的工作与尚缺的验证，结论可由另一位维护者复核。
+live 测试按 develop 的独立运行条件处理；未配置或未运行的测试按实际状态报告。
 
-1. 受影响的架构依赖方向、canonical path、薄 façade、语义 feature 和 allocator 边界有源码证据；
-2. 每项公共/feature 变化同时有正向和必要的负向契约；
-3. 适用测试、Clippy、rustdoc、文档 harness、依赖树和发布清单通过；
-4. 受影响的文档与 CHANGELOG 按职责同步；发现的规则/Skill 漂移已在授权范围内修正或单独报告；
-5. 无未处理的行为回归、安全弱化、敏感信息、外部副作用或无关改动；
-6. 最终报告列明实际命令、结果、未运行项和剩余风险，另一位维护者可据此复核。
-
-维护本 Skill 时必须完整读取它，并检查 `AGENTS.md` 的触发入口、module map 与 develop 链接。
-Skill 或规则自身的纯维护不改版本、不写 CHANGELOG；与源码公共契约一起收口时，CHANGELOG 只记录
-用户可见变化。
+维护本 Skill 时核对受影响内容的原意、上下文、AGENTS 入口及 module map/develop 引用。
+纯规则维护通常不改版本或 CHANGELOG；与源码契约一同调整时，CHANGELOG 记录用户可见变化。

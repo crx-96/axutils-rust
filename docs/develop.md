@@ -1,7 +1,11 @@
 # axutils 开发与验收
 
-本文档只维护当前有效的开发命令和验收层级。公共模块与 feature 契约见
+本文档维护开发命令和验证范围选择。公共模块与 feature 契约见
 [模块与 feature 定位](module-map.md)。
+
+下面按验证目的分组，可按改动影响组合使用，不需要逐级执行。选择能检验原问题、受影响契约
+和主要失败路径的检查；复杂或高风险变化增加相应证据，局部变化优先复用现有测试。
+已有结果与当前代码、feature 和环境一致时可复用；新改动、失败或未解决疑点再触发补充验证。
 
 ## 环境
 
@@ -17,13 +21,13 @@ rustc --version
 cargo --version
 ```
 
-不要为普通验证执行 `cargo clean`。需要测量冷缓存或隔离并发任务时，为命令设置独立
-`CARGO_TARGET_DIR`，并只清理该任务自己创建的目录。
+普通验证复用现有构建缓存。测量冷缓存或隔离并发任务时可设置独立 `CARGO_TARGET_DIR`；清理范围
+限于本任务创建且已无用途的目录，保留用户进程和其他任务的有效缓存。
 
-## 一级：快速门禁
+## 快速检查
 
-适用于默认能力、可执行文档示例变化或提交前快速反馈。纯规则、措辞和格式维护只检查文档结构、
-链接及 `git diff --check`；涉及库契约判断时使用项目审查 Skill 选择验证范围。
+适用于默认能力、可执行文档示例变化或提交前快速反馈。纯规则、措辞和格式维护通常检查文档结构、
+链接及 `git diff --check` 即可；涉及库契约判断时结合项目审查 Skill 的对应主题选择验证范围。
 
 ```bash
 cargo fmt --all -- --check
@@ -39,11 +43,12 @@ git diff --check
 cargo tree --no-default-features --edges normal,build
 ```
 
-不得通过放宽断言、删除负向用例或开启额外 feature 来让快速门禁通过。
+断言与负向用例的维护依据见项目 Skill 的实施与迁移章节，检查失败时先查明契约与实现的差异。
 
-## 二级：领域门禁
+## 领域验证
 
-改动一个领域时，至少验证其最小语义 feature、组合 feature 和直接集成测试。示例：
+改动一个领域时，按影响选择最小语义 feature、相关组合和直接集成测试。下面是各领域可用命令，
+选用与改动有关的部分；局部用例不足以证明行为或隔离关系时再扩大。
 
 ### FS 与 Config
 
@@ -70,7 +75,7 @@ cargo tree --no-default-features --features http --edges normal,build
 cargo tree --no-default-features --features http-async --edges normal,build
 ```
 
-`http` 的树中不得出现 `reqwest`；`http-async` 才应包含它。
+依赖树预期：同步 `http` 不含 `reqwest`，`http-async` 包含它。
 
 ### Redis
 
@@ -95,7 +100,7 @@ cargo test --no-default-features --features axum --test axum
 cargo test --no-default-features --features axum-governor --test axum
 ```
 
-SQLx 单 driver 的依赖树不得包含另外两个 driver。`scheduler` 单 feature 必须提供完整调度 API。
+依赖树预期：SQLx 单 driver 与另外两个 driver 隔离；`scheduler` 单 feature 提供完整调度 API。
 
 ### 其他领域
 
@@ -108,11 +113,12 @@ cargo test --no-default-features --features tokio,task-group --test tokio
 
 `email_live` 在该命令中只运行本地配置解析测试；网络用例保持 ignored。
 
-## 三级：完整非 live 门禁
+## 完整非 live 验证
 
-跨模块、公共路径、feature/依赖或发布级变化完成后，在快速门禁基础上运行本节全部检查，
-包括完整 feature matrix 和 Markdown 示例验证。局部实现或单领域行为按项目 Skill 选择直接
-相关的检查；适用检查通过后，仅因新改动、失败或未解决疑点追加验证。
+共享实现、跨模块依赖、公共路径迁移、feature 组合或发布级变化可能扩大回归面，按影响考虑本节
+检查。影响广、边界难以收敛、准备发布或用户要求全量验收时，采用快速检查及本节完整集合，
+覆盖 feature matrix 和 Markdown 示例。能明确限定影响的公共 API 或 feature 小改动，可先验证
+相关正负 fixture、组合、依赖树与文档；证据有缺口时补充对应检查，按实际范围报告。
 
 ```bash
 cargo check --all-features
@@ -123,7 +129,8 @@ cargo doc --no-deps --all-features
 cargo test --doc --all-features -- --test-threads=4
 ```
 
-Windows 上限制 doctest 线程数可减少并发 linker 的页面文件压力；这不改变测试集合。
+示例中的线程数用于缓解 Windows 并发 linker 的页面文件压力，可按资源和隔离需求调整，
+测试集合保持一致。
 
 ### Feature/API/依赖矩阵
 
@@ -139,7 +146,7 @@ cargo test --no-default-features --test feature_matrix
 cargo test --no-default-features --test feature_matrix -- --ignored --test-threads=1 --nocapture
 ```
 
-矩阵使用统一 scratch fixture，并复用相同 feature/edge/invert 的 `cargo tree` 结果。它至少验证：
+矩阵使用统一 scratch fixture，并复用相同 feature/edge/invert 的 `cargo tree` 结果。覆盖范围包括：
 
 - 默认正常依赖为空；
 - 每个独立 feature 有对应 API；
@@ -182,9 +189,10 @@ Remove-Item Env:AXUTILS_DOCS_EXAMPLE_FILTER
 正向代码块按“axutils feature + 完整直接依赖语义”分组，一个 scratch crate 使用多个 bin 一次
 检查；组失败后才逐 bin 回退。`compile_fail` 用例保持独立并匹配稳定诊断。
 
-## 四级：发布前门禁
+## 发布前检查
 
-发布前在三级门禁基础上运行：
+准备发布时，在完整非 live 验证的基础上检查本地包；仅调整发布清单等元数据时，可先运行相关
+清单或打包检查，再依据影响判断其余范围：
 
 ```bash
 cargo package --list
@@ -192,8 +200,8 @@ cargo package --allow-dirty
 git diff --check
 ```
 
-`cargo package --allow-dirty` 只构建本地包，不等于发布；不要运行 `cargo publish`，除非用户明确
-授权。
+`cargo package --allow-dirty` 构建本地包；`cargo publish` 的真实发布操作按 AGENTS 的已有授权
+边界处理。本地检查通过提供质量证据，不增加发布授权。
 
 发布包应包含：
 
@@ -204,7 +212,7 @@ git diff --check
 - `src/**`
 - `docs/examples/**`
 
-不应包含：
+开发内容留在仓库，发布白名单排除：
 
 - `tests/**`
 - `config/**`
@@ -215,12 +223,12 @@ git diff --check
 - `docs/plans/**`
 - `docs/status/**`
 
-根目录 `Cargo.lock` 不是 library 的依赖版本策略，不应作为发布内容提交。
+根目录 `Cargo.lock` 的提交约定见 AGENTS。
 
 ## 性能测量
 
-比较 feature 或 harness 性能时固定工具链、命令和缓存条件。不要用一次冷构建和一次热构建直接
-比较。
+比较 feature 或 harness 性能时对齐工具链、命令和缓存条件，区分冷构建与热构建，确保结果
+具有可比性。
 
 PowerShell 示例：
 
@@ -232,7 +240,7 @@ $elapsed = Measure-Command {
 $elapsed.TotalSeconds
 ```
 
-至少记录：
+根据比较目的记录：
 
 - 工具链和目标平台；
 - feature 集；
@@ -241,8 +249,8 @@ $elapsed.TotalSeconds
 - Cargo 子进程或唯一依赖树调用数；
 - 是否存在并发任务。
 
-性能目标按当前任务与可复核基线确定，不沿用历史任务的固定降幅；不得靠删除安全、边界或负向
-契约达成。
+性能目标按当前任务与可复核基线确定；提升以保留安全、边界和负向契约为前提，历史任务的降幅
+作为参考，不直接用作当前验收目标。
 
 ## Live 测试
 
@@ -252,13 +260,15 @@ $elapsed.TotalSeconds
 - Redis 单机；
 - Redis Cluster。
 
-只有用户明确授权、服务受控、所需本地配置存在并且对应环境变量精确为 `1` 时才可单独运行。不要
-把凭据放入命令行、日志、fixture、文档或提交内容。普通“全量测试”不包含 live 测试，也不应临时
-取消其 `#[ignore]`。
+运行 live 场景时核对用户对此服务与操作的明确授权、受控服务、被忽略的本地配置，以及值为 `1`
+的一次性 opt-in 环境变量，然后单独执行；这些条件作用于真实外部访问，普通“全量测试”使用
+非 live 集合，保持 live 用例的 `#[ignore]`。敏感信息按 AGENTS 脱敏处理，缺配置或未运行时如实
+记录状态，不把跳过记为成功。
 
 ## 失败处理
 
-- 先保留完整 stdout/stderr 和失败命令，区分源码问题、fixture 问题、资源不足与环境权限问题。
-- feature 负向用例必须匹配目标 rustc 诊断，不能把任意编译失败当作成功。
-- 页面文件或并发 linker 资源不足时，降低测试线程或使用独立 target；不要删测试或修改语义。
-- 临时目录清理失败应显式报告；不得静默遗留凭据、日志或大型 target。
+- 保留诊断所需的 stdout/stderr 和失败命令，并按 AGENTS 处理敏感内容；区分源码问题、fixture
+  问题、资源不足与环境权限问题，依据原因选择下一步。
+- feature 负向用例以目标 rustc 诊断作为预期失败证据，其他编译失败继续排查。
+- 页面文件或并发 linker 资源不足时可降低测试线程或使用独立 target，保留测试集合与语义。
+- 临时目录清理失败时说明遗留内容和位置，妥善处理本任务的凭据、日志或大型 target。

@@ -3,9 +3,9 @@
 本文档是当前源码结构、公共路径和能力 feature 的定位清单。它描述“能力归属在哪里”，不复制每个
 方法的完整签名；方法、错误和安全语义以 Rustdoc 与对应领域文档为准。
 
-## 架构约束
+## 架构与公共路径
 
-`axutils` 保持单 crate，依赖方向固定为：
+`axutils` 采用单 crate，当前依赖方向为：
 
 ```text
 axutils::utils façade -> 领域公开 API -> 领域私有实现 -> 第三方 crate
@@ -13,9 +13,9 @@ axutils::utils façade -> 领域公开 API -> 领域私有实现 -> 第三方 cr
 ```
 
 - `src/lib.rs` 只声明公开领域模块，不平铺重导出类型。
-- Client、配置、错误和模型的规范路径是 `axutils::<domain>::Type`。
+- Client、配置、错误、模型和自由函数的规范路径是 `axutils::<domain>::Item`。
 - 所有 `*Utils` 及其支持类型的规范路径是 `axutils::utils::Type`。
-- `utils` 叶模块和领域实现模块不是公共 API；领域代码不得反向依赖 `utils`。
+- `utils` 叶模块和领域实现模块保持私有；领域代码独立于 `utils`，由 façade 调用领域 API。
 - 状态型 façade 只管理初始化、状态和实例访问，业务方法由返回的实例承担。
 - 默认 feature 为空；无第三方依赖的基础能力默认可用。
 
@@ -38,7 +38,8 @@ use axutils::{
 # );
 ```
 
-不要创建 `prelude`，也不要重新引入 crate 根类型别名或公开 `utils::*_utils` 叶模块。
+公共入口采用上述领域路径；当前结构不设 `prelude`、crate 根类型别名或公开 `utils::*_utils`
+叶模块，扩展能力时沿用对应领域入口。
 
 ## 默认能力
 
@@ -76,7 +77,7 @@ use axutils::{
 | `phone-validation` | 国际手机号校验，同时包含 `regex` | `phonenumber` |
 | `template-strfmt` | Strfmt 模板 | `serde`、`serde_json`、`strfmt` |
 | `template-minijinja` | MiniJinja 模板 | `serde`、`minijinja` |
-| `chrono` / `time` / `jiff` | 对应后端且名称稳定的时间格式化 API | 同名后端 |
+| `chrono` / `time` / `jiff` | 带明确后端后缀的时间格式化 API，名称不随后端组合改变 | 同名后端 |
 | `base64` / `md5` / `aes` | 对应编码、摘要或 AES 实例/全局 cipher | 对应加密后端 |
 | `encoding_rs` | `TextEncoding` 的 legacy 编码变体 | `encoding_rs` |
 | `jwt` | JWS 配置、Key、公开 `JwtCodec` 与全局生命周期入口 | `jsonwebtoken`、Serde |
@@ -165,8 +166,8 @@ use axutils::{
 | `CryptoUtils`（AES） | `aes_init`、`aes_init_from_bytes`、`aes_is_initialized`、`cipher` | `AesCipher` |
 | `LogUtils` | `init`、`is_initialized` | 标准 `tracing` 宏 |
 
-这些全局对象成功初始化后不可 reset 或 replace。初始化失败不得占位；取得实例后，其关闭或失败语义
-由领域实例决定。需要多配置、测试隔离或可控销毁时，应直接创建实例。
+这些全局对象成功初始化后不可 reset 或 replace。初始化失败不占位；取得实例后，其关闭或失败语义
+由领域实例决定。多配置、测试隔离或可控销毁场景可直接创建实例。
 
 `ConfigUtils`、`FsUtils`、`ConvertUtils`、`FormatUtils`、`PathUtils`、`RandomUtils`、
 `RegUtils`、`TimeUtils` 是无状态工具，不受上述生命周期收缩限制。
@@ -178,7 +179,7 @@ use axutils::{
 - `src/telemetry/**`：只在 `tracing` 下编译的私有事件适配；不形成 `axutils::tracing` 模块。
 - `src/utils/*_utils.rs`：私有聚合叶；只由 `src/utils/mod.rs` 重导出。
 
-跨模块调用应先导入有业务含义的模块限定符，例如：
+跨模块调用可导入有业务含义的模块限定符，例如：
 
 ```rust,ignore
 use crate::telemetry::sqlx as sqlx_trace;
@@ -188,18 +189,11 @@ sqlx_trace::record_client_init(&result, started);
 transfer::copy_file_with(source, destination, options, processor);
 ```
 
-普通表达式与签名路径最多保留两个 segment；`execute`、`parse` 等通用函数不得裸导入。
+路径风格及现有 lint 的适用方式见
+[项目 Skill 的路径与命名](skills/review-rust-library-change/SKILL.md#52-路径与命名)。
 
 ## 新增或调整能力
 
-新增能力时同时确认：
-
-1. 领域归属和单向依赖是否明确；
-2. canonical path 是否保留来源，且没有新增根级或公开叶模块别名；
-3. 用户 feature 单独启用后是否存在可用 API，并只编译必要依赖；
-4. sync/async、provider 和附加能力是否按语义 feature 分层；
-5. 错误、资源上限、敏感数据和全局生命周期是否有正向及负向测试；
-6. Rustdoc、本清单、对应领域文档和 CHANGELOG 是否同步。
-
-实现模块可以继续拆分，但不要按行数机械切割；普通生产文件超过约 600 行时评估职责，超过 800 行
-必须有清晰且不可再拆的理由。
+本清单随模块职责、公共路径、feature 或文档映射的变化更新。领域归属、能力分层、正负契约、
+安全与生命周期验证、文档同步及职责拆分的判断依据集中在
+[项目 Skill](skills/review-rust-library-change/SKILL.md) 对应主题，可按改动需要查阅。
