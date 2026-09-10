@@ -22,8 +22,9 @@ impl AxumConfig {
     /// # Examples
     /// ```rust
     /// # use axutils::axum::*;
-    /// # use axutils::axum::*;
-    /// # #[cfg(feature="axum")] { assert_eq!(AxumConfig::new().max_body_bytes(),1024*1024); }
+    /// # #[cfg(feature = "axum")] {
+    /// assert_eq!(AxumConfig::new().max_body_bytes(), 1024 * 1024);
+    /// # }
     /// ```
     pub fn new() -> Self {
         Self::default()
@@ -32,8 +33,11 @@ impl AxumConfig {
     /// # Examples
     /// ```rust
     /// # use axutils::axum::*;
-    /// # use axutils::axum::*;
-    /// # #[cfg(feature="axum")] { assert!(AxumConfig::new().with_service_timeout(std::time::Duration::ZERO).is_err()); }
+    /// # #[cfg(feature = "axum")] {
+    /// assert!(AxumConfig::new()
+    ///     .with_service_timeout(std::time::Duration::ZERO)
+    ///     .is_err());
+    /// # }
     /// ```
     pub fn with_service_timeout(mut self, value: Duration) -> Result<Self, AxumError> {
         if !(Duration::from_millis(1)..=Duration::from_secs(600)).contains(&value) {
@@ -48,8 +52,9 @@ impl AxumConfig {
     /// # Examples
     /// ```rust
     /// # use axutils::axum::*;
-    /// # use axutils::axum::*;
-    /// # #[cfg(feature="axum")] { assert!(AxumConfig::new().with_max_body_bytes(0).is_err()); }
+    /// # #[cfg(feature = "axum")] {
+    /// assert!(AxumConfig::new().with_max_body_bytes(0).is_err());
+    /// # }
     /// ```
     pub fn with_max_body_bytes(mut self, value: usize) -> Result<Self, AxumError> {
         if !(1..=64 * 1024 * 1024).contains(&value) {
@@ -64,8 +69,9 @@ impl AxumConfig {
     /// # Examples
     /// ```rust
     /// # use axutils::axum::*;
-    /// # use axutils::axum::*;
-    /// # #[cfg(feature="axum")] { assert!(AxumConfig::new().with_max_concurrency(65_537).is_err()); }
+    /// # #[cfg(feature = "axum")] {
+    /// assert!(AxumConfig::new().with_max_concurrency(65_537).is_err());
+    /// # }
     /// ```
     pub fn with_max_concurrency(mut self, value: usize) -> Result<Self, AxumError> {
         if !(1..=65_536).contains(&value) {
@@ -80,8 +86,12 @@ impl AxumConfig {
     /// # Examples
     /// ```rust
     /// # use axutils::axum::*;
-    /// # use axutils::axum::*;
-    /// # #[cfg(feature="axum")] { assert_eq!(AxumConfig::new().service_timeout(),std::time::Duration::from_secs(30)); }
+    /// # #[cfg(feature = "axum")] {
+    /// assert_eq!(
+    ///     AxumConfig::new().service_timeout(),
+    ///     std::time::Duration::from_secs(30)
+    /// );
+    /// # }
     /// ```
     pub fn service_timeout(&self) -> Duration {
         self.service_timeout
@@ -90,8 +100,9 @@ impl AxumConfig {
     /// # Examples
     /// ```rust
     /// # use axutils::axum::*;
-    /// # use axutils::axum::*;
-    /// # #[cfg(feature="axum")] { let _=AxumConfig::new().max_body_bytes(); }
+    /// # #[cfg(feature = "axum")] {
+    /// let _ = AxumConfig::new().max_body_bytes();
+    /// # }
     /// ```
     pub fn max_body_bytes(&self) -> usize {
         self.max_body_bytes
@@ -100,8 +111,9 @@ impl AxumConfig {
     /// # Examples
     /// ```rust
     /// # use axutils::axum::*;
-    /// # use axutils::axum::*;
-    /// # #[cfg(feature="axum")] { assert_eq!(AxumConfig::new().max_concurrency(),1024); }
+    /// # #[cfg(feature = "axum")] {
+    /// assert_eq!(AxumConfig::new().max_concurrency(), 1024);
+    /// # }
     /// ```
     pub fn max_concurrency(&self) -> usize {
         self.max_concurrency

@@ -31,8 +31,9 @@ impl TokioTaskGroup {
     /// # Examples
     /// ```rust
     /// # use axutils::tokio::*;
-    /// # use axutils::tokio::*;
-    /// # #[cfg(feature="task-group")] { assert!(!TokioTaskGroup::new().is_closed()); }
+    /// # #[cfg(feature = "task-group")] {
+    /// assert!(!TokioTaskGroup::new().is_closed());
+    /// # }
     /// ```
     pub fn new() -> Self {
         Self {
@@ -48,8 +49,9 @@ impl TokioTaskGroup {
     /// # Examples
     /// ```rust
     /// # use axutils::tokio::*;
-    /// # use axutils::tokio::*;
-    /// # #[cfg(feature="task-group")] { assert!(!TokioTaskGroup::new().cancellation_token().is_cancelled()); }
+    /// # #[cfg(feature = "task-group")] {
+    /// assert!(!TokioTaskGroup::new().cancellation_token().is_cancelled());
+    /// # }
     /// ```
     pub fn cancellation_token(&self) -> CancellationToken {
         self.inner.cancel.clone()
@@ -59,8 +61,11 @@ impl TokioTaskGroup {
     /// # Examples
     /// ```rust
     /// # use axutils::tokio::*;
-    /// # use axutils::tokio::*;
-    /// # #[cfg(feature="task-group")] { let g=TokioTaskGroup::new();g.close();assert!(g.is_closed()); }
+    /// # #[cfg(feature = "task-group")] {
+    /// let g = TokioTaskGroup::new();
+    /// g.close();
+    /// assert!(g.is_closed());
+    /// # }
     /// ```
     pub fn is_closed(&self) -> bool {
         *self.inner.gate.lock().unwrap_or_else(|e| e.into_inner())
@@ -70,8 +75,9 @@ impl TokioTaskGroup {
     /// # Examples
     /// ```rust
     /// # use axutils::tokio::*;
-    /// # use axutils::tokio::*;
-    /// # #[cfg(feature="task-group")] { assert_eq!(TokioTaskGroup::new().remaining_tasks(),0); }
+    /// # #[cfg(feature = "task-group")] {
+    /// assert_eq!(TokioTaskGroup::new().remaining_tasks(), 0);
+    /// # }
     /// ```
     pub fn remaining_tasks(&self) -> usize {
         self.inner.tracker.len()
@@ -80,7 +86,6 @@ impl TokioTaskGroup {
     /// 在线性化门闩下登记异步任务；关闭后返回 TaskGroupClosed，缺少 runtime 返回 RuntimeRequired。
     /// # Examples
     /// ```rust
-    /// # use axutils::tokio::*;
     /// # use axutils::tokio::*;
     /// # use axutils::utils::TokioUtils;
     /// # #[cfg(feature="task-group")] {
@@ -106,7 +111,6 @@ impl TokioTaskGroup {
     /// # Examples
     /// ```rust
     /// # use axutils::tokio::*;
-    /// # use axutils::tokio::*;
     /// # use axutils::utils::TokioUtils;
     /// # #[cfg(feature="task-group")] {
     /// let result=TokioUtils::run(&TokioConfig::new(),async{let g=TokioTaskGroup::new();g.spawn_blocking(||2).unwrap().await.unwrap()}).unwrap();assert_eq!(result,2);
@@ -131,8 +135,11 @@ impl TokioTaskGroup {
     /// # Examples
     /// ```rust
     /// # use axutils::tokio::*;
-    /// # use axutils::tokio::*;
-    /// # #[cfg(feature="task-group")] { let g=TokioTaskGroup::new();g.close();assert!(g.is_closed()); }
+    /// # #[cfg(feature = "task-group")] {
+    /// let g = TokioTaskGroup::new();
+    /// g.close();
+    /// assert!(g.is_closed());
+    /// # }
     /// ```
     pub fn close(&self) {
         let mut g = self.inner.gate.lock().unwrap_or_else(|e| e.into_inner());
@@ -146,8 +153,12 @@ impl TokioTaskGroup {
     /// # Examples
     /// ```rust
     /// # use axutils::tokio::*;
-    /// # use axutils::tokio::*;
-    /// # #[cfg(feature="task-group")] { let g=TokioTaskGroup::new();let t=g.cancellation_token();g.cancel();assert!(t.is_cancelled()); }
+    /// # #[cfg(feature = "task-group")] {
+    /// let g = TokioTaskGroup::new();
+    /// let t = g.cancellation_token();
+    /// g.cancel();
+    /// assert!(t.is_cancelled());
+    /// # }
     /// ```
     pub fn cancel(&self) {
         self.inner.cancel.cancel();
@@ -156,7 +167,6 @@ impl TokioTaskGroup {
     /// close、cancel 并等待任务清空；grace 必须 <=300 秒，超时返回剩余数量。
     /// # Examples
     /// ```rust
-    /// # use axutils::tokio::*;
     /// # use axutils::tokio::*;
     /// # use axutils::utils::TokioUtils;
     /// # #[cfg(feature="task-group")] {

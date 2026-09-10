@@ -46,8 +46,8 @@ struct State {
 }
 
 enum ValidatedSchedule {
-    Once(Duration),
-    Interval(Duration),
+    Once(Instant),
+    Interval { start: Instant, period: Duration },
     Cron(Box<CronSchedule>, Duration),
 }
 
@@ -163,10 +163,18 @@ impl Drop for TaskCleanup {
 }
 
 fn validate_schedule(schedule: TaskSchedule) -> Result<ValidatedSchedule, SchedulerError> {
+    // 在发布任务前校验并保存 deadline，避免后台再次做不受检的时间加法。
+    let now = Instant::now();
     match schedule {
-        TaskSchedule::Once(delay) => Ok(ValidatedSchedule::Once(delay)),
+        TaskSchedule::Once(delay) => now
+            .checked_add(delay)
+            .map(ValidatedSchedule::Once)
+            .ok_or(SchedulerError::InvalidSchedule),
         TaskSchedule::Interval(period) if period.is_zero() => Err(SchedulerError::InvalidSchedule),
-        TaskSchedule::Interval(period) => Ok(ValidatedSchedule::Interval(period)),
+        TaskSchedule::Interval(period) => now
+            .checked_add(period)
+            .map(|start| ValidatedSchedule::Interval { start, period })
+            .ok_or(SchedulerError::InvalidSchedule),
         TaskSchedule::Cron {
             expression,
             timezone,
@@ -197,12 +205,12 @@ where
     Fut: Future<Output = ()>,
 {
     match schedule {
-        ValidatedSchedule::Once(delay) => {
-            time::sleep(delay).await;
+        ValidatedSchedule::Once(deadline) => {
+            time::sleep_until(deadline).await;
             callback().await;
         }
-        ValidatedSchedule::Interval(period) => {
-            let mut interval = time::interval_at(Instant::now() + period, period);
+        ValidatedSchedule::Interval { start, period } => {
+            let mut interval = time::interval_at(start, period);
             interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
             loop {
                 interval.tick().await;

@@ -28,7 +28,9 @@ async fn schedule_once() -> Result<(), SchedulerError> {
 }
 ```
 
-`TaskSchedule::interval` 要求非零周期；`TaskSchedule::cron` 接收 cron 表达式和 IANA 时区。关闭后
+一次与固定间隔任务的首次 deadline 从注册时刻计算；无法表示的时间（如 `Duration::MAX`）在
+注册时返回 `SchedulerError::InvalidSchedule`，不会启动后台任务或占用名额。
+`TaskSchedule::interval` 还要求非零周期；`TaskSchedule::cron` 接收 cron 表达式和 IANA 时区。关闭后
 不能继续注册任务，`SchedulerError` 会保留该生命周期错误而非静默忽略。`cancel` 和 `shutdown`
 返回只表示已经发出 abort 请求并更新状态，不等待任务 future 的清理完成；清理由 Tokio 后续调度
 推进。业务若要求资源释放或工作完成确认，必须另建 acknowledgement/graceful shutdown 协议。

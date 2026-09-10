@@ -56,9 +56,9 @@ impl Default for SchedulerConfig {
 /// 一个任务的触发方式。
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum TaskSchedule {
-    /// 在指定延迟后异步执行一次；零延迟合法。
+    /// 从注册时刻起延迟后异步执行一次；零延迟合法，无法表示的 deadline 在注册时拒绝。
     Once(Duration),
-    /// 按 monotonic timer 固定间隔串行执行。
+    /// 按 monotonic timer 固定间隔串行执行；首次 deadline 从注册时刻计算。
     Interval(Duration),
     /// 使用六段 POSIX/Vixie cron 和显式 IANA 时区执行。
     Cron {
@@ -70,7 +70,7 @@ pub enum TaskSchedule {
 }
 
 impl TaskSchedule {
-    /// 创建一次性任务调度。
+    /// 创建一次性任务调度；无法表示的 deadline 会在注册时返回 `InvalidSchedule`。
     ///
     /// # Examples
     ///
@@ -86,7 +86,7 @@ impl TaskSchedule {
         Self::Once(delay)
     }
 
-    /// 创建固定间隔任务调度；零间隔会在注册时拒绝。
+    /// 创建固定间隔任务调度；零间隔和无法表示的首次 deadline 会在注册时拒绝。
     ///
     /// # Examples
     ///

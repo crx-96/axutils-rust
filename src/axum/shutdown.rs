@@ -11,8 +11,9 @@ use tokio::sync::Notify;
 /// # Examples
 /// ```rust
 /// # use axutils::axum::*;
-/// # use axutils::axum::*;
-/// # #[cfg(feature="axum")] { assert_eq!(AxumShutdownReason::Programmatic.to_string(),"programmatic"); }
+/// # #[cfg(feature = "axum")] {
+/// assert_eq!(AxumShutdownReason::Programmatic.to_string(), "programmatic");
+/// # }
 /// ```
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[non_exhaustive]
@@ -50,9 +51,7 @@ impl AxumServeOutcome {
     /// # Examples
     /// ```rust,no_run
     /// # use axutils::axum::*;
-    /// # use axutils::tokio::*;
     /// # use tokio::net::TcpListener;
-    /// # use axutils::axum::*;
     /// # async fn example(server: AxumServer, listener: TcpListener)->Result<(),AxumError>{
     /// let outcome=server.serve_with_shutdown(listener,async{AxumShutdownReason::Programmatic}).await?;let _=outcome.local_addr();
     /// # Ok(()) }
@@ -64,9 +63,7 @@ impl AxumServeOutcome {
     /// # Examples
     /// ```rust,no_run
     /// # use axutils::axum::*;
-    /// # use axutils::tokio::*;
     /// # use tokio::net::TcpListener;
-    /// # use axutils::axum::*;
     /// # async fn example(server: AxumServer, listener: TcpListener)->Result<(),AxumError>{
     /// let outcome=server.serve_with_shutdown(listener,async{AxumShutdownReason::Programmatic}).await?;assert_eq!(outcome.reason(),&AxumShutdownReason::Programmatic);
     /// # Ok(()) }
@@ -103,8 +100,10 @@ impl Shared {
 /// # Examples
 /// ```rust
 /// # use axutils::axum::*;
-/// # use axutils::axum::*;
-/// # #[cfg(feature="axum")] { let server=AxumApp::new().into_server_builder().build().unwrap();let _handle=server.shutdown_handle(); }
+/// # #[cfg(feature = "axum")] {
+/// let server = AxumApp::new().into_server_builder().build().unwrap();
+/// let _handle = server.shutdown_handle();
+/// # }
 /// ```
 #[derive(Clone)]
 pub struct AxumShutdownHandle {
@@ -117,8 +116,15 @@ impl AxumShutdownHandle {
     /// # Examples
     /// ```rust
     /// # use axutils::axum::*;
-    /// # use axutils::axum::*;
-    /// # #[cfg(feature="axum")] { let server=AxumApp::new().into_server_builder().build().unwrap();assert!(matches!(server.shutdown_handle().shutdown(AxumShutdownReason::Programmatic),Err(AxumError::NotRunning))); }
+    /// # #[cfg(feature = "axum")] {
+    /// let server = AxumApp::new().into_server_builder().build().unwrap();
+    /// assert!(matches!(
+    ///     server
+    ///         .shutdown_handle()
+    ///         .shutdown(AxumShutdownReason::Programmatic),
+    ///     Err(AxumError::NotRunning)
+    /// ));
+    /// # }
     /// ```
     pub fn shutdown(&self, reason: AxumShutdownReason) -> Result<AxumShutdownReason, AxumError> {
         let mut phase = self.shared.phase.lock().expect("Axum phase mutex poisoned");

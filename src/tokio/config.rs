@@ -43,7 +43,6 @@ impl TokioConfig {
     /// # Examples
     /// ```rust
     /// # use axutils::tokio::*;
-    /// # use axutils::tokio::*;
     /// # #[cfg(feature="tokio")] {
     /// let config = TokioConfig::new();
     /// assert_eq!(config.flavor(), TokioRuntimeFlavor::MultiThread);
@@ -57,7 +56,6 @@ impl TokioConfig {
     ///
     /// # Examples
     /// ```rust
-    /// # use axutils::tokio::*;
     /// # use axutils::tokio::*;
     /// # #[cfg(feature="tokio")] {
     /// let config = TokioConfig::new().with_flavor(TokioRuntimeFlavor::CurrentThread);
@@ -74,7 +72,6 @@ impl TokioConfig {
     /// CurrentThread 与显式 worker 数组合会在 `builder` 返回错误。
     /// # Examples
     /// ```rust
-    /// # use axutils::tokio::*;
     /// # use axutils::tokio::*;
     /// # #[cfg(feature="tokio")] {
     /// let error = TokioConfig::new().with_worker_threads(Some(0)).unwrap_err();
@@ -95,7 +92,6 @@ impl TokioConfig {
     /// # Examples
     /// ```rust
     /// # use axutils::tokio::*;
-    /// # use axutils::tokio::*;
     /// # #[cfg(feature="tokio")] {
     /// assert!(TokioConfig::new().with_max_blocking_threads(4096).is_ok());
     /// # }
@@ -113,7 +109,6 @@ impl TokioConfig {
     /// 设置可选线程名；非空名称最多 64 字节且不得包含 NUL。
     /// # Examples
     /// ```rust
-    /// # use axutils::tokio::*;
     /// # use axutils::tokio::*;
     /// # #[cfg(feature="tokio")] {
     /// let config = TokioConfig::new().with_thread_name(None).unwrap();
@@ -136,8 +131,9 @@ impl TokioConfig {
     /// # Examples
     /// ```rust
     /// # use axutils::tokio::*;
-    /// # use axutils::tokio::*;
-    /// # #[cfg(feature="tokio")] { assert!(!TokioConfig::new().with_io_enabled(false).io_enabled()); }
+    /// # #[cfg(feature = "tokio")] {
+    /// assert!(!TokioConfig::new().with_io_enabled(false).io_enabled());
+    /// # }
     /// ```
     pub fn with_io_enabled(mut self, v: bool) -> Self {
         self.enable_io = v;
@@ -148,8 +144,9 @@ impl TokioConfig {
     /// # Examples
     /// ```rust
     /// # use axutils::tokio::*;
-    /// # use axutils::tokio::*;
-    /// # #[cfg(feature="tokio")] { assert!(!TokioConfig::new().with_time_enabled(false).time_enabled()); }
+    /// # #[cfg(feature = "tokio")] {
+    /// assert!(!TokioConfig::new().with_time_enabled(false).time_enabled());
+    /// # }
     /// ```
     pub fn with_time_enabled(mut self, v: bool) -> Self {
         self.enable_time = v;
@@ -159,7 +156,6 @@ impl TokioConfig {
     /// 设置 `TokioUtils::run` 的 shutdown timeout，范围 >0 且 <=300 秒。
     /// # Examples
     /// ```rust
-    /// # use axutils::tokio::*;
     /// # use axutils::tokio::*;
     /// # #[cfg(feature="tokio")] {
     /// assert!(TokioConfig::new().with_shutdown_timeout(std::time::Duration::ZERO).is_err());
@@ -179,8 +175,9 @@ impl TokioConfig {
     /// # Examples
     /// ```rust
     /// # use axutils::tokio::*;
-    /// # use axutils::tokio::*;
-    /// # #[cfg(feature="tokio")] { let _ = TokioConfig::new().flavor(); }
+    /// # #[cfg(feature = "tokio")] {
+    /// let _ = TokioConfig::new().flavor();
+    /// # }
     /// ```
     pub fn flavor(&self) -> TokioRuntimeFlavor {
         self.flavor
@@ -189,8 +186,9 @@ impl TokioConfig {
     /// # Examples
     /// ```rust
     /// # use axutils::tokio::*;
-    /// # use axutils::tokio::*;
-    /// # #[cfg(feature="tokio")] { assert_eq!(TokioConfig::new().worker_threads(), None); }
+    /// # #[cfg(feature = "tokio")] {
+    /// assert_eq!(TokioConfig::new().worker_threads(), None);
+    /// # }
     /// ```
     pub fn worker_threads(&self) -> Option<usize> {
         self.worker_threads
@@ -199,8 +197,9 @@ impl TokioConfig {
     /// # Examples
     /// ```rust
     /// # use axutils::tokio::*;
-    /// # use axutils::tokio::*;
-    /// # #[cfg(feature="tokio")] { assert_eq!(TokioConfig::new().max_blocking_threads(), 512); }
+    /// # #[cfg(feature = "tokio")] {
+    /// assert_eq!(TokioConfig::new().max_blocking_threads(), 512);
+    /// # }
     /// ```
     pub fn max_blocking_threads(&self) -> usize {
         self.max_blocking_threads
@@ -209,8 +208,9 @@ impl TokioConfig {
     /// # Examples
     /// ```rust
     /// # use axutils::tokio::*;
-    /// # use axutils::tokio::*;
-    /// # #[cfg(feature="tokio")] { assert_eq!(TokioConfig::new().thread_name(), Some("axutils-runtime")); }
+    /// # #[cfg(feature = "tokio")] {
+    /// assert_eq!(TokioConfig::new().thread_name(), Some("axutils-runtime"));
+    /// # }
     /// ```
     pub fn thread_name(&self) -> Option<&str> {
         self.thread_name.as_deref()
@@ -219,8 +219,9 @@ impl TokioConfig {
     /// # Examples
     /// ```rust
     /// # use axutils::tokio::*;
-    /// # use axutils::tokio::*;
-    /// # #[cfg(feature="tokio")] { assert!(TokioConfig::new().io_enabled()); }
+    /// # #[cfg(feature = "tokio")] {
+    /// assert!(TokioConfig::new().io_enabled());
+    /// # }
     /// ```
     pub fn io_enabled(&self) -> bool {
         self.enable_io
@@ -229,8 +230,9 @@ impl TokioConfig {
     /// # Examples
     /// ```rust
     /// # use axutils::tokio::*;
-    /// # use axutils::tokio::*;
-    /// # #[cfg(feature="tokio")] { assert!(TokioConfig::new().time_enabled()); }
+    /// # #[cfg(feature = "tokio")] {
+    /// assert!(TokioConfig::new().time_enabled());
+    /// # }
     /// ```
     pub fn time_enabled(&self) -> bool {
         self.enable_time
@@ -239,8 +241,12 @@ impl TokioConfig {
     /// # Examples
     /// ```rust
     /// # use axutils::tokio::*;
-    /// # use axutils::tokio::*;
-    /// # #[cfg(feature="tokio")] { assert_eq!(TokioConfig::new().shutdown_timeout(), std::time::Duration::from_secs(30)); }
+    /// # #[cfg(feature = "tokio")] {
+    /// assert_eq!(
+    ///     TokioConfig::new().shutdown_timeout(),
+    ///     std::time::Duration::from_secs(30)
+    /// );
+    /// # }
     /// ```
     pub fn shutdown_timeout(&self) -> Duration {
         self.shutdown_timeout
@@ -252,8 +258,9 @@ impl TokioConfig {
     /// # Examples
     /// ```rust
     /// # use axutils::tokio::*;
-    /// # use axutils::tokio::*;
-    /// # #[cfg(feature="tokio")] { let _builder = TokioConfig::new().builder().unwrap(); }
+    /// # #[cfg(feature = "tokio")] {
+    /// let _builder = TokioConfig::new().builder().unwrap();
+    /// # }
     /// ```
     pub fn builder(&self) -> Result<RuntimeBuilder, TokioError> {
         if self.flavor == TokioRuntimeFlavor::CurrentThread && self.worker_threads.is_some() {

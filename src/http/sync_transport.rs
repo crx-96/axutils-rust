@@ -270,11 +270,12 @@ fn read_sync_response(
     {
         return Err(AttemptError::Local(HttpError::ResponseTooLarge { limit }));
     }
+    // ureq 的 BodyWithConfig::limit 位于解压前，会把小响应的压缩帧截断。
+    // 在输出 reader 上限制到上限加一字节，使原始/解压响应都按返回字节判定超限。
     let mut reader = response
         .into_body()
-        .into_with_config()
-        .limit(limit.saturating_add(1) as u64)
-        .reader();
+        .into_reader()
+        .take(limit.saturating_add(1) as u64);
     let mut body = Vec::with_capacity(limit.min(8192));
     let mut buffer = [0u8; 8192];
     loop {

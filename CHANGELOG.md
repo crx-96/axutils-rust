@@ -178,7 +178,7 @@
   claims、标准 `exp`/`nbf`/`aud`/`iss`/`sub` 验证以及明确的 token/claims/key 资源上限。
 - 新增独立 `http` feature 下的 HTTP 客户端能力：提供同步 `HttpClient`、`HttpUtils`、请求/响应、
   Header、重试和去重策略类型；同步使用 Rustls `ureq`，同时启用 `tokio` 后追加基于 Rustls 的异步
-  `reqwest` 入口。客户端默认关闭系统代理、自动重定向、自动压缩和隐式重试，执行总时间与请求/响应
+  `reqwest` 入口。客户端默认不启用压缩能力，关闭系统代理、自动重定向和隐式重试，执行总时间与请求/响应
   大小受限，并提供安全方法默认 single-flight 与显式完成缓存。
 
 - 新增 `http + serde` 下的三参数 Serde 便捷 HTTP 方法：`get`、`post`、`delete`、`patch`、
@@ -284,6 +284,11 @@
 
 ### Fixed
 
+- Scheduler 在注册阶段拒绝无法表示的一次/固定间隔首次 deadline，返回 `InvalidSchedule` 且
+  不占用任务名额；首次 deadline 从注册时刻计算，避免后台时间加法溢出或启动延迟重置计时。
+- HTTP 异步入口显式关闭 gzip、Brotli、deflate 和 Zstd 自动解压，保留下游 reqwest feature
+  合并后的原始压缩响应。同步入口保留 ureq：明确下游启用其 gzip/Brotli feature 时会解压响应、
+  移除编码/长度 Header，且将读取上限放在解压后的流上，避免合规的小响应因压缩帧开销被截断。
 - JSON 无类型解析会关闭 `serde_json` 较小的默认递归限制，严格执行 `ConfigLoader` 的
   `max_depth` 1–256 预算；超过预算稳定返回 `DepthLimitExceeded`，不再在 128 层处提前落入
   通用解析错误。JSON 有类型解析仍保留重复键预扫描和后端递归保护。
@@ -324,7 +329,8 @@
   或地址。
 - HTTP 只接受 HTTP/HTTPS URL，拒绝用户信息、Header 注入和超限请求/响应；同步入口拒绝在 Tokio runtime
   中阻塞，异步入口要求调用方提供 runtime；错误不回显 URL、Header 值、请求体、响应体或第三方传输文本。
-- HTTP 默认关闭代理、重定向、压缩和隐式重试；默认只对 GET/HEAD/OPTIONS 重试有限的传输失败与瞬态
+- HTTP 默认不启用压缩能力，关闭代理、重定向和隐式重试；同步端的下游解压边界见本版本 Fixed。
+  默认只对 GET/HEAD/OPTIONS 重试有限的传输失败与瞬态
   状态码，非幂等方法必须显式允许。完成缓存只保存满足安全 Header、请求/响应缓存指令约束的 2xx GET/HEAD。
 - 不支持明文 SMTP、机会式 STARTTLS、跳过证书校验、自签名证书、企业私有 CA relay、附件、抄送/密送、
   DKIM、OAuth2、自动重试、后台队列或邮件接收。

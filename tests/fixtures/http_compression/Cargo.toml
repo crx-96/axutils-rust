@@ -1,0 +1,18 @@
+[package]
+name = "axutils-http-compression-fixture"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[features]
+default = []
+compression = [
+    "ureq/gzip", "ureq/brotli",
+    "reqwest/gzip", "reqwest/brotli", "reqwest/deflate", "reqwest/zstd",
+]
+
+[dependencies]
+axutils = { path = "../../..", default-features = false, features = ["http-async"] }
+ureq = { version = "3.4.0", default-features = false }
+reqwest = { version = "0.13.4", default-features = false }
+tokio = { version = "1.53.1", default-features = false, features = ["rt", "net", "time"] }

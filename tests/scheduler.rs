@@ -160,6 +160,43 @@ fn runtime_and_time_driver_are_required_without_consuming_capacity() {
     });
 }
 
+#[tokio::test(start_paused = true)]
+async fn unrepresentable_delays_are_rejected_without_consuming_capacity() {
+    let scheduler = Scheduler::new(SchedulerConfig::new(1).unwrap()).unwrap();
+    let calls = Arc::new(AtomicUsize::new(0));
+    for schedule in [
+        TaskSchedule::once(Duration::MAX),
+        TaskSchedule::interval(Duration::MAX),
+    ] {
+        let calls = Arc::clone(&calls);
+        assert_eq!(
+            scheduler.register(schedule, move || {
+                let calls = Arc::clone(&calls);
+                async move {
+                    calls.fetch_add(1, Ordering::SeqCst);
+                }
+            }),
+            Err(SchedulerError::InvalidSchedule)
+        );
+    }
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
+
+    let callback_calls = Arc::clone(&calls);
+    let task = scheduler
+        .register(TaskSchedule::once(Duration::from_secs(1)), move || {
+            let calls = Arc::clone(&callback_calls);
+            async move {
+                calls.fetch_add(1, Ordering::SeqCst);
+            }
+        })
+        .unwrap();
+    // 首次 poll 前推进时钟，验证注册时确定的 deadline 不会被后台启动延迟重置。
+    tokio_time::advance(Duration::from_secs(1)).await;
+    tokio_task::yield_now().await;
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    assert!(!scheduler.cancel(task).unwrap());
+}
+
 #[test]
 fn dropping_runtime_before_first_poll_releases_capacity() {
     let scheduler = Scheduler::new(SchedulerConfig::new(1).unwrap()).unwrap();

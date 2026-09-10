@@ -6,6 +6,12 @@ use super::{
 const OK: &[&str] = &[];
 
 #[test]
+#[ignore = "下游 HTTP 压缩 feature 合并与 loopback 响应契约"]
+fn http_downstream_compression_contract() {
+    support::run_http_compression_contract();
+}
+
+#[test]
 #[ignore = "slow semantic feature/API matrix"]
 fn semantic_phone_and_template_matrix() {
     run_fixture_cases(

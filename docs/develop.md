@@ -7,6 +7,10 @@
 和主要失败路径的检查；复杂或高风险变化增加相应证据，局部变化优先复用现有测试。
 已有结果与当前代码、feature 和环境一致时可复用；新改动、失败或未解决疑点再触发补充验证。
 
+规范入口见 [AGENTS.md](../AGENTS.md)，库级判断依据见
+[Rust library 审查 Skill](skills/review-rust-library-change/SKILL.md)。以下命令提供不同范围的证据，
+不替代对公共契约和实际行为的审查。
+
 ## 环境
 
 - Rust / Cargo：1.95（项目 MSRV）
@@ -76,6 +80,17 @@ cargo tree --no-default-features --features http-async --edges normal,build
 ```
 
 依赖树预期：同步 `http` 不含 `reqwest`，`http-async` 包含它。
+
+下游压缩 feature 合并的行为回归使用独立 fixture，分别验证未启用压缩和启用所有 provider 压缩
+feature 的组合；仅访问测试自身启动的 loopback server。首次运行需准备 fixture 的依赖缓存：
+
+```bash
+cargo fetch --manifest-path tests/fixtures/http_compression/Cargo.toml
+cargo test --no-default-features --test feature_matrix http_downstream_compression_contract -- --ignored --test-threads=1 --nocapture
+```
+
+同步入口验证 ureq 的下游解压边界；异步入口验证原始字节与编码 Header 保持不变。该用例也纳入
+完整 ignored 矩阵。
 
 ### Redis
 
@@ -224,6 +239,29 @@ git diff --check
 - `docs/status/**`
 
 根目录 `Cargo.lock` 的提交约定见 AGENTS。
+
+## 规范审查的补充检查
+
+公共 API 文档维护或项目规范审查时，可用以下命令检查缺失说明和 Rustdoc 警告，并单独运行示例：
+
+```bash
+cargo rustdoc --no-default-features --lib -- -D warnings -W missing_docs
+cargo rustdoc --all-features --lib -- -D warnings -W missing_docs
+cargo test --doc --all-features -- --test-threads=4
+```
+
+这是补充诊断入口，不修改 manifest 的 lint 等级。结合 Rustdoc 渲染结果检查示例是否显示核心调用，
+并核对关键断言是否实际运行；编译成功、`no_run` 和运行成功分别报告。
+
+本地已有依赖缓存时可附加 `--offline`，此时结果只证明当前已解析依赖集；缺少缓存属于环境缺口。
+检查 MSRV 时核对实际 `rustc --version`，验证平台也按实际环境记录。
+
+涉及第三方 feature 合并时，在独立下游 fixture 中同时依赖 `axutils` 和相关 provider，并额外启用
+会改变行为的 provider feature。现有 `--all-features` 仅覆盖本 crate 声明的组合，不能证明所有下游
+组合都已验证。真实外部访问继续遵循 Live 测试条件，本地复现优先使用 loopback 或内存 fixture。
+
+规范审查按问题报告触发条件、影响、对应条款、位置和证据；没有运行的矩阵、平台分支或 live
+场景列为未验证，不因工具返回成功或用例被 ignored 而视为通过。
 
 ## 性能测量
 

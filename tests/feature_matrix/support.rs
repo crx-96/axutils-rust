@@ -43,6 +43,39 @@ pub(super) fn run_fixture_cases(name: &str, cases: &[FixtureCase]) {
     target.cleanup();
 }
 
+pub(super) fn run_http_compression_contract() {
+    let manifest =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/http_compression/Cargo.toml");
+    let target = TemporaryTarget::new("axutils-http-compression");
+    let (fixture, manifest) = copy_fixture_to_temporary_directory(&manifest);
+    for features in ["", "compression"] {
+        let mut command = Command::new("cargo");
+        command
+            .args(["test", "--offline", "--no-default-features", "-j", "2"])
+            .arg("--manifest-path")
+            .arg(&manifest)
+            .arg("--target-dir")
+            .arg(target.path())
+            .env("CARGO_TERM_COLOR", "never");
+        if !features.is_empty() {
+            command.arg("--features").arg(features);
+        }
+        FIXTURE_CARGO_CALLS.fetch_add(1, Ordering::Relaxed);
+        let output = command
+            .args(["--", "--test-threads=1"])
+            .output()
+            .expect("failed to run downstream HTTP compression fixture");
+        assert!(
+            output.status.success(),
+            "HTTP compression fixture failed for features {features:?}\nstdout: {}\nstderr: {}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    fixture.cleanup();
+    target.cleanup();
+}
+
 pub(super) fn assert_removed_provider_features(features: &[&str]) {
     let target = TemporaryTarget::new("axutils-removed-provider-features");
     let repository = Path::new(env!("CARGO_MANIFEST_DIR"))

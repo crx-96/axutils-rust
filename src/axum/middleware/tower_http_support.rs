@@ -27,7 +27,6 @@ const REQUEST_ID: HeaderName = HeaderName::from_static("x-request-id");
 ///
 /// ```rust
 /// # use axutils::axum::*;
-/// # use axutils::axum::*;
 /// assert_eq!(
 ///     AxumTimeoutStatus::default(),
 ///     AxumTimeoutStatus::RequestTimeout,
@@ -196,8 +195,9 @@ impl AxumServerBuilder {
     /// # Examples
     /// ```rust
     /// # use axutils::axum::*;
-    /// # use axutils::axum::*;
-    /// # #[cfg(feature="axum-tower-http")] { let _=AxumApp::new().into_server_builder().with_request_id(); }
+    /// # #[cfg(feature = "axum-tower-http")] {
+    /// let _ = AxumApp::new().into_server_builder().with_request_id();
+    /// # }
     /// ```
     pub fn with_request_id(mut self) -> Self {
         self.request_id_installed = true;
@@ -207,8 +207,15 @@ impl AxumServerBuilder {
     /// # Examples
     /// ```rust
     /// # use axutils::axum::*;
-    /// # use axutils::axum::*;
-    /// # #[cfg(feature="axum-tower-http")] { let _=AxumApp::new().into_server_builder().with_timeout(std::time::Duration::from_secs(1),AxumTimeoutStatus::RequestTimeout).unwrap(); }
+    /// # #[cfg(feature = "axum-tower-http")] {
+    /// let _ = AxumApp::new()
+    ///     .into_server_builder()
+    ///     .with_timeout(
+    ///         std::time::Duration::from_secs(1),
+    ///         AxumTimeoutStatus::RequestTimeout,
+    ///     )
+    ///     .unwrap();
+    /// # }
     /// ```
     pub fn with_timeout(
         mut self,
@@ -227,8 +234,12 @@ impl AxumServerBuilder {
     /// # Examples
     /// ```rust
     /// # use axutils::axum::*;
-    /// # use axutils::axum::*;
-    /// # #[cfg(feature="axum-tower-http")] { assert!(AxumApp::new().into_server_builder().with_body_limit(0).is_err()); }
+    /// # #[cfg(feature = "axum-tower-http")] {
+    /// assert!(AxumApp::new()
+    ///     .into_server_builder()
+    ///     .with_body_limit(0)
+    ///     .is_err());
+    /// # }
     /// ```
     pub fn with_body_limit(mut self, max_bytes: usize) -> Result<Self, AxumError> {
         if !(1..=64 * 1024 * 1024).contains(&max_bytes) {
@@ -244,8 +255,9 @@ impl AxumServerBuilder {
     /// # Examples
     /// ```rust
     /// # use axutils::axum::*;
-    /// # use axutils::axum::*;
-    /// # #[cfg(feature="axum-tower-http")] { let _=AxumApp::new().into_server_builder().with_catch_panic(); }
+    /// # #[cfg(feature = "axum-tower-http")] {
+    /// let _ = AxumApp::new().into_server_builder().with_catch_panic();
+    /// # }
     /// ```
     pub fn with_catch_panic(mut self) -> Self {
         self.catch_panic_installed = true;
@@ -255,8 +267,12 @@ impl AxumServerBuilder {
     /// # Examples
     /// ```rust
     /// # use axutils::axum::*;
-    /// # use axutils::axum::*;
-    /// # #[cfg(feature="axum-tower-http")] { let _=AxumApp::new().into_server_builder().with_cors(AxumCorsConfig::default()).unwrap(); }
+    /// # #[cfg(feature = "axum-tower-http")] {
+    /// let _ = AxumApp::new()
+    ///     .into_server_builder()
+    ///     .with_cors(AxumCorsConfig::default())
+    ///     .unwrap();
+    /// # }
     /// ```
     pub fn with_cors(mut self, config: AxumCorsConfig) -> Result<Self, AxumError> {
         if let Some(layer) = config.layer()? {
@@ -310,8 +326,9 @@ impl AxumServerBuilder {
     /// # Examples
     /// ```rust
     /// # use axutils::axum::*;
-    /// # use axutils::axum::*;
-    /// # #[cfg(all(feature="axum-tower-http",feature="tracing"))] { let _=AxumApp::new().into_server_builder().with_http_trace(); }
+    /// # #[cfg(all(feature = "axum-tower-http", feature = "tracing"))] {
+    /// let _ = AxumApp::new().into_server_builder().with_http_trace();
+    /// # }
     /// ```
     pub fn with_http_trace(mut self) -> Self {
         self.request_id_installed = true;

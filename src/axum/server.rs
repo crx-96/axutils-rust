@@ -18,8 +18,9 @@ use tokio::{
 /// # Examples
 /// ```rust
 /// # use axutils::axum::*;
-/// # use axutils::axum::*;
-/// # #[cfg(feature="axum")] { let _builder=AxumApp::new().into_server_builder(); }
+/// # #[cfg(feature = "axum")] {
+/// let _builder = AxumApp::new().into_server_builder();
+/// # }
 /// ```
 pub struct AxumServerBuilder {
     pub(crate) router: Router,
@@ -62,8 +63,11 @@ impl AxumServerBuilder {
     /// # Examples
     /// ```rust
     /// # use axutils::axum::*;
-    /// # use axutils::axum::*;
-    /// # #[cfg(feature="axum")] { let _=AxumApp::new().into_server_builder().config(AxumConfig::new()); }
+    /// # #[cfg(feature = "axum")] {
+    /// let _ = AxumApp::new()
+    ///     .into_server_builder()
+    ///     .config(AxumConfig::new());
+    /// # }
     /// ```
     pub fn config(mut self, config: AxumConfig) -> Self {
         self.config = config;
@@ -73,8 +77,9 @@ impl AxumServerBuilder {
     /// # Examples
     /// ```rust
     /// # use axutils::axum::*;
-    /// # use axutils::axum::*;
-    /// # #[cfg(feature="axum")] { let _server=AxumApp::new().into_server_builder().build().unwrap(); }
+    /// # #[cfg(feature = "axum")] {
+    /// let _server = AxumApp::new().into_server_builder().build().unwrap();
+    /// # }
     /// ```
     pub fn build(self) -> Result<AxumServer, AxumError> {
         #[cfg(feature = "axum-tower-http")]
@@ -97,8 +102,10 @@ impl AxumServerBuilder {
 /// # Examples
 /// ```rust
 /// # use axutils::axum::*;
-/// # use axutils::axum::*;
-/// # #[cfg(feature="axum")] { let server=AxumApp::new().into_server_builder().build().unwrap();let _clone=server.clone(); }
+/// # #[cfg(feature = "axum")] {
+/// let server = AxumApp::new().into_server_builder().build().unwrap();
+/// let _clone = server.clone();
+/// # }
 /// ```
 #[derive(Clone)]
 pub struct AxumServer {
@@ -113,8 +120,10 @@ impl AxumServer {
     /// # Examples
     /// ```rust
     /// # use axutils::axum::*;
-    /// # use axutils::axum::*;
-    /// # #[cfg(feature="axum")] { let server=AxumApp::new().into_server_builder().build().unwrap();let _=server.config(); }
+    /// # #[cfg(feature = "axum")] {
+    /// let server = AxumApp::new().into_server_builder().build().unwrap();
+    /// let _ = server.config();
+    /// # }
     /// ```
     pub fn config(&self) -> &AxumConfig {
         &self.config
@@ -123,8 +132,10 @@ impl AxumServer {
     /// # Examples
     /// ```rust
     /// # use axutils::axum::*;
-    /// # use axutils::axum::*;
-    /// # #[cfg(feature="axum")] { let server=AxumApp::new().into_server_builder().build().unwrap();let _=server.shutdown_handle(); }
+    /// # #[cfg(feature = "axum")] {
+    /// let server = AxumApp::new().into_server_builder().build().unwrap();
+    /// let _ = server.shutdown_handle();
+    /// # }
     /// ```
     pub fn shutdown_handle(&self) -> AxumShutdownHandle {
         AxumShutdownHandle {
@@ -135,7 +146,10 @@ impl AxumServer {
     /// # Examples
     /// ```rust,no_run
     /// # use axutils::axum::*;
-    /// # async fn example(server:AxumServer)->Result<(),AxumError>{let _=server.serve_addr("127.0.0.1:0".parse().unwrap()).await?;Ok(())}
+    /// async fn example(server: AxumServer) -> Result<(), AxumError> {
+    ///     let _ = server.serve_addr("127.0.0.1:0".parse().unwrap()).await?;
+    ///     Ok(())
+    /// }
     /// ```
     pub async fn serve_addr(&self, addr: SocketAddr) -> Result<AxumServeOutcome, AxumError> {
         let mut start = StartGuard::reserve(self.shared.clone())?;
@@ -148,10 +162,12 @@ impl AxumServer {
     /// 使用已 bind listener 运行，默认等待程序化 handle 或 OS signal。
     /// # Examples
     /// ```rust,no_run
-    /// # use axutils::tokio::*;
     /// # use tokio::net::TcpListener;
     /// # use axutils::axum::*;
-    /// # async fn example(server:AxumServer,listener:TcpListener)->Result<(),AxumError>{let _=server.serve(listener).await?;Ok(())}
+    /// async fn example(server: AxumServer, listener: TcpListener) -> Result<(), AxumError> {
+    ///     let _ = server.serve(listener).await?;
+    ///     Ok(())
+    /// }
     /// ```
     pub async fn serve(&self, listener: TcpListener) -> Result<AxumServeOutcome, AxumError> {
         let mut start = StartGuard::reserve(self.shared.clone())?;
@@ -164,10 +180,15 @@ impl AxumServer {
     /// # Examples
     /// ```rust,no_run
     /// # use axutils::axum::*;
-    /// # use axutils::tokio::*;
     /// # use tokio::net::TcpListener;
-    /// # use axutils::axum::*;
-    /// # async fn example(server:AxumServer,listener:TcpListener)->Result<(),AxumError>{let _=server.serve_with_shutdown(listener,async{AxumShutdownReason::Custom("host".into())}).await?;Ok(())}
+    /// async fn example(server: AxumServer, listener: TcpListener) -> Result<(), AxumError> {
+    ///     let _ = server
+    ///         .serve_with_shutdown(listener, async {
+    ///             AxumShutdownReason::Custom("host".into())
+    ///         })
+    ///         .await?;
+    ///     Ok(())
+    /// }
     /// ```
     pub async fn serve_with_shutdown<F>(
         &self,
@@ -396,8 +417,12 @@ impl AxumServerBuilder {
     /// # Examples
     /// ```rust
     /// # use axutils::axum::*;
-    /// # use axutils::axum::*;
-    /// # #[cfg(feature="axum-tower")] { let _=AxumApp::new().into_server_builder().with_concurrency_limit(1).unwrap(); }
+    /// # #[cfg(feature = "axum-tower")] {
+    /// let _ = AxumApp::new()
+    ///     .into_server_builder()
+    ///     .with_concurrency_limit(1)
+    ///     .unwrap();
+    /// # }
     /// ```
     pub fn with_concurrency_limit(mut self, max: usize) -> Result<Self, AxumError> {
         use axum::{error_handling::HandleErrorLayer, http::StatusCode, BoxError};

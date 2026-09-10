@@ -15,8 +15,13 @@ use super::{HttpConfig, HttpError};
 /// HTTP 客户端。
 ///
 /// 客户端持有独立的同步和异步连接池；同步入口使用 `ureq`，异步入口使用 `reqwest`。
-/// 两者都关闭系统代理、自动重定向、自动压缩和隐式重试，并且不会把第三方错误文本
-/// 直接暴露给调用方。
+/// 两者都关闭系统代理、自动重定向和隐式重试，并且不会把第三方错误文本直接暴露给调用方。
+/// 异步入口显式关闭 gzip、Brotli、deflate 和 Zstd 自动解压，不受下游 reqwest feature 合并影响。
+///
+/// 同步入口不主动声明压缩支持，本库也不启用 ureq 解压 feature；但 ureq 没有实例级关闭开关。
+/// 若下游启用 `ureq/gzip` 或 `ureq/brotli`，对应响应会由 ureq 解压，并移除 `Content-Encoding`
+/// 与 `Content-Length`；响应体上限此时约束解压后的字节。需要逐字节保留原始压缩响应时使用
+/// 异步入口。
 pub struct HttpClient {
     pub(super) config: HttpConfig,
     pub(super) sync_agent: SyncAgent,
@@ -60,7 +65,11 @@ impl HttpClient {
             .referer(false)
             .retry(reqwest_retry::never())
             .no_proxy()
+            // 每个格式都显式关闭，保持下游合并 provider feature 后的响应字节契约。
             .no_gzip()
+            .no_brotli()
+            .no_deflate()
+            .no_zstd()
             .timeout(config.request_timeout())
             .connect_timeout(config.connect_timeout())
             .pool_idle_timeout(config.idle_connection_timeout())

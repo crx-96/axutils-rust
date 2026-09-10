@@ -29,9 +29,17 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 
 单独启用 `tokio` 不会公开任何 HTTP API；单独启用 `http` 也不会编译异步 transport。
-客户端使用 Rustls，关闭系统代理、自动重定向、自动压缩和 transport 的隐式重试；不提供跳过
+客户端使用 Rustls，关闭系统代理、自动重定向和 transport 的隐式重试；不提供跳过
 证书或 hostname 校验的选项。调用方仍须自行限制允许的主机、出口网络和 DNS 重绑定风险，库不将
 客户端 URL 校验等同于 SSRF 防护。
+
+异步入口显式关闭 gzip、Brotli、deflate 和 Zstd 自动解压，即使下游同时启用了 reqwest 的压缩
+feature，也保留服务器返回的压缩字节与相关响应 Header。
+
+同步入口不主动发送 `Accept-Encoding`，本库也不启用 ureq 的解压 feature。但 ureq 没有按客户端
+关闭解压的开关：下游启用 `ureq/gzip` 或 `ureq/brotli` 后，ureq 会解压相应响应并移除
+`Content-Encoding` 和 `Content-Length`；`max_response_body_bytes` 此时约束解压后的字节。
+设置空 `Accept-Encoding` 不会禁止这一行为。需要逐字节保留原始压缩响应时使用异步入口。
 
 ## 导入与同步实例
 
