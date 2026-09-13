@@ -13,9 +13,7 @@
 
 ## 环境
 
-- Rust / Cargo：1.95（项目 MSRV）
-- Edition：2021
-- 默认 feature：空
+- MSRV、edition 和默认 feature：以 [Cargo.toml](../Cargo.toml) 为准。
 - 工作目录：仓库根目录
 
 确认环境：
@@ -47,7 +45,8 @@ git diff --check
 cargo tree --no-default-features --edges normal,build
 ```
 
-断言与负向用例的维护依据见项目 Skill 的实施与迁移章节，检查失败时先查明契约与实现的差异。
+断言与负向用例的维护依据见 [实施与迁移](skills/review-rust-library-change/references/api-and-features.md#实施与迁移)，
+检查失败时先查明契约与实现的差异。
 
 ## 领域验证
 
@@ -161,7 +160,9 @@ cargo test --no-default-features --test feature_matrix
 cargo test --no-default-features --test feature_matrix -- --ignored --test-threads=1 --nocapture
 ```
 
-矩阵使用统一 scratch fixture，并复用相同 feature/edge/invert 的 `cargo tree` 结果。覆盖范围包括：
+矩阵由 `tests/feature_matrix/` 的声明式 case 和共享 runner 组织，使用统一 scratch fixture，
+复用相同 feature/edge/invert 的 `cargo tree` 结果；正向场景尽量批量，负向场景保留独立诊断。
+覆盖范围包括：
 
 - 默认正常依赖为空；
 - 每个独立 feature 有对应 API；
@@ -201,8 +202,10 @@ cargo test --no-default-features --test docs_examples -- --ignored --nocapture
 Remove-Item Env:AXUTILS_DOCS_EXAMPLE_FILTER
 ```
 
+Markdown harness 用“文档默认 feature/直接依赖 + 邻接 fence override”描述示例配置。
 正向代码块按“axutils feature + 完整直接依赖语义”分组，一个 scratch crate 使用多个 bin 一次
-检查；组失败后才逐 bin 回退。`compile_fail` 用例保持独立并匹配稳定诊断。
+检查；组失败后才逐 bin 回退。`compile_fail` 用例保持独立并匹配稳定诊断。新增 fence 纳入双向
+枚举；未闭合 fence、未声明的活动 `cfg` 和敏感值作为 harness 失败处理。
 
 ## 发布前检查
 
@@ -232,6 +235,7 @@ git diff --check
 - `tests/**`
 - `config/**`
 - `AGENTS.md`
+- `docs/architecture.md`
 - `docs/develop.md`
 - `docs/module-map.md`
 - `docs/skills/**`
@@ -260,8 +264,8 @@ cargo test --doc --all-features -- --test-threads=4
 会改变行为的 provider feature。现有 `--all-features` 仅覆盖本 crate 声明的组合，不能证明所有下游
 组合都已验证。真实外部访问继续遵循 Live 测试条件，本地复现优先使用 loopback 或内存 fixture。
 
-规范审查按问题报告触发条件、影响、对应条款、位置和证据；没有运行的矩阵、平台分支或 live
-场景列为未验证，不因工具返回成功或用例被 ignored 而视为通过。
+规范审查的问题分类与证据报告方式见
+[Skill 的审查与交付](skills/review-rust-library-change/SKILL.md#审查与交付)。
 
 ## 性能测量
 

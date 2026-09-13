@@ -1,23 +1,12 @@
 # axutils 模块与 feature 定位
 
-本文档是当前源码结构、公共路径和能力 feature 的定位清单。它描述“能力归属在哪里”，不复制每个
-方法的完整签名；方法、错误和安全语义以 Rustdoc 与对应领域文档为准。
+本文档是当前源码结构、公共路径和能力 feature 的定位清单。目录、依赖和拆分约定集中在
+[架构基线](architecture.md)；方法、错误和安全语义见 Rustdoc 与对应领域文档。
 
 ## 架构与公共路径
 
-`axutils` 采用单 crate，当前依赖方向为：
-
-```text
-axutils::utils façade -> 领域公开 API -> 领域私有实现 -> 第三方 crate
-                                      -> 私有 telemetry
-```
-
-- `src/lib.rs` 只声明公开领域模块，不平铺重导出类型。
-- Client、配置、错误、模型和自由函数的规范路径是 `axutils::<domain>::Item`。
-- 所有 `*Utils` 及其支持类型的规范路径是 `axutils::utils::Type`。
-- `utils` 叶模块和领域实现模块保持私有；领域代码独立于 `utils`，由 façade 调用领域 API。
-- 状态型 façade 只管理初始化、状态和实例访问，业务方法由返回的实例承担。
-- 默认 feature 为空；无第三方依赖的基础能力默认可用。
+领域类型从 `axutils::<domain>` 导入，工具入口从 `axutils::utils` 导入。类型归属与重导出
+边界见 [固定边界](architecture.md#固定边界)，调用关系见 [入口与依赖方向](architecture.md#入口与依赖方向)。
 
 推荐导入：
 
@@ -37,9 +26,6 @@ use axutils::{
 #     RedisUtils::is_initialized(),
 # );
 ```
-
-公共入口采用上述领域路径；当前结构不设 `prelude`、crate 根类型别名或公开 `utils::*_utils`
-叶模块，扩展能力时沿用对应领域入口。
 
 ## 默认能力
 
@@ -166,18 +152,18 @@ use axutils::{
 | `CryptoUtils`（AES） | `aes_init`、`aes_init_from_bytes`、`aes_is_initialized`、`cipher` | `AesCipher` |
 | `LogUtils` | `init`、`is_initialized` | 标准 `tracing` 宏 |
 
-这些全局对象成功初始化后不可 reset 或 replace。初始化失败不占位；取得实例后，其关闭或失败语义
-由领域实例决定。多配置、测试隔离或可控销毁场景可直接创建实例。
+上述入口的初始化、关闭和多实例原则见 [状态与能力隔离](architecture.md#状态与能力隔离)。
 
 `ConfigUtils`、`FsUtils`、`ConvertUtils`、`FormatUtils`、`PathUtils`、`RandomUtils`、
 `RegUtils`、`TimeUtils` 是无状态工具，不受上述生命周期收缩限制。
 
 ## 私有实现定位
 
-- `src/<domain>/global.rs`：领域状态 façade 的私有实现。
-- `src/<domain>/**`：client、config、transport、codec、policy、validation 等领域实现。
-- `src/telemetry/**`：只在 `tracing` 下编译的私有事件适配；不形成 `axutils::tracing` 模块。
-- `src/utils/*_utils.rs`：私有聚合叶；只由 `src/utils/mod.rs` 重导出。
+- Client、config、transport、codec、policy、validation 等实现位于 `src/<domain>/`。
+- Email/HTTP/JWT/Redis/SQLx/Scheduler/Axum 的状态入口位于各领域 `global.rs`；
+  Crypto/Logging 使用 `facade.rs`，其他无状态领域工具也在各自 `facade.rs`。
+- `src/utils/*_utils.rs` 聚合对应领域工具；Format/Path/Random/Reg 在 `utils` 内实现。
+- 事件适配位于 `src/telemetry/<domain>.rs`；与 Logging 的职责边界见架构文档。
 
 跨模块调用可导入有业务含义的模块限定符，例如：
 
@@ -190,10 +176,10 @@ transfer::copy_file_with(source, destination, options, processor);
 ```
 
 路径风格及现有 lint 的适用方式见
-[项目 Skill 的路径与命名](skills/review-rust-library-change/SKILL.md#52-路径与命名)。
+[项目 Skill 的路径与命名](skills/review-rust-library-change/references/api-and-features.md#路径与命名)。
 
 ## 新增或调整能力
 
-本清单随模块职责、公共路径、feature 或文档映射的变化更新。领域归属、能力分层、正负契约、
-安全与生命周期验证、文档同步及职责拆分的判断依据集中在
-[项目 Skill](skills/review-rust-library-change/SKILL.md) 对应主题，可按改动需要查阅。
+本清单随模块职责、公共路径、feature 或文档映射的变化更新。领域归属与职责拆分遵循
+[架构基线](architecture.md)，库级设计和验收按 [项目 Skill](skills/review-rust-library-change/SKILL.md)
+选用相关主题。
