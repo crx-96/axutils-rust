@@ -1,5 +1,54 @@
 #![allow(dead_code)]
 
+fn common_baseline() {
+    use axutils::{concurrency::KeyedAdmission, tree, utils::FormatUtils};
+
+    let _ = KeyedAdmission::new(1).try_enter("key");
+    let _ = tree::build_forest(vec![(1, None::<i32>)], 1, |row| row.0, |row| row.1, |_| 0);
+    let _ = FormatUtils::escape_html("<&>");
+    let _ = FormatUtils::replace_placeholders("{x}", &[("{x}", "value")]);
+}
+
+#[cfg(feature = "secure-random")]
+fn secure_random() {
+    use axutils::utils::CryptoUtils;
+
+    let _ = CryptoUtils::secure_random_bytes;
+    let _ = CryptoUtils::secure_random_digits;
+    let _ = CryptoUtils::secure_random_hex;
+}
+
+#[cfg(any(
+    feature = "negative-secure-random",
+    feature = "negative-secure-random-rand"
+))]
+fn negative_secure_random() {
+    let _ = axutils::utils::CryptoUtils::secure_random_bytes;
+    let _ = axutils::utils::CryptoUtils::secure_random_digits;
+    let _ = axutils::utils::CryptoUtils::secure_random_hex;
+}
+
+#[cfg(feature = "negative-task-guard")]
+fn negative_task_guard() {
+    let _ = axutils::tokio::TokioTaskGuard::<()>::new;
+}
+
+#[cfg(any(
+    feature = "negative-postgres-classifier-mysql",
+    feature = "negative-postgres-classifier-sqlite"
+))]
+fn negative_postgres_classifier() {
+    let _ = axutils::sqlx::is_postgres_transaction_conflict;
+}
+
+#[cfg(feature = "sqlx-postgres")]
+fn postgres_classifier() {
+    use axutils::sqlx as axutils_sqlx;
+
+    let _ = axutils_sqlx::is_postgres_transaction_conflict;
+    assert!(axutils_sqlx::SqlxError::PoolClosed.is_infrastructure_unavailable());
+}
+
 #[cfg(feature = "phone-validation")]
 fn phone_validation() {
     use axutils::utils::RegUtils;
@@ -25,9 +74,13 @@ fn template_minijinja() {
 
 #[cfg(feature = "tokio")]
 fn tokio() {
-    use axutils::{tokio::TokioConfig, utils::TokioUtils};
+    use axutils::{
+        tokio::{TokioConfig, TokioTaskGuard},
+        utils::TokioUtils,
+    };
 
     let _ = TokioConfig::new;
+    let _ = TokioTaskGuard::<u32>::new;
     let _ = TokioUtils::try_current_handle;
 }
 

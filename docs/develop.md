@@ -107,6 +107,8 @@ cargo test --no-default-features --features redis-cluster-async --test redis_glo
 ```bash
 cargo check --no-default-features --features sqlx-postgres
 cargo check --no-default-features --features sqlx-mysql
+cargo test --no-default-features --features sqlx-postgres --test sqlx
+cargo test --no-default-features --features sqlx-mysql --test sqlx
 cargo test --no-default-features --features sqlx-sqlite --test sqlx
 
 cargo test --no-default-features --features scheduler --test scheduler --test scheduler_global
@@ -115,10 +117,14 @@ cargo test --no-default-features --features axum-governor --test axum
 ```
 
 依赖树预期：SQLx 单 driver 与另外两个 driver 隔离；`scheduler` 单 feature 提供完整调度 API。
+SQLx 错误分类用例不连接数据库；SQLite 的既有 client 回归使用内存数据库。
 
 ### 其他领域
 
 ```bash
+cargo test --no-default-features --test tree --test concurrency --test format
+cargo test --no-default-features --features secure-random --lib --test crypto
+cargo test --no-default-features --features tokio --test concurrency --test tokio
 cargo test --no-default-features --features jwt --test jwt --test jwt_codec --test jwt_global
 cargo test --no-default-features --features email --test email_live
 cargo test --no-default-features --features logging --test log_global --test log_conflict
@@ -166,12 +172,19 @@ cargo test --no-default-features --test feature_matrix -- --ignored --test-threa
 
 - 默认正常依赖为空；
 - 每个独立 feature 有对应 API；
+- 默认树/准入/文本入口，以及 `secure-random`、Tokio 单任务守卫和 PostgreSQL 分类器的能力隔离；
 - `tokio` 不开放其他领域异步 API；
 - HTTP、Redis、SQLx、FS、Config、Axum 的分层；
 - Scheduler 单 feature；
 - canonical path 正向和旧根/公开叶路径负向；
 - provider-only feature 与 allocator feature 已删除；
 - 时间无后缀 API 已删除。
+
+仅验证本批通用能力的正负 API 与默认/安全随机生产依赖边界：
+
+```bash
+cargo test --no-default-features --test feature_matrix common_capability_matrix -- --ignored --test-threads=1 --nocapture
+```
 
 ### Markdown 示例
 

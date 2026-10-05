@@ -30,8 +30,9 @@ pub(super) fn run_fixture_cases(name: &str, cases: &[FixtureCase]) {
         assert_eq!(
             output.status.success(),
             case.expected_success,
-            "fixture feature {} unexpected status\nstdout: {}\nstderr: {}",
+            "fixture feature {:?} unexpected status: {}\nstdout: {}\nstderr: {}",
             case.feature,
+            output.status,
             String::from_utf8_lossy(&output.stdout),
             String::from_utf8_lossy(&output.stderr),
         );

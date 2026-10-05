@@ -66,3 +66,40 @@ async fn initialize() -> Result<(), SqlxError> {
 全局 client 关闭后仍可取得；查询对象仍可本地构造，但后续 execute/fetch 和事务等连接池操作保留
 pool-closed 错误语义。多数据库、测试隔离或可控
 生命周期应直接持有 `SqlxClient`。
+
+## 错误分类
+
+任何 SQLx driver feature 均提供 `SqlxError::is_infrastructure_unavailable()`，只识别
+`PoolAcquireTimeout`、`PoolClosed` 以及 `Transport` 的 `Timeout` / `Network`。配置、TLS、
+协议、服务端响应（含约束冲突）、行不存在和解码错误均不属于这个集合；返回 `false` 不证明
+基础设施健康。这是错误分组，不是允许自动重试的判断。
+
+```rust
+use axutils::sqlx::{SqlxError, SqlxTransportErrorKind};
+
+assert!(SqlxError::PoolClosed.is_infrastructure_unavailable());
+assert!(SqlxError::Transport(SqlxTransportErrorKind::Network)
+    .is_infrastructure_unavailable());
+assert!(!SqlxError::RowNotFound.is_infrastructure_unavailable());
+assert!(!SqlxError::Transport(SqlxTransportErrorKind::Server)
+    .is_infrastructure_unavailable());
+```
+
+仅 `sqlx-postgres` 提供 `axutils::sqlx::is_postgres_transaction_conflict`，接收 PostgreSQL
+操作返回的原生 `sqlx::Error`，只读取 SQLSTATE 并匹配 `40001`（序列化冲突）和 `40P01`
+（死锁）。不依赖连接池或 runtime，也不连接数据库；调用方须直接依赖兼容的 SQLx 0.9.x。
+
+```rust
+use axutils::sqlx as axutils_sqlx;
+use sqlx::Error;
+
+let error = Error::PoolClosed;
+assert!(!axutils_sqlx::is_postgres_transaction_conflict(&error));
+assert!(!axutils_sqlx::is_postgres_transaction_conflict(&Error::RowNotFound));
+```
+
+分类器不检查具体 driver 类型，不解析或记录数据库错误消息。原生 SQLx 错误不会因为被查询过
+而自动脱敏，日志仍须由调用方控制，避免输出 SQL、连接信息或业务参数。`SqlxError` 原有的
+脱敏转换保持不变，转换后不会保留 SQLSTATE，因此事务冲突应在原生错误仍可用时判断。
+事务冲突并不保证业务能安全重试：调用方需要确认事务可重放、外部副作用可接受，并在决定重试时
+重新执行整个事务；本库不执行重试。

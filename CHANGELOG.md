@@ -7,6 +7,20 @@
 
 ### Added
 
+- 默认新增 `tree::{build_forest, TreeNode, TreeBuildError}`：泛型 ID/排序值，验证重复 ID、缺失父节点、
+  自环、独立环与深度边界，以显式栈完成森林构建和可失败后序转换。
+- 默认新增 `concurrency::{KeyedAdmission, KeyedPermit, AdmissionError}`：克隆共享状态、同键 Busy
+  优先、总容量限制、锁中毒 Unavailable 与 Drop 释放；零容量拒绝新准入。
+- `tokio` 新增 `TokioTaskGuard<T>`，接管单个 `JoinHandle` 并在 Drop 请求 abort；不等待任务完成，
+  不改变 `TokioTaskGroup` 的协作取消及 Drop 契约。
+- 新增独立 `secure-random` feature 与 `CryptoUtils::secure_random_bytes/digits/hex`；复用系统随机源、
+  Hex 编码和 `CryptoError`，数字保留前导零并无偏采样，随机源/长度/可报告分配失败返回错误。
+- 默认新增 `FormatUtils::escape_html` 和 `replace_placeholders`：HTML 五字符转义与借用标记表的
+  单次字面替换；不自动混用转义与替换，不改变可选模板引擎行为。
+- `sqlx-postgres` 新增原生 SQLx 错误的 `is_postgres_transaction_conflict`，识别 40001/40P01；
+  任一 SQLx driver 新增 `SqlxError::is_infrastructure_unavailable`，仅分类既定的池/网络/超时错误。
+  分类不执行或保证业务可安全重试，也不额外暴露数据库诊断。
+
 - 新增稳定的领域模块与工具入口：领域 Client、配置、错误和模型使用
   `axutils::<domain>::Type`，所有 `*Utils` 与工具支持类型使用 `axutils::utils::Type`；新增公开
   `axutils::jwt::JwtCodec` 实例 API。

@@ -38,6 +38,7 @@ features = [
     "tracing",
     "logging",
     "rand",
+    "secure-random",
     "regex",
     "phone-validation",
     "template-strfmt",
@@ -91,6 +92,7 @@ jwt = ["dep:jsonwebtoken", "dep:serde", "dep:serde_json"]
 tracing = ["dep:tracing"]
 logging = ["tracing", "dep:tracing-subscriber", "dep:tracing-appender"]
 rand = ["dep:rand"]
+secure-random = ["dep:getrandom"]
 regex = ["dep:regex"]
 phone-validation = ["regex", "dep:libphonenumber"]
 template-strfmt = ["dep:serde", "dep:serde_json", "dep:strfmt"]
@@ -249,6 +251,7 @@ jsonwebtoken = { version = "11.0.0", default-features = false, features = [
     "use_pem",
 ], optional = true }
 rand = { version = "0.10.2", optional = true }
+getrandom = { version = "0.4.3", optional = true, default-features = false }
 regex = { version = "1", optional = true }
 libphonenumber = { package = "phonenumber", version = "0.3", optional = true }
 serde = { version = "1", features = ["derive"], optional = true }

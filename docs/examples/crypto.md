@@ -1,4 +1,4 @@
-# 编码、摘要与 AES
+# 编码、摘要、AES 与安全随机
 
 领域类型从 `axutils::crypto` 导入，静态工具从 `axutils::utils::CryptoUtils` 导入。该能力只处理内存
 数据：不提供密钥存储、口令派生、非对称密码学、文件流或密钥轮换。
@@ -18,6 +18,7 @@ axutils = { version = "1.0", features = ["base64", "md5", "aes", "encoding_rs"] 
 | `md5` | 原始 MD5 摘要及小写十六进制摘要 |
 | `aes` | `AesKey`、`AesMode`、`AesCipher` 与全局 cipher 生命周期入口 |
 | `encoding_rs` | `TextEncoding` 的 GBK、Big5 等 legacy 文本编码变体 |
+| `secure-random` | 可失败的系统安全随机字节、数字及小写十六进制字符串 |
 
 ## 十六进制与文本
 
@@ -105,3 +106,27 @@ assert_eq!(cipher.decrypt(ciphertext)?, b"payload");
   输入上限。
 - `TextEncoding::Utf8` 默认可用；legacy 编码只有启用 `encoding_rs` 后存在，并应避免把解码后的
   敏感文本写入日志。
+
+## 系统安全随机
+
+仅需启用 `secure-random`，不需要 `aes` 或 `rand`。它独立于非密码学 `RandomUtils`，使用
+系统随机源；数字采用拒绝采样，保留前导零。零长度直接返回空结果且不访问随机源。
+
+```rust
+use axutils::utils::CryptoUtils;
+
+let bytes = CryptoUtils::secure_random_bytes(16)?;
+let digits = CryptoUtils::secure_random_digits(6)?;
+let token = CryptoUtils::secure_random_hex(16)?;
+assert_eq!(bytes.len(), 16);
+assert_eq!(digits.len(), 6);
+assert!(digits.bytes().all(|byte| byte.is_ascii_digit()));
+assert_eq!(token.len(), 32);
+assert!(token.bytes().all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)));
+assert_eq!(CryptoUtils::secure_random_hex(0)?, "");
+# Ok::<(), axutils::crypto::CryptoError>(())
+```
+
+随机源失败返回 `CryptoError::RandomSource`，不回传底层原始错误，不 panic、不降级、不返回部分
+结果；长度溢出及可报告的容量预留失败返回 `OutputTooLarge`。系统随机源可能阻塞，业务长度上限
+由调用方设置；库不规定媒体键格式或其他业务标识协议。输出由调用方持有，内容不自动清零。

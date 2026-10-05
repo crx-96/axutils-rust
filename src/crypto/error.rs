@@ -84,12 +84,14 @@ pub enum CryptoError {
     #[cfg(feature = "aes")]
     Encrypt,
     /// 操作系统随机源不可用。
-    #[cfg(feature = "aes")]
+    #[cfg(any(feature = "aes", feature = "secure-random"))]
     RandomSource,
 }
 
 impl fmt::Display for CryptoError {
+    /// 仅格式化稳定错误分类及非敏感元数据，不包含底层随机源或加密库的原始错误。
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // 按能力 gate 输出对应分类，避免透传上游诊断中的原始数据。
         match self {
             Self::OddHexLength { length } => write!(f, "hex string has odd length {length}"),
             Self::InvalidHex { position } => {
@@ -143,7 +145,7 @@ impl fmt::Display for CryptoError {
             Self::Decrypt => write!(f, "decryption failed"),
             #[cfg(feature = "aes")]
             Self::Encrypt => write!(f, "encryption failed"),
-            #[cfg(feature = "aes")]
+            #[cfg(any(feature = "aes", feature = "secure-random"))]
             Self::RandomSource => write!(f, "operating system random source unavailable"),
         }
     }

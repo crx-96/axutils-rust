@@ -37,7 +37,9 @@ use axutils::{
 | `time` | `axutils::time::*`、`axutils::utils::TimeUtils` | Unix 时间戳、格式模板和固定偏移支持类型 |
 | `crypto` | `axutils::crypto::{CryptoError, TextEncoding}`、`axutils::utils::CryptoUtils` | Hex 与 UTF-8 文本编解码 |
 | `convert` | `axutils::convert`、`axutils::utils::ConvertUtils` | feature 控制的数值/UUID 转换 façade |
-| `utils` | `FormatUtils`、`PathUtils` | 持续时间/脱敏格式化与词法路径操作 |
+| `utils` | `FormatUtils`、`PathUtils` | 持续时间/脱敏格式化、HTML 转义、字面标记替换与词法路径操作 |
+| `tree` | `build_forest`、`TreeNode`、`TreeBuildError` | 泛型 ID/排序森林构建、全节点校验与可失败后序转换 |
+| `concurrency` | `KeyedAdmission`、`KeyedPermit`、`AdmissionError` | 进程内按键互斥准入与总容量约束 |
 
 对应文档：
 
@@ -47,6 +49,8 @@ use axutils::{
 - [转换](examples/convert.md)
 - [格式化](examples/format.md)
 - [路径](examples/path.md)
+- [树与森林](examples/tree.md)
+- [按键并发准入](examples/concurrency.md)
 
 ## 能力 feature
 
@@ -59,6 +63,7 @@ use axutils::{
 | `zmij` | `FloatFormat::Zmij` | `zmij` |
 | `uuid` | UUID 解析、格式化与 `UuidBuffer` | `uuid` |
 | `rand` | `RandomUtils`、`LetterCase`、`RandomRangeError` | `rand` |
+| `secure-random` | `CryptoUtils::secure_random_bytes/digits/hex` | `getrandom` |
 | `regex` | 邮箱和中国大陆手机号校验 | `regex` |
 | `phone-validation` | 国际手机号校验，同时包含 `regex` | `phonenumber` |
 | `template-strfmt` | Strfmt 模板 | `serde`、`serde_json`、`strfmt` |
@@ -102,6 +107,9 @@ use axutils::{
 | `sqlx-postgres` / `sqlx-mysql` / `sqlx-sqlite` | SQLx Any、Tokio runtime 与一个 driver |
 | `sqlx` | 聚合三个 SQLx driver |
 
+任一 SQLx driver 提供 `SqlxError::is_infrastructure_unavailable`；仅 `sqlx-postgres` 开放
+`is_postgres_transaction_conflict`，分类本身不执行重试，也不代表业务可安全重试。
+
 详见 [邮件](examples/email.md)、[HTTP](examples/http.md)、[Redis](examples/redis.md) 和
 [SQLx](examples/sqlx.md)。
 
@@ -109,7 +117,7 @@ use axutils::{
 
 | Feature | 契约 |
 | --- | --- |
-| `tokio` | 只开放 Tokio runtime、任务、channel、timeout 与 shutdown 工具 |
+| `tokio` | 只开放 Tokio runtime、任务、channel、timeout 与 shutdown 工具，含 Drop 请求 abort 的 `TokioTaskGuard` |
 | `task-group` | 包含 `tokio`，增加基于 `tokio-util` 的任务组 |
 | `scheduler` | 一次启用 Tokio、Chrono、IANA 时区和 Croner 的完整调度能力 |
 | `axum` | 基础 Axum HTTP/1 server 与最小 runtime |
@@ -126,6 +134,8 @@ use axutils::{
 | `convert` | `IntegerBuffer`、`FloatBuffer`、`FloatFormat`、`UuidBuffer` | `ConvertUtils` | 模块默认；方法按转换 feature |
 | `crypto` | `CryptoError`、`TextEncoding`、`Base64Options`、`AesKey`、`AesMode`、`AesCipher` | `CryptoUtils` | 基线 + 对应后端 feature |
 | `fs` | `FsError`、传输类型、临时资源类型 | `FsUtils` | 同步基线；异步/临时按 feature |
+| `tree` | `TreeNode`、`TreeBuildError` 与 `build_forest` | 无 | 默认 |
+| `concurrency` | `KeyedAdmission`、`KeyedPermit`、`AdmissionError` | 无 | 默认 |
 | `time` | `TimeError`、`TimeZoneOffset`、模板支持类型 | `TimeUtils` | 时间戳基线；后端按 feature |
 | `config` | `ConfigLoader`、`ConfigFormat`、`ConfigValue`、`ConfigError` | `ConfigUtils` | `config` |
 | `email` | `EmailClient`、配置、消息、错误 | `EmailUtils` | `email` |
@@ -133,7 +143,7 @@ use axutils::{
 | `jwt` | `JwtCodec`、Key、配置、验证、错误 | `JwtUtils` | `jwt` |
 | `redis` | `RedisClient`、配置、事务、锁、错误 | `RedisUtils` | `redis` |
 | `sqlx` | `SqlxClient`、配置、row/result/transaction 别名、错误 | `SqlxUtils` | 任一 SQLx driver |
-| `tokio` | `TokioConfig`、shutdown 类型；`TokioTaskGroup` 需 `task-group` | `TokioUtils` | `tokio`；任务组按 `task-group` |
+| `tokio` | `TokioConfig`、`TokioTaskGuard`、shutdown 类型；`TokioTaskGroup` 需 `task-group` | `TokioUtils` | `tokio`；任务组按 `task-group` |
 | `scheduler` | `Scheduler`、配置、Schedule、TaskId、错误 | `SchedulerUtils` | `scheduler` |
 | `axum` | `AxumApp`、Server/Builder、配置与关闭类型；中间件类型按扩展 feature | `AxumUtils` | 基础 `axum`；扩展按 `axum-*` |
 | `logging` | `LogConfig`、level、file/rotation、错误 | `LogUtils` | `logging` |

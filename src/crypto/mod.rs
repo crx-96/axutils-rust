@@ -11,6 +11,9 @@
 //! 密钥存储/轮换/封装策略或流式/文件接口；启用 `aes` 后，`AesCipher` 提供实例级可控密钥
 //! 生命周期，`CryptoUtils` 的全局 AES 便捷入口则使用进程级单例。错误不回显明文、密文、密钥、
 //! IV 或原始文本内容。
+//!
+//! `secure-random` 提供可失败的系统安全随机字节、数字字符串与小写 Hex 字符串；
+//! 它独立于非密码学 `RandomUtils`，不需要启用 AES 或 `rand`。
 
 #[cfg(feature = "aes")]
 mod aes;
@@ -23,6 +26,8 @@ pub(crate) mod facade;
 mod hex;
 #[cfg(feature = "md5")]
 mod md5;
+#[cfg(feature = "secure-random")]
+mod random;
 mod text;
 
 pub use error::CryptoError;

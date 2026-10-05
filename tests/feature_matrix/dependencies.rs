@@ -1,5 +1,14 @@
 use super::support::{assert_tree_cache_budget, has_package, tree, tree_with};
 
+pub(super) fn common_capabilities() {
+    baseline();
+    let random = tree("secure-random");
+    assert_has(&random, "getrandom", "secure-random");
+    for package in ["rand", "aes", "tokio", "sqlx", "serde"] {
+        assert_absent(&random, package, "secure-random");
+    }
+}
+
 pub(super) fn baseline() {
     let tree = tree("");
     let non_empty_lines = tree

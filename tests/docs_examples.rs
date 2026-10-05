@@ -22,6 +22,7 @@ const VALID_AXUTILS_FEATURES: &[&str] = &[
     "tracing",
     "logging",
     "rand",
+    "secure-random",
     "regex",
     "phone-validation",
     "template-strfmt",
@@ -163,6 +164,14 @@ const DEP_SERDE: DirectDependency = DirectDependency {
     default_features: true,
     features: &["derive"],
 };
+
+const DEP_SQLX: DirectDependency = DirectDependency {
+    name: "sqlx",
+    package: None,
+    version: "0.9.0",
+    default_features: false,
+    features: &[],
+};
 const DEP_TOKIO_MACROS: DirectDependency = DirectDependency {
     name: "tokio",
     package: None,
@@ -275,6 +284,7 @@ const DOCUMENT_METADATA: &[DocumentMetadata] = &[
             block(4, settings(&["md5"], NO_DEPS)),
             block(5, settings(&["aes"], NO_DEPS)),
             block(6, settings(&["aes"], NO_DEPS)),
+            block(7, settings(&["secure-random"], NO_DEPS)),
         ],
     ),
     document(
@@ -291,6 +301,8 @@ const DOCUMENT_METADATA: &[DocumentMetadata] = &[
         &[block(3, settings(&["template-minijinja"], SERDE_DEP))],
     ),
     document("docs/examples/path.md", settings(&[], NO_DEPS), &[]),
+    document("docs/examples/tree.md", settings(&[], NO_DEPS), &[]),
+    document("docs/examples/concurrency.md", settings(&[], NO_DEPS), &[]),
     document("docs/examples/random.md", settings(&["rand"], NO_DEPS), &[]),
     document(
         "docs/examples/reg.md",
@@ -336,7 +348,10 @@ const DOCUMENT_METADATA: &[DocumentMetadata] = &[
     document(
         "docs/examples/sqlx.md",
         settings(&["sqlx-postgres"], NO_DEPS),
-        &[block(4, settings(&["sqlx-sqlite"], NO_DEPS))],
+        &[
+            block(4, settings(&["sqlx-sqlite"], NO_DEPS)),
+            block(6, settings(&["sqlx-postgres"], &[DEP_SQLX])),
+        ],
     ),
     document(
         "docs/examples/tokio.md",

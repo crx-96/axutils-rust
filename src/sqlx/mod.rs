@@ -14,6 +14,8 @@ mod config;
 mod driver;
 mod error;
 pub(crate) mod global;
+#[cfg(feature = "sqlx-postgres")]
+mod postgres;
 
 use sqlx::any::{AnyQueryResult, AnyRow};
 use sqlx::{Any, Transaction};
@@ -21,6 +23,8 @@ use sqlx::{Any, Transaction};
 pub use client::SqlxClient;
 pub use config::SqlxConfig;
 pub use error::{SqlxError, SqlxTransportErrorKind};
+#[cfg(feature = "sqlx-postgres")]
+pub use postgres::is_postgres_transaction_conflict;
 
 /// SQLx Any driver 返回的原生结果行。
 pub type SqlxRow = AnyRow;

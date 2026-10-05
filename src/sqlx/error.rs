@@ -31,7 +31,9 @@ pub enum SqlxTransportErrorKind {
 }
 
 impl fmt::Display for SqlxTransportErrorKind {
+    /// 输出固定分类 token，不包含底层错误消息或连接信息。
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // 将各分类映射为稳定的非敏感文本，供调用方安全展示或记录。
         formatter.write_str(match self {
             Self::Connection => "connection",
             Self::Timeout => "timeout",
@@ -88,7 +90,38 @@ pub enum SqlxError {
 }
 
 impl SqlxError {
+    /// 判断错误是否属于本库明确识别的基础设施不可用类别。
+    ///
+    /// 仅连接池获取超时、连接池关闭以及底层传输的超时和网络错误返回 `true`。
+    /// 配置、认证/TLS、协议、服务端响应、约束冲突、行不存在、编码和解码错误
+    /// 不会被泛化为基础设施不可用；`false` 也不证明基础设施健康。
+    /// 此方法只查询已有分类，不执行 I/O，也不保证当前业务操作可以安全重试。
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use axutils::sqlx::{SqlxError, SqlxTransportErrorKind};
+    ///
+    /// assert!(SqlxError::PoolClosed.is_infrastructure_unavailable());
+    /// assert!(SqlxError::Transport(SqlxTransportErrorKind::Network)
+    ///     .is_infrastructure_unavailable());
+    /// assert!(!SqlxError::RowNotFound.is_infrastructure_unavailable());
+    /// ```
+    pub fn is_infrastructure_unavailable(&self) -> bool {
+        // 仅列举约定的四类，避免把查询、数据或协议错误误报为基础设施故障。
+        matches!(
+            self,
+            Self::PoolAcquireTimeout
+                | Self::PoolClosed
+                | Self::Transport(
+                    SqlxTransportErrorKind::Timeout | SqlxTransportErrorKind::Network
+                )
+        )
+    }
+
+    /// 将原生 SQLx 错误收敛为固定分类，不保留其原始内容或错误链。
     pub(crate) fn from_upstream(error: &sqlx::Error) -> Self {
+        // 优先识别连接池、结果与事务错误，再将传输失败降为稳定且脱敏的类别。
         match error {
             BackendError::RowNotFound => Self::RowNotFound,
             BackendError::PoolTimedOut => Self::PoolAcquireTimeout,
@@ -97,6 +130,7 @@ impl SqlxError {
                 Self::TransactionFailed
             }
             BackendError::Io(error) => {
+                // 只读取 I/O 类型；超时独立于其他网络故障，不复制系统错误文本。
                 Self::Transport(if error.kind() == io::ErrorKind::TimedOut {
                     SqlxTransportErrorKind::Timeout
                 } else {
@@ -120,7 +154,9 @@ impl SqlxError {
 }
 
 impl fmt::Display for SqlxError {
+    /// 输出本库错误类别和公开预算，不格式化任何第三方错误对象。
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // 每个变体只产生固定文本或调用方可见的本地限制值。
         match self {
             Self::InvalidConfig { field } => {
                 write!(formatter, "invalid SQLx configuration field: {field}")

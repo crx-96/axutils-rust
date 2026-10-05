@@ -6,6 +6,70 @@ use super::{
 const OK: &[&str] = &[];
 
 #[test]
+#[ignore = "common capabilities feature/API and dependency isolation matrix"]
+fn common_capability_matrix() {
+    run_fixture_cases(
+        "common-capabilities",
+        &[
+            FixtureCase {
+                feature: "",
+                expected_success: true,
+                diagnostic_tokens: OK,
+            },
+            FixtureCase {
+                feature: "secure-random",
+                expected_success: true,
+                diagnostic_tokens: OK,
+            },
+            FixtureCase {
+                feature: "tokio",
+                expected_success: true,
+                diagnostic_tokens: OK,
+            },
+            FixtureCase {
+                feature: "sqlx-postgres",
+                expected_success: true,
+                diagnostic_tokens: OK,
+            },
+            FixtureCase {
+                feature: "negative-secure-random",
+                expected_success: false,
+                diagnostic_tokens: &[
+                    "secure_random_bytes",
+                    "secure_random_digits",
+                    "secure_random_hex",
+                ],
+            },
+            FixtureCase {
+                feature: "negative-secure-random-rand",
+                expected_success: false,
+                diagnostic_tokens: &[
+                    "secure_random_bytes",
+                    "secure_random_digits",
+                    "secure_random_hex",
+                ],
+            },
+            FixtureCase {
+                feature: "negative-task-guard",
+                expected_success: false,
+                diagnostic_tokens: &["tokio"],
+            },
+            FixtureCase {
+                feature: "negative-postgres-classifier-mysql",
+                expected_success: false,
+                diagnostic_tokens: &["is_postgres_transaction_conflict"],
+            },
+            FixtureCase {
+                feature: "negative-postgres-classifier-sqlite",
+                expected_success: false,
+                diagnostic_tokens: &["is_postgres_transaction_conflict"],
+            },
+        ],
+    );
+    dependencies::common_capabilities();
+}
+
+#[test]
 #[ignore = "下游 HTTP 压缩 feature 合并与 loopback 响应契约"]
 fn http_downstream_compression_contract() {
     support::run_http_compression_contract();

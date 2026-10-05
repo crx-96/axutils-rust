@@ -1,5 +1,8 @@
 #![cfg(feature = "tokio")]
 
+#[path = "tokio/task_guard.rs"]
+mod task_guard;
+
 use axutils::{
     tokio::{TokioConfig, TokioError, TokioRuntimeFlavor},
     utils::TokioUtils,

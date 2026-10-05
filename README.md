@@ -67,7 +67,9 @@ feature 只保证其自身所需的最小 runtime 能力，不替应用选择执
 - `PathUtils`：词法路径组合、当前目录与可执行文件路径；
 - `FsUtils`：同步文件/目录、受限读取与同步流式传输；
 - `TimeUtils`：Unix 时间戳；
-- `FormatUtils`：持续时间与字符串脱敏；
+- `FormatUtils`：持续时间、字符串脱敏、HTML 转义与单次字面标记替换；
+- `tree`：泛型森林构建、结构校验与后序转换；
+- `concurrency`：按键准入与 Drop 释放占用；
 - `CryptoUtils`：Hex；
 - `TextEncoding::Utf8`；
 - `ConvertUtils` 类型本身（具体转换方法由 feature 开放）。
@@ -97,6 +99,7 @@ assert!(seconds > 0);
 | `ryu` / `zmij` | 两种显式选择的浮点格式化后端 |
 | `uuid` | UUID 解析与格式化 |
 | `rand` | ASCII 字符串和有界数值随机能力 |
+| `secure-random` | 可失败的系统安全随机字节、数字与小写 Hex 字符串 |
 | `regex` | 邮箱和中国大陆手机号校验 |
 | `phone-validation` | 国际手机号校验；包含 `regex` |
 | `template-strfmt` | Strfmt 模板 |

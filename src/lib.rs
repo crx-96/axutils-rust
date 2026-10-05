@@ -20,10 +20,12 @@
 #[cfg(feature = "tracing")]
 mod telemetry;
 
+pub mod concurrency;
 pub mod convert;
 pub mod crypto;
 pub mod fs;
 pub mod time;
+pub mod tree;
 pub mod utils;
 
 #[cfg(feature = "config")]
