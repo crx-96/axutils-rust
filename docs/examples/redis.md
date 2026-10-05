@@ -17,14 +17,14 @@ Redis 是显式分层的领域能力。客户端、配置、错误、事务与�
 
 ```toml
 [dependencies]
-axutils = { version = "1.0", features = ["redis"] }
+axutils = { version = "1.1", features = ["redis"] }
 ```
 
 异步 Cluster：
 
 ```toml
 [dependencies]
-axutils = { version = "1.0", features = ["redis-cluster-async"] }
+axutils = { version = "1.1", features = ["redis-cluster-async"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 serde = { version = "1", features = ["derive"] }
 ```

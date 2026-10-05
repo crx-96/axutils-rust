@@ -9,7 +9,7 @@
 
 ```toml
 [dependencies]
-axutils = { version = "1.0", features = ["template-minijinja"] }
+axutils = { version = "1.1", features = ["template-minijinja"] }
 serde = { version = "1", features = ["derive"] }
 ```
 

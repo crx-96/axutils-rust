@@ -16,14 +16,14 @@ HTTP 是显式启用的客户端领域；类型和错误都从 `axutils::http` �
 
 ```toml
 [dependencies]
-axutils = { version = "1.0", features = ["http"] }
+axutils = { version = "1.1", features = ["http"] }
 ```
 
 异步 JSON 客户端：
 
 ```toml
 [dependencies]
-axutils = { version = "1.0", features = ["http-async", "http-json"] }
+axutils = { version = "1.1", features = ["http-async", "http-json"] }
 serde = { version = "1", features = ["derive"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```

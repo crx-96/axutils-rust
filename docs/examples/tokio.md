@@ -5,7 +5,7 @@
 
 ```toml
 [dependencies]
-axutils = { version = "1.0", features = ["tokio"] }
+axutils = { version = "1.1", features = ["tokio"] }
 ```
 
 部分公共签名保留 Tokio 原生的 `Handle`、`Runtime`、`mpsc` 和 `JoinHandle` 类型；应用若要在
@@ -50,7 +50,7 @@ async fn bounded_wait() -> Result<(), TokioError> {
 
 ```toml
 [dependencies]
-axutils = { version = "1.0", features = ["task-group"] }
+axutils = { version = "1.1", features = ["task-group"] }
 ```
 
 ```rust,no_run

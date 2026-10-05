@@ -5,7 +5,7 @@
 
 ```toml
 [dependencies]
-axutils = { version = "1.0", features = ["scheduler"] }
+axutils = { version = "1.1", features = ["scheduler"] }
 tokio = { version = "1", features = ["rt-multi-thread", "time"] }
 ```
 

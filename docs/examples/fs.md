@@ -12,14 +12,14 @@
 
 ```toml
 [dependencies]
-axutils = "1.0"
+axutils = "1.1"
 ```
 
 异步一般文件操作、同步临时资源和异步临时资源分别是独立能力：
 
 ```toml
 [dependencies]
-axutils = { version = "1.0", default-features = false, features = [
+axutils = { version = "1.1", default-features = false, features = [
     "fs-async",      # 完整的带 _async 后缀的 FS 操作
     "fs-temp",       # 同步临时文件和目录
     "fs-temp-async", # 仅异步临时文件和目录

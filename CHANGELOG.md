@@ -3,7 +3,7 @@
 本文件仅记录 `axutils` 各版本的源码、公共 API、运行时行为、错误与安全边界，以及面向使用者的兼容性变化。
 每次修改或增加功能时，先读取 `Cargo.toml` 中的 `[package].version`，再在对应版本条目中补充记录。
 
-## [1.0.0]
+## [1.1.0]
 
 ### Added
 
@@ -20,6 +20,18 @@
 - `sqlx-postgres` 新增原生 SQLx 错误的 `is_postgres_transaction_conflict`，识别 40001/40P01；
   任一 SQLx driver 新增 `SqlxError::is_infrastructure_unavailable`，仅分类既定的池/网络/超时错误。
   分类不执行或保证业务可安全重试，也不额外暴露数据库诊断。
+
+### Fixed
+
+- Scheduler 在注册阶段拒绝无法表示的一次/固定间隔首次 deadline，返回 `InvalidSchedule` 且
+  不占用任务名额；首次 deadline 从注册时刻计算，避免后台时间加法溢出或启动延迟重置计时。
+- HTTP 异步入口显式关闭 gzip、Brotli、deflate 和 Zstd 自动解压，保留下游 reqwest feature
+  合并后的原始压缩响应。同步入口保留 ureq：明确下游启用其 gzip/Brotli feature 时会解压响应、
+  移除编码/长度 Header，且将读取上限放在解压后的流上，避免合规的小响应因压缩帧开销被截断。
+
+## [1.0.0]
+
+### Added
 
 - 新增稳定的领域模块与工具入口：领域 Client、配置、错误和模型使用
   `axutils::<domain>::Type`，所有 `*Utils` 与工具支持类型使用 `axutils::utils::Type`；新增公开
@@ -298,11 +310,6 @@
 
 ### Fixed
 
-- Scheduler 在注册阶段拒绝无法表示的一次/固定间隔首次 deadline，返回 `InvalidSchedule` 且
-  不占用任务名额；首次 deadline 从注册时刻计算，避免后台时间加法溢出或启动延迟重置计时。
-- HTTP 异步入口显式关闭 gzip、Brotli、deflate 和 Zstd 自动解压，保留下游 reqwest feature
-  合并后的原始压缩响应。同步入口保留 ureq：明确下游启用其 gzip/Brotli feature 时会解压响应、
-  移除编码/长度 Header，且将读取上限放在解压后的流上，避免合规的小响应因压缩帧开销被截断。
 - JSON 无类型解析会关闭 `serde_json` 较小的默认递归限制，严格执行 `ConfigLoader` 的
   `max_depth` 1–256 预算；超过预算稳定返回 `DepthLimitExceeded`，不再在 128 层处提前落入
   通用解析错误。JSON 有类型解析仍保留重复键预扫描和后端递归保护。
@@ -343,7 +350,7 @@
   或地址。
 - HTTP 只接受 HTTP/HTTPS URL，拒绝用户信息、Header 注入和超限请求/响应；同步入口拒绝在 Tokio runtime
   中阻塞，异步入口要求调用方提供 runtime；错误不回显 URL、Header 值、请求体、响应体或第三方传输文本。
-- HTTP 默认不启用压缩能力，关闭代理、重定向和隐式重试；同步端的下游解压边界见本版本 Fixed。
+- HTTP 默认不启用压缩能力，关闭代理、重定向和隐式重试；同步端的下游解压边界见 1.1.0 Fixed。
   默认只对 GET/HEAD/OPTIONS 重试有限的传输失败与瞬态
   状态码，非幂等方法必须显式允许。完成缓存只保存满足安全 Header、请求/响应缓存指令约束的 2xx GET/HEAD。
 - 不支持明文 SMTP、机会式 STARTTLS、跳过证书校验、自签名证书、企业私有 CA relay、附件、抄送/密送、

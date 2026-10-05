@@ -7,7 +7,7 @@ HTTP trace 还需组合 `tracing`。`axum-governor` 提供 Governor 限流。这
 
 ```toml
 [dependencies]
-axutils = { version = "1.0", features = ["axum", "axum-tower-http"] }
+axutils = { version = "1.1", features = ["axum", "axum-tower-http"] }
 ```
 
 路由与 layer 的公共签名保留 Axum/Tower 原生类型。应用若要命名 `Router`、注册 route 或直接组合

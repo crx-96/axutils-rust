@@ -25,7 +25,7 @@ assert!(nanoseconds >= microseconds * 1_000);
 
 ```toml
 [dependencies]
-axutils = { version = "1.0", features = ["chrono", "time", "jiff"] }
+axutils = { version = "1.1", features = ["chrono", "time", "jiff"] }
 chrono = { version = "0.4", default-features = false }
 time = { version = "0.3", default-features = false }
 jiff = { version = "0.2", default-features = false }

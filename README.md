@@ -4,7 +4,7 @@
 第三方正常依赖；网络、异步、数据库、配置后端、模板和加密后端均按需启用。
 
 - MSRV：Rust 1.95
-- 当前 crate 版本：`1.0.0`
+- 当前 crate 版本：`1.1.0`
 - Edition：2021
 - 默认 feature：`[]`
 
@@ -43,7 +43,7 @@ use axutils::{
 
 ```toml
 [dependencies]
-axutils = { version = "1.0", default-features = false }
+axutils = { version = "1.1", default-features = false }
 ```
 
 按能力组合：
@@ -51,7 +51,7 @@ axutils = { version = "1.0", default-features = false }
 ```toml
 [dependencies]
 axutils = {
-    version = "1.0",
+    version = "1.1",
     default-features = false,
     features = ["config-yaml", "http-async", "http-json", "redis-async"]
 }
