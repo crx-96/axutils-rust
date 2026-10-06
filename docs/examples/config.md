@@ -13,7 +13,7 @@
 
 ```toml
 [dependencies]
-axutils = { version = "1.1", default-features = false, features = [
+axutils = { version = "1.2", default-features = false, features = [
     "config",       # JSON 与 .env
     "config-yaml",  # 同时包含 config
     "config-toml",  # 同时包含 config

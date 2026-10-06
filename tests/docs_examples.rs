@@ -39,6 +39,7 @@ const VALID_AXUTILS_FEATURES: &[&str] = &[
     "redis-cluster",
     "redis-async",
     "redis-cluster-async",
+    "redis-invalidation",
     "sqlx",
     "sqlx-postgres",
     "sqlx-mysql",
@@ -186,6 +187,13 @@ const DEP_TOKIO_SCHEDULER: DirectDependency = DirectDependency {
     default_features: false,
     features: &["rt-multi-thread", "time"],
 };
+const DEP_TOKIO_INVALIDATION: DirectDependency = DirectDependency {
+    name: "tokio",
+    package: None,
+    version: "1",
+    default_features: false,
+    features: &["macros", "rt-multi-thread", "time", "net"],
+};
 const DEP_TRACING: DirectDependency = DirectDependency {
     name: "tracing",
     package: None,
@@ -208,6 +216,7 @@ const JIFF_DEP: &[DirectDependency] = &[DEP_JIFF];
 const SERDE_DEP: &[DirectDependency] = &[DEP_SERDE];
 const TOKIO_MACROS_DEP: &[DirectDependency] = &[DEP_TOKIO_MACROS];
 const TOKIO_SCHEDULER_DEP: &[DirectDependency] = &[DEP_TOKIO_SCHEDULER];
+const TOKIO_INVALIDATION_DEP: &[DirectDependency] = &[DEP_TOKIO_INVALIDATION];
 const TRACING_DEP: &[DirectDependency] = &[DEP_TRACING];
 const UUID_DEP: &[DirectDependency] = &[DEP_UUID];
 const HTTP_ASYNC_DEPS: &[DirectDependency] = &[DEP_SERDE, DEP_TOKIO_MACROS];
@@ -343,6 +352,10 @@ const DOCUMENT_METADATA: &[DocumentMetadata] = &[
             block(4, settings(&["redis-cluster"], NO_DEPS)),
             block(8, settings(&["redis-async"], TOKIO_MACROS_DEP)),
             block(10, settings(&["redis-async"], TOKIO_MACROS_DEP)),
+            block(
+                12,
+                settings(&["redis-invalidation"], TOKIO_INVALIDATION_DEP),
+            ),
         ],
     ),
     document(

@@ -1,6 +1,6 @@
 [package]
 name = "axutils"
-version = "1.1.0"
+version = "1.2.0"
 edition = "2021"
 rust-version = "1.95"
 resolver = "3"
@@ -55,6 +55,7 @@ features = [
     "redis-cluster",
     "redis-async",
     "redis-cluster-async",
+    "redis-invalidation",
     "sqlx",
     "tokio",
     "task-group",
@@ -140,6 +141,7 @@ redis-cluster-async = [
     "redis-async",
     "redis/cluster-async",
 ]
+redis-invalidation = ["redis-async", "tokio"]
 sqlx-postgres = [
     "dep:sqlx",
     "dep:futures-util",

@@ -6,14 +6,14 @@ SQLx 能力按实际数据库 driver 选择。只启用一个 driver 可减少�
 ```toml
 [dependencies]
 # 三选一：sqlx-postgres、sqlx-mysql 或 sqlx-sqlite
-axutils = { version = "1.1", features = ["sqlx-postgres"] }
+axutils = { version = "1.2", features = ["sqlx-postgres"] }
 ```
 
 使用全部 driver 时：
 
 ```toml
 [dependencies]
-axutils = { version = "1.1", features = ["sqlx"] }
+axutils = { version = "1.2", features = ["sqlx"] }
 ```
 
 `SqlxConfig` 可在本地解析 PostgreSQL、MySQL/MariaDB 与 SQLite URL scheme；这不代表每种连接都

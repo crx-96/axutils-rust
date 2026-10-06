@@ -61,7 +61,9 @@ pub(crate) fn record_connection(
     }
 }
 
-fn error_kind(error: &RedisError) -> &'static str {
+/// 将库内 Redis 错误映射为稳定分类，供命令与失效队列事件复用，不读取原始响应。
+pub(super) fn error_kind(error: &RedisError) -> &'static str {
+    // 仅选择固定标签；资源上限、命令参数和连接配置不进入诊断字段。
     match error {
         RedisError::InvalidConfig { .. } => "invalid_config",
         RedisError::InvalidKey => "invalid_key",

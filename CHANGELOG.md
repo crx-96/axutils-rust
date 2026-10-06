@@ -3,6 +3,18 @@
 本文件仅记录 `axutils` 各版本的源码、公共 API、运行时行为、错误与安全边界，以及面向使用者的兼容性变化。
 每次修改或增加功能时，先读取 `Cargo.toml` 中的 `[package].version`，再在对应版本条目中补充记录。
 
+## [1.2.0]
+
+### Added
+
+- 新增独立 `redis-invalidation` feature，开放
+  `redis::{RedisInvalidationQueue, RedisInvalidationConfig, RedisInvalidationEnqueue}`：显式注入
+  `RedisClient`，按键去重、待处理容量、数量/UTF-8 键字节分批，以及调用方配置的超时和有限退避重试。
+  同键再次入队刷新重试预算，旧失败不覆盖新请求；容量不计在途批次，满队列拒绝新键，重试回队满时
+  丢弃。worker 惰性启动，需要启动但无 runtime 时返回分类错误并保留待处理键，最后拥有者释放请求 abort；
+  不保证持久投递、强一致或超时/取消后命令未执行。该 feature 包含 `redis-async + tokio`，不改变默认依赖树。
+  每批处理后让出执行权，避免本地立即失败与零退避重试持续占用 runtime 线程。
+
 ## [1.1.0]
 
 ### Added

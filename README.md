@@ -4,7 +4,7 @@
 第三方正常依赖；网络、异步、数据库、配置后端、模板和加密后端均按需启用。
 
 - MSRV：Rust 1.95
-- 当前 crate 版本：`1.1.0`
+- 当前 crate 版本：`1.2.0`
 - Edition：2021
 - 默认 feature：`[]`
 
@@ -43,7 +43,7 @@ use axutils::{
 
 ```toml
 [dependencies]
-axutils = { version = "1.1", default-features = false }
+axutils = { version = "1.2", default-features = false }
 ```
 
 按能力组合：
@@ -51,7 +51,7 @@ axutils = { version = "1.1", default-features = false }
 ```toml
 [dependencies]
 axutils = {
-    version = "1.1",
+    version = "1.2",
     default-features = false,
     features = ["config-yaml", "http-async", "http-json", "redis-async"]
 }
@@ -129,12 +129,17 @@ assert!(seconds > 0);
 | `redis-cluster` | 同步 Cluster |
 | `redis-async` | 异步单机 |
 | `redis-cluster-async` | 异步 Cluster |
+| `redis-invalidation` | 显式 RedisClient 的进程内去重失效队列；包含 `redis-async + tokio` |
 | `sqlx-postgres` / `sqlx-mysql` / `sqlx-sqlite` | SQLx Any + 单 driver |
 | `sqlx` | 聚合三个 SQLx driver |
 
 异步 JSON HTTP 组合为 `http-async + http-json`。Redis 四层 feature 互不偷带能力：
 `redis-cluster + redis-async` 同时具有同步 Cluster 和异步单机 API，但只有
 `redis-cluster-async` 开放异步 Cluster 后端。
+
+`redis-invalidation` 按调用方配置限制待处理键数、批次、超时和有限退避重试；容量不包含在途批次。
+应用保留缓存键、业务提交时机与失败处理策略，队列不提供持久投递或强一致性。详见
+[Redis 缓存失效队列](docs/examples/redis.md#缓存失效队列)。
 
 ### Runtime 与服务
 

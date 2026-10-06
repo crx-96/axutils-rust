@@ -104,6 +104,7 @@ use axutils::{
 | `redis-cluster` | 包含 `redis`，增加同步 Cluster |
 | `redis-async` | 包含 `redis`，增加异步单机连接管理 |
 | `redis-cluster-async` | 包含 `redis-cluster + redis-async`，增加异步 Cluster |
+| `redis-invalidation` | 包含 `redis-async + tokio`，增加显式 client 的有界去重失效队列与有限退避重试 |
 | `sqlx-postgres` / `sqlx-mysql` / `sqlx-sqlite` | SQLx Any、Tokio runtime 与一个 driver |
 | `sqlx` | 聚合三个 SQLx driver |
 
@@ -141,7 +142,7 @@ use axutils::{
 | `email` | `EmailClient`、配置、消息、错误 | `EmailUtils` | `email` |
 | `http` | `HttpClient`、请求/响应、配置、策略、错误 | `HttpUtils` | `http` |
 | `jwt` | `JwtCodec`、Key、配置、验证、错误 | `JwtUtils` | `jwt` |
-| `redis` | `RedisClient`、配置、事务、锁、错误 | `RedisUtils` | `redis` |
+| `redis` | `RedisClient`、配置、事务、锁、错误；`RedisInvalidationQueue` 及其配置与投递结果按能力开放 | `RedisUtils` | `redis`；失效队列需 `redis-invalidation` |
 | `sqlx` | `SqlxClient`、配置、row/result/transaction 别名、错误 | `SqlxUtils` | 任一 SQLx driver |
 | `tokio` | `TokioConfig`、`TokioTaskGuard`、shutdown 类型；`TokioTaskGroup` 需 `task-group` | `TokioUtils` | `tokio`；任务组按 `task-group` |
 | `scheduler` | `Scheduler`、配置、Schedule、TaskId、错误 | `SchedulerUtils` | `scheduler` |

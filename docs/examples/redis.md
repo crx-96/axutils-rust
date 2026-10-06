@@ -12,19 +12,20 @@ Redis 是显式分层的领域能力。客户端、配置、错误、事务与�
 | 同步 Cluster | `redis-cluster` | 包含 `redis`，追加 Cluster 后端。 |
 | 单机异步 | `redis-async` | 包含 `redis`，追加 `_async` 方法和连接管理。 |
 | 异步 Cluster | `redis-cluster-async` | 包含 Cluster 与异步能力。 |
+| 进程内缓存失效队列 | `redis-invalidation` | 包含 `redis-async + tokio`，显式注入客户端。 |
 
 单机同步：
 
 ```toml
 [dependencies]
-axutils = { version = "1.1", features = ["redis"] }
+axutils = { version = "1.2", features = ["redis"] }
 ```
 
 异步 Cluster：
 
 ```toml
 [dependencies]
-axutils = { version = "1.1", features = ["redis-cluster-async"] }
+axutils = { version = "1.2", features = ["redis-cluster-async"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 serde = { version = "1", features = ["derive"] }
 ```
@@ -206,3 +207,107 @@ async fn main() -> Result<(), RedisError> {
 `RedisError::AlreadyInitialized`，未初始化调用 `client()` 返回 `RedisError::NotInitialized`。初始化
 失败不会占用全局槽。真实服务不可用、连接、认证、超时和协议失败均作为稳定分类的 `RedisError` 返回；
 不要把错误文本当作 Redis 服务端诊断或凭据记录载体。
+
+## 缓存失效队列
+
+`RedisInvalidationQueue` 将调用方给出的缓存键去重后交给后台 worker，以 `delete_many_async` 删除。
+它只管理进程内失效请求，不生成业务键，不读取应用配置，也不合并缓存读取或回填流程。
+`RedisInvalidationConfig` 和 `RedisInvalidationEnqueue` 与队列一起从 `axutils::redis` 导入。
+
+```toml
+[dependencies]
+axutils = { version = "1.2", default-features = false, features = ["redis-invalidation"] }
+tokio = { version = "1", default-features = false, features = ["macros", "rt-multi-thread", "time", "net"] }
+```
+
+队列通过 `new(client, config)` 显式接收 `RedisClient`，构造只做本地配置校验，不连接 Redis，
+不启动 worker，也不要求已进入 runtime。应用可以将 `Arc<RedisInvalidationQueue>` 放进共享状态，
+在业务提交完成后调用同步的 `enqueue`。以下示例保留应用服务的等待位置；运行它会访问 Redis，
+因此标为 `no_run`：
+
+```rust,no_run
+use std::{sync::Arc, time::Duration};
+
+use axutils::redis::{
+    RedisClient, RedisConfig, RedisError, RedisInvalidationConfig, RedisInvalidationQueue,
+};
+
+#[tokio::main]
+async fn main() -> Result<(), RedisError> {
+    let client = RedisClient::new(RedisConfig::single("redis://127.0.0.1:6379/0")?)?;
+    let queue = Arc::new(RedisInvalidationQueue::new(
+        client,
+        RedisInvalidationConfig {
+            capacity: 4096,
+            batch_items: 128,
+            batch_bytes: 32 * 1024,
+            io_timeout: Duration::from_secs(2),
+            retry_delays: vec![Duration::from_millis(100), Duration::from_millis(500)],
+        },
+    )?);
+
+    // 键由应用在事务提交后生成；同一次调用中的重复键也计入 accepted。
+    let result = queue.enqueue([
+        "cache:example:42".to_owned(),
+        "cache:example:42".to_owned(),
+    ]);
+    assert_eq!(result.accepted, 2);
+    assert_eq!(result.rejected, 0);
+    if let Some(error) = result.worker_error {
+        return Err(error);
+    }
+
+    // 实际应用在这里等待自己的服务循环或关闭信号，并让 queue 一直留在共享状态中。
+    // pending 仅表示服务生命周期的占位，不代表 flush 或成功确认。
+    std::future::pending::<()>().await;
+    drop(queue);
+    Ok(())
+}
+```
+
+配置由应用明确给出，没有隐含业务默认值：
+
+| 字段 | 含义与边界 |
+| --- | --- |
+| `capacity` | 待处理集合的不同键数上限，**不包含在途批次**；`0` 拒绝全部新键。 |
+| `batch_items` | 一批最多选取的到期键数；`0` 按 `1` 处理。 |
+| `batch_bytes` | 一批缓存键的 UTF-8 字节数之和，不包含 DEL 命令名、参数长度编码或其他协议开销；`0` 每批最多一个键。 |
+| `io_timeout` | 一次后台删除尝试的超时；允许 `0`，不表示关闭超时。 |
+| `retry_delays` | 每次失败后依次使用的等待时长；空列表不重试，最大尝试次数为 `1 + len()`。 |
+
+容量不是总内存字节上限，调用方还应约束输入迭代器的长度、执行时间与单键长度。
+无法表示为 deadline 的超时或重试间隔在构造时返回 `RedisError::InvalidConfig`。分批从已到期的键中
+按 `String` 字典序选择，不保证 FIFO 或公平性。首个键即使超过 `batch_bytes`，也独立成批，避免
+永远停留在队列；这不绕过 `RedisClient` 的 key、批量项数、批量参数字节或 Cluster slot 校验。
+`InvalidKey`、预算错误、`CrossSlot`、传输错误和超时都会消耗同一套有限重试预算。应用应将队列
+预算与 client 限制对齐；Cluster 还需启用 `redis-cluster-async`，并由应用保证同批键适合同 slot 删除。
+
+去重与投递结果遵循以下语义：
+
+- 待处理集合中同键只保存一条请求。再次入队将它立即设为到期并重置重试预算，即使集合已满也接受。
+- `accepted` 按输入条目计数，包含同一次调用中的重复刷新；它不代表不同键数、成功删除数或投递确认。
+  `rejected` 只计因容量不足被拒绝的新键；满队列不等待空位，也不淘汰已有键。
+  两个计数达到 `usize::MAX` 时饱和。
+- 键进入在途批次后会释放待处理容量；在删除尚未完成时，同键可以作为新请求再次入队，但仍需通过
+  当时的容量检查。因此内存中可能同时存在一个在途旧请求和一个待处理新请求。
+- 旧批次失败回队时，只补回待处理集合中不存在的键，不能覆盖新请求的到期时间和重试预算；容量
+  已被其他新请求占满时丢弃该旧重试。重试次数耗尽后同样丢弃。
+
+第一次存在待处理键的 `enqueue` 才尝试启动 worker；没有当前 Tokio runtime 时，
+`worker_error` 返回 `RedisError::RuntimeRequired`，**已接受的待处理键仍保留**。以后在有效 runtime
+中再次调用 `enqueue`（允许传空迭代器）可重新启动处理；空队列不会仅因空入队启动 worker。
+已有 worker 存活时允许在 runtime 外投递。已启动 worker 在队列为空时等待通知，有新请求时被唤醒。
+
+调用方必须维持可运行、启用 I/O 和 time driver 的 Tokio runtime。当前线程 runtime 只有被驱动时
+才推进任务；缺少 driver 可能使后台任务 panic，runtime 关闭或任务异常退出也会中断 worker。下次 `enqueue` 会检测已退出
+worker 并尝试重启，仍在待处理集合中的请求保留，退出时的在途请求不会自动恢复。queue 通过
+`TokioTaskGuard` 持有 worker；最后一个 `Arc` 所有者释放队列时请求 abort，不等待完成，也不会排空。
+没有 `flush`、等待完成确认或 graceful drain API。
+
+后台失败、重试丢弃及满队列等诊断可由可选 `tracing` 接收，只记录分类与数量，不记录缓存键或内容；
+未启用 `tracing` 时没有后台事件。`enqueue` 的 `worker_error` 只报告本次启动问题，后台删除错误不会
+回填到该返回值。应用需处理拒绝计数，并自行决定告警、降级或 TTL 兜底策略。
+
+该队列不持久化，不承诺每个已接受请求最终被删除，也不提供强一致性。超时和 abort 只取消本地等待，
+不保证 Redis 没有执行命令；重试可能再次删除缓存，包括并发回填后的新值。应用应保留自己的缓存键
+生成、业务提交时机、TTL 与回填策略，并评估该失效方式是否符合业务的一致性需求。

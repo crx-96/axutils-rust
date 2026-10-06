@@ -421,6 +421,59 @@ fn semantic_redis_matrix() {
 }
 
 #[test]
+#[ignore = "Redis 缓存失效队列的独立 feature、公开 API 与依赖隔离"]
+fn semantic_redis_invalidation_matrix() {
+    run_fixture_cases(
+        "redis-invalidation",
+        &[
+            FixtureCase {
+                feature: "redis-invalidation",
+                expected_success: true,
+                diagnostic_tokens: OK,
+            },
+            FixtureCase {
+                feature: "redis-invalidation,tracing",
+                expected_success: true,
+                diagnostic_tokens: OK,
+            },
+            FixtureCase {
+                feature: "redis-invalidation,redis-cluster-async",
+                expected_success: true,
+                diagnostic_tokens: OK,
+            },
+            FixtureCase {
+                feature: "negative-redis-invalidation-async",
+                expected_success: false,
+                diagnostic_tokens: &[
+                    "RedisInvalidationQueue",
+                    "RedisInvalidationConfig",
+                    "RedisInvalidationEnqueue",
+                ],
+            },
+            FixtureCase {
+                feature: "negative-redis-invalidation-tokio",
+                expected_success: false,
+                diagnostic_tokens: &[
+                    "RedisInvalidationQueue",
+                    "RedisInvalidationConfig",
+                    "RedisInvalidationEnqueue",
+                ],
+            },
+            FixtureCase {
+                feature: "negative-redis-invalidation-combined",
+                expected_success: false,
+                diagnostic_tokens: &[
+                    "RedisInvalidationQueue",
+                    "RedisInvalidationConfig",
+                    "RedisInvalidationEnqueue",
+                ],
+            },
+        ],
+    );
+    dependencies::redis_invalidation();
+}
+
+#[test]
 #[ignore = "slow SQLx driver semantic feature/API matrix"]
 fn semantic_sqlx_matrix() {
     run_fixture_cases(

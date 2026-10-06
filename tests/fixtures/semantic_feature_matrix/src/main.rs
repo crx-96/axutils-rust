@@ -315,6 +315,47 @@ fn redis_cluster_async() {
     let _ = RedisConfig::cluster(["redis://127.0.0.1:7000/0"]);
 }
 
+#[cfg(feature = "redis-invalidation")]
+fn redis_invalidation() {
+    use std::{sync::Arc, time::Duration};
+
+    use axutils::redis::{
+        RedisClient, RedisConfig, RedisError, RedisInvalidationConfig, RedisInvalidationEnqueue,
+        RedisInvalidationQueue,
+    };
+
+    let config = RedisInvalidationConfig {
+        capacity: 128,
+        batch_items: 16,
+        batch_bytes: 4096,
+        io_timeout: Duration::from_secs(1),
+        retry_delays: vec![Duration::from_millis(50)],
+    };
+    let client =
+        RedisClient::new(RedisConfig::single("redis://127.0.0.1:6379/0").unwrap()).unwrap();
+    let queue = Arc::new(RedisInvalidationQueue::new(client, config).unwrap());
+    let RedisInvalidationEnqueue {
+        accepted,
+        rejected,
+        worker_error,
+    } = queue.enqueue(["cache:item".to_owned(), "cache:item".to_owned()]);
+    let _: (usize, usize, Option<RedisError>) = (accepted, rejected, worker_error);
+    let _ = queue.enqueue(std::iter::empty::<String>());
+    fn require_send_sync<T: Send + Sync>() {}
+    require_send_sync::<RedisInvalidationQueue>();
+}
+
+#[cfg(any(
+    feature = "negative-redis-invalidation-async",
+    feature = "negative-redis-invalidation-tokio",
+    feature = "negative-redis-invalidation-combined"
+))]
+fn negative_redis_invalidation() {
+    use axutils::redis::{
+        RedisInvalidationConfig, RedisInvalidationEnqueue, RedisInvalidationQueue,
+    };
+}
+
 #[cfg(any(
     feature = "sqlx-postgres",
     feature = "sqlx-mysql",

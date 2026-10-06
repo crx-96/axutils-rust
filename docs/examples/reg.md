@@ -7,7 +7,7 @@
 
 ```toml
 [dependencies]
-axutils = { version = "1.1", features = ["regex", "phone-validation"] }
+axutils = { version = "1.2", features = ["regex", "phone-validation"] }
 ```
 
 `phone-validation` 包含 `regex`，并增加国际 E.164 mobile provider 校验；不需要也不应单独启用

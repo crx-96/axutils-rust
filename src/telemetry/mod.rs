@@ -15,6 +15,8 @@ pub(crate) mod http;
 pub(crate) mod jwt;
 #[cfg(feature = "redis")]
 pub(crate) mod redis;
+#[cfg(feature = "redis-invalidation")]
+pub(crate) mod redis_invalidation;
 #[cfg(any(
     feature = "sqlx",
     feature = "sqlx-postgres",

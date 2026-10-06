@@ -199,6 +199,28 @@ pub(super) fn redis_layers() {
     assert_tree_cache_budget();
 }
 
+pub(super) fn redis_invalidation() {
+    baseline();
+    let invalidation = tree("redis-invalidation");
+    for package in ["redis", "tokio", "r2d2", "rmp-serde"] {
+        assert_has(&invalidation, package, "redis-invalidation");
+    }
+    for package in [
+        "croner",
+        "chrono-tz",
+        "tracing-subscriber",
+        "reqwest",
+        "sqlx",
+        "axum",
+    ] {
+        assert_absent(&invalidation, package, "redis-invalidation");
+    }
+    let redis_features = tree_with("redis-invalidation", "normal,build,features", Some("redis"));
+    assert!(redis_features.contains(r#"redis feature "connection-manager""#));
+    assert!(!redis_features.contains(r#"redis feature "cluster-async""#));
+    assert_tree_cache_budget();
+}
+
 pub(super) fn sqlx_drivers() {
     for (feature, expected) in [
         ("sqlx-postgres", "postgres"),

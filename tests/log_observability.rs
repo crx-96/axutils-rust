@@ -102,6 +102,74 @@ fn tracing_minimal_feature_exercises_the_capture_harness() {
     assert!(!output.contains('\u{1b}'));
 }
 
+#[cfg(feature = "redis-invalidation")]
+#[test]
+fn redis_invalidation_diagnostics_classify_failures_without_exposing_keys() {
+    use axutils::redis::{
+        RedisClient, RedisConfig, RedisError, RedisInvalidationConfig, RedisInvalidationQueue,
+    };
+    use std::time::Duration;
+    use tokio::{runtime::Builder, task};
+
+    // 复用可观测性 target 隔离 subscriber 与并发队列状态测试的首次 callsite 注册。
+    let capture = Arc::new(Mutex::new(Vec::new()));
+    let subscriber = tracing_subscriber::fmt()
+        .with_ansi(false)
+        .without_time()
+        .with_writer(Capture(Arc::clone(&capture)))
+        .finish();
+    subscriber::with_default(subscriber, || {
+        let client = RedisClient::new(
+            RedisConfig::single("redis://127.0.0.1:6379/0")
+                .unwrap()
+                .with_max_key_bytes(1)
+                .unwrap(),
+        )
+        .unwrap();
+        let queue = RedisInvalidationQueue::new(
+            client,
+            RedisInvalidationConfig {
+                capacity: 1,
+                batch_items: 2,
+                batch_bytes: 64,
+                io_timeout: Duration::from_secs(1),
+                retry_delays: Vec::new(),
+            },
+        )
+        .unwrap();
+        let report = queue.enqueue(["SENSITIVE_KEY", "REJECTED_KEY"].map(String::from));
+        assert_eq!(report.accepted, 1);
+        assert_eq!(report.rejected, 1);
+        assert_eq!(report.worker_error, Some(RedisError::RuntimeRequired));
+        Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(async {
+                assert_eq!(queue.enqueue([]).worker_error, None);
+                task::yield_now().await;
+                assert!(captured(&capture).contains("retry_exhausted"));
+                drop(queue);
+                task::yield_now().await;
+            });
+    });
+    let output = captured(&capture);
+    for event in [
+        "cache_invalidation",
+        "queue_full",
+        "runtime_unavailable",
+        "delete_failed",
+        "invalid_key",
+        "retry_exhausted",
+        "worker_stopped",
+    ] {
+        assert!(output.contains(event), "缺少事件 {event}: {output}");
+    }
+    for secret in ["SENSITIVE_KEY", "REJECTED_KEY", "redis://", "127.0.0.1"] {
+        assert!(!output.contains(secret), "诊断泄漏 {secret}");
+    }
+}
+
 #[test]
 #[cfg(feature = "http")]
 fn captures_sync_http_events_without_sensitive_context() {

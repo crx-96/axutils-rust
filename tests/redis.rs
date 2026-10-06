@@ -7,6 +7,10 @@ use axutils::{
     utils::RedisUtils,
 };
 
+#[cfg(feature = "redis-invalidation")]
+#[path = "redis/invalidation.rs"]
+mod invalidation;
+
 #[test]
 fn config_defaults_and_boundaries_are_local() {
     let config = RedisConfig::single("redis://127.0.0.1:6379/0")

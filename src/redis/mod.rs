@@ -12,6 +12,9 @@
 //! 校验释放/续租；它适用于同一 Redis 逻辑主节点或 Cluster 拓扑，不是 Redlock，也不提供
 //! fencing token。第一阶段只接受 `redis://`，不启用 TLS；Cluster 事务明确返回
 //! [`RedisError::UnsupportedMode`]，不伪装成跨节点原子操作。
+//!
+//! `redis-invalidation` 组合异步 Redis 与 Tokio 工具，提供显式注入客户端、按键去重的
+//! 内存失效队列；缓存键、预算、提交时机和最终恢复策略均由调用方决定。
 
 mod client;
 mod codec;
@@ -19,12 +22,16 @@ mod commands;
 mod config;
 mod error;
 pub(crate) mod global;
+#[cfg(feature = "redis-invalidation")]
+mod invalidation;
 mod lock;
 mod transaction;
 
 pub use client::RedisClient;
 pub use config::RedisConfig;
 pub use error::{RedisError, RedisTransportErrorKind};
+#[cfg(feature = "redis-invalidation")]
+pub use invalidation::{RedisInvalidationConfig, RedisInvalidationEnqueue, RedisInvalidationQueue};
 #[cfg(feature = "redis-async")]
 pub use lock::RedisAsyncLockGuard;
 pub use lock::RedisLockGuard;

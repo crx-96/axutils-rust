@@ -98,9 +98,18 @@ cargo test --no-default-features --features redis --test redis --test redis_glob
 cargo test --no-default-features --features redis-cluster --test redis_cluster --test redis_global_cluster
 cargo test --no-default-features --features redis-async --test redis_global_async
 cargo test --no-default-features --features redis-cluster-async --test redis_global_cluster_async
+cargo test --no-default-features --features redis-invalidation --lib redis::invalidation
+cargo test --no-default-features --features redis-invalidation --test redis
+cargo test --no-default-features --features redis-invalidation,tracing --test log_observability
+cargo test --no-default-features --test feature_matrix semantic_redis_invalidation_matrix -- --ignored --test-threads=1 --nocapture
 ```
 
 上述命令不会执行 ignored 的真实服务测试。
+
+失效队列的单元和本地 RESP 集成测试覆盖去重、容量与在途请求、数量/字节分批、超时与有限重试、再次入队、worker
+唤醒/退出、立即失败时的调度让出和拥有者释放；专用 feature 矩阵覆盖单 feature、`tracing`/异步 Cluster
+组合，以及只启用 `redis-async`、`redis + tokio`、`redis-async + tokio` 时不能导入队列的负向契约，并检查默认正常依赖
+仍为空。Redis Markdown 示例按下方 harness 的 `docs/examples/redis.md` 过滤方式编译。
 
 ### SQLx、Scheduler 与 Axum
 
@@ -175,6 +184,7 @@ cargo test --no-default-features --test feature_matrix -- --ignored --test-threa
 - 默认树/准入/文本入口，以及 `secure-random`、Tokio 单任务守卫和 PostgreSQL 分类器的能力隔离；
 - `tokio` 不开放其他领域异步 API；
 - HTTP、Redis、SQLx、FS、Config、Axum 的分层；
+- Redis 失效队列独立 feature、公开路径与 `redis-async`/`tokio` 组合隔离；
 - Scheduler 单 feature；
 - canonical path 正向和旧根/公开叶路径负向；
 - provider-only feature 与 allocator feature 已删除；

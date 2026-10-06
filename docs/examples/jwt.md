@@ -5,7 +5,7 @@
 
 ```toml
 [dependencies]
-axutils = { version = "1.1", features = ["jwt"] }
+axutils = { version = "1.2", features = ["jwt"] }
 serde = { version = "1", features = ["derive"] }
 ```
 

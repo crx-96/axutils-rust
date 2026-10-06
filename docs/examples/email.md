@@ -5,7 +5,7 @@
 
 ```toml
 [dependencies]
-axutils = { version = "1.1", features = ["email"] }
+axutils = { version = "1.2", features = ["email"] }
 ```
 
 ## 实例 API
@@ -52,7 +52,7 @@ runtime 中持续复用，不能假设可以跨已结束的 runtime 迁移。
 
 ```toml
 [dependencies]
-axutils = { version = "1.1", features = ["email-async"] }
+axutils = { version = "1.2", features = ["email-async"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 ```
 
