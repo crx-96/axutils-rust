@@ -5,7 +5,7 @@
 
 ```toml
 [dependencies]
-axutils = { version = "1.2", features = ["jwt"] }
+axutils = { version = "2.0", features = ["jwt"] }
 serde = { version = "1", features = ["derive"] }
 ```
 
@@ -30,28 +30,41 @@ fn codec() -> Result<JwtCodec, JwtError> {
     )?;
     Ok(JwtCodec::new(config))
 }
+
+let _codec = codec()?;
+# Ok::<(), JwtError>(())
 ```
 
 `encode` 接受可序列化的 claims，`decode` 仅在固定算法签名和标准 claims 校验成功后才反序列化。
 token 与 claims 都有大小、结构和资源预算；token 不是加密内容，不应写入日志、错误或指标标签。
 
 ```rust
-use axutils::jwt::{JwtCodec, JwtError};
+use axutils::jwt::{
+    JwtAlgorithm, JwtCodec, JwtConfig, JwtError, JwtSigningKey, JwtValidation, JwtVerificationKey,
+};
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, PartialEq)]
 struct Claims {
     sub: String,
     exp: u64,
 }
 
-fn round_trip(codec: &JwtCodec) -> Result<Claims, JwtError> {
-    let token = codec.encode(&Claims {
-        sub: "user-42".to_owned(),
-        exp: 2_000_000_000,
-    })?;
-    codec.decode(&token)
-}
+let config = JwtConfig::new(
+    JwtAlgorithm::Hs256,
+    Some(JwtSigningKey::from_hmac_secret([0x11; 32])?),
+    Some(JwtVerificationKey::from_hmac_secret([0x11; 32])?),
+    JwtValidation::new(),
+)?;
+let codec = JwtCodec::new(config);
+let claims = Claims {
+    sub: "user-42".to_owned(),
+    exp: 2_000_000_000,
+};
+let token = codec.encode(&claims)?;
+assert_eq!(codec.decode::<Claims>(&token)?, claims);
+assert!(codec.decode::<Claims>("invalid-token").is_err());
+# Ok::<(), JwtError>(())
 ```
 
 验证启用 `exp` 或 `nbf` 时使用系统 Unix 时钟；应用应明确选择 audience、issuer、subject 和
@@ -75,4 +88,8 @@ fn initialize() -> Result<(), JwtError> {
     let _codec = JwtUtils::codec()?;
     Ok(())
 }
+
+initialize()?;
+assert!(JwtUtils::is_initialized());
+# Ok::<(), JwtError>(())
 ```

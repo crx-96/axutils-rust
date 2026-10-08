@@ -8,6 +8,7 @@ mod config;
 mod cron;
 mod error;
 pub(crate) mod global;
+mod schedule;
 mod task;
 
 use std::{future::Future, sync::Arc};
@@ -22,6 +23,7 @@ use task::Shared;
 ///
 /// 同一任务的 callback 串行执行；取消和关闭是非阻塞取消请求。实例被丢弃时会请求取消全部活动任务。
 pub struct Scheduler {
+    /// 共享有界注册表；任务仅持 Weak 清理引用，不延长实例生命周期。
     shared: Arc<Shared>,
 }
 
@@ -135,6 +137,7 @@ impl Scheduler {
 }
 
 impl Drop for Scheduler {
+    /// 请求取消所有登记的任务，不阻塞等待 callback 或其资源实际释放。
     fn drop(&mut self) {
         self.shared.shutdown();
     }

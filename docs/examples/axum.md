@@ -7,7 +7,7 @@ HTTP trace 还需组合 `tracing`。`axum-governor` 提供 Governor 限流。这
 
 ```toml
 [dependencies]
-axutils = { version = "1.2", features = ["axum", "axum-tower-http"] }
+axutils = { version = "2.0", features = ["axum", "axum-tower-http"] }
 ```
 
 路由与 layer 的公共签名保留 Axum/Tower 原生类型。应用若要命名 `Router`、注册 route 或直接组合
@@ -42,6 +42,10 @@ async fn run() -> Result<(), AxumError> {
 `axum-tower-http` 的 `with_timeout`/`with_body_limit`、`axum-tower` 的
 `with_concurrency_limit`，或应用自有 layer 显式安装，并自行保证 layer 参数与配置声明一致。
 读取 `server.config()` 不能证明这些限制已经生效。
+
+`with_concurrency_limit` 的许可由全 Router 的路径、HTTP 方法和 fallback 共享，server clone
+不会复制配额；满载立即返回 503。许可覆盖 service future，返回响应头后释放，不包含后续流式
+响应正文的传输时间。
 
 有状态路由可先通过 `AxumApp::<State>::create_router()` 创建原生 router，再使用
 `AxumApp::from_router(router)` 继续构建。应用负责路由 handler 的认证、输入限制与业务错误映射；

@@ -9,7 +9,7 @@
 
 ```toml
 [dependencies]
-axutils = { version = "1.2", features = ["base64", "md5", "aes", "encoding_rs"] }
+axutils = { version = "2.0", features = ["base64", "md5", "aes", "encoding_rs"] }
 ```
 
 | feature | 能力 |

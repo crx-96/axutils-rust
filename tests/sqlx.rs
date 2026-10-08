@@ -8,6 +8,10 @@
 #[path = "sqlx/client.rs"]
 mod client;
 
+#[cfg(feature = "sqlx-sqlite")]
+#[path = "sqlx/logging.rs"]
+mod logging;
+
 #[path = "sqlx/errors.rs"]
 mod errors;
 

@@ -185,18 +185,23 @@ fn exercises_sync_single_key_lock_ownership_and_ttl() {
         let thread_client_b = client_b.clone();
         let first = scope.spawn(move || {
             barrier_a.wait();
-            match thread_client_a.try_lock(key_a, Duration::from_secs(5))? {
+            let acquired = thread_client_a.try_lock(key_a, Duration::from_secs(5));
+            barrier_a.wait();
+            match acquired? {
                 Some(mut lock) => lock.release(),
                 None => Ok(false),
             }
         });
         let second = scope.spawn(move || {
             barrier_b.wait();
-            match thread_client_b.try_lock(key_b, Duration::from_secs(5))? {
+            let acquired = thread_client_b.try_lock(key_b, Duration::from_secs(5));
+            barrier_b.wait();
+            match acquired? {
                 Some(mut lock) => lock.release(),
                 None => Ok(false),
             }
         });
+        barrier.wait();
         barrier.wait();
         [
             first.join().expect("first lock thread should not panic"),

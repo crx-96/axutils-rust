@@ -2,23 +2,35 @@ use std::fmt;
 use std::str::FromStr;
 use std::time::Duration;
 
-use sqlx::any::AnyConnectOptions;
+use sqlx::{any::AnyConnectOptions, ConnectOptions};
 
 use super::SqlxError;
 
+/// 普通数据库默认允许同时持有的连接数。
 const DEFAULT_MAX_CONNECTIONS: u32 = 10;
+/// 内存 SQLite 必须由唯一连接持有数据库状态。
 const DEFAULT_MEMORY_MAX_CONNECTIONS: u32 = 1;
+/// 单个客户端允许配置的最大连接数，防止无界占用数据库资源。
 const MAX_CONNECTIONS_LIMIT: u32 = 100;
+/// 获取连接的默认等待预算，也用于首次连接池建立。
 const DEFAULT_ACQUIRE_TIMEOUT: Duration = Duration::from_secs(30);
+/// 可配置获取预算的最小值，拒绝零超时。
 const MIN_ACQUIRE_TIMEOUT: Duration = Duration::from_millis(1);
+/// 可配置获取预算的最大值，避免无限等待。
 const MAX_ACQUIRE_TIMEOUT: Duration = Duration::from_secs(5 * 60);
+/// 多行查询默认允许收集的行数；不限制单行字节数。
 const DEFAULT_MAX_ROWS: usize = 1_024;
+/// 多行查询可以配置的行数上界。
 const MAX_ROWS_LIMIT: usize = 100_000;
 
+/// 由 URL scheme 得到的固定驱动分类；不代表对应 driver 已编译或可连接。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SqlxDriver {
+    /// PostgreSQL 的 postgres/postgresql scheme。
     PostgreSql,
+    /// MySQL 或 MariaDB 的 mysql/mariadb scheme。
     MySql,
+    /// SQLite 文件或内存数据库。
     Sqlite,
 }
 
@@ -27,6 +39,8 @@ enum SqlxDriver {
 /// `new` 和所有 `with_*` 方法只做本地 URL/参数校验，不访问网络、不安装 Any driver，也不创建
 /// 连接池。配置不提供 URL getter；`Debug` 只显示 driver 和非敏感的资源参数，不回显连接 URL、
 /// 用户名、密码或查询参数。
+/// 创建的连接选项关闭 SQLx 普通和慢查询语句日志，避免 SQL 字面量随日志输出；这不控制应用
+/// 自行使用 SQLx 的日志，也不保证屏蔽 SQLx 的其他底层诊断。
 ///
 /// 普通数据库 URL 的最大连接数默认为 `10`，SQLite 内存 URL 默认为 `1`；最大连接数只能是
 /// `1..=100`。`min_connections` 默认为 `0`，且不能超过最大连接数。连接获取超时默认为 30 秒，
@@ -34,12 +48,19 @@ enum SqlxDriver {
 /// 范围是 `1..=100_000`。
 #[derive(Clone)]
 pub struct SqlxConfig {
+    /// 已解析 URL 和禁用语句日志的连接选项；只供内部建池，不能直接输出。
     pub(crate) connect_options: AnyConnectOptions,
+    /// 脱敏 Debug 与 telemetry 使用的驱动分类。
     driver: SqlxDriver,
+    /// 内存 SQLite 标记，决定单连接与禁止自动回收策略。
     pub(crate) sqlite_memory: bool,
+    /// 同时连接数上限，允许 1..=100，内存 SQLite 固定为 1。
     pub(crate) max_connections: u32,
+    /// 保持的最小连接数，默认为 0，不能大于 max_connections。
     pub(crate) min_connections: u32,
+    /// 连接获取的最长等待时间，允许 1 毫秒至 5 分钟。
     pub(crate) acquire_timeout: Duration,
+    /// 多行收集的最大行数，允许 1..=100_000。
     pub(crate) max_rows: usize,
 }
 
@@ -64,8 +85,11 @@ impl SqlxConfig {
     /// # }
     /// ```
     pub fn new(url: impl AsRef<str>) -> Result<Self, SqlxError> {
+        // 仅本地解析；语句日志在连接创建前关闭，避免绕过本库的脱敏 telemetry。
         let connect_options = AnyConnectOptions::from_str(url.as_ref())
-            .map_err(|_| SqlxError::InvalidConfig { field: "url" })?;
+            .map_err(|_| SqlxError::InvalidConfig { field: "url" })?
+            .disable_statement_logging();
+        // 不访问 driver 注册器，因此仅启用某一个 driver 时仍可离线解析其他受支持 scheme。
         let driver = match connect_options.database_url.scheme() {
             "postgres" | "postgresql" => SqlxDriver::PostgreSql,
             "mysql" | "mariadb" => SqlxDriver::MySql,
@@ -77,10 +101,12 @@ impl SqlxConfig {
             }
         };
 
+        // 当前未开放 TLS 配置，显式要求 TLS 的 URL 必须在任何连接尝试前被拒绝。
         if has_unsupported_tls(&connect_options) {
             return Err(SqlxError::InvalidConfig { field: "tls" });
         }
 
+        // 内存数据库不能依赖普通连接池的连接替换行为，记录此标记供建池阶段使用。
         let sqlite_memory = driver == SqlxDriver::Sqlite && is_sqlite_memory(&connect_options);
         Ok(Self {
             connect_options,
@@ -114,6 +140,7 @@ impl SqlxConfig {
     /// # }
     /// ```
     pub fn with_max_connections(mut self, max_connections: u32) -> Result<Self, SqlxError> {
+        // 先检查单字段范围，再维护内存库及已有最小连接数的跨字段约束。
         if !(1..=MAX_CONNECTIONS_LIMIT).contains(&max_connections) {
             return Err(SqlxError::InvalidConfig {
                 field: "max_connections",
@@ -150,6 +177,7 @@ impl SqlxConfig {
     /// # }
     /// ```
     pub fn with_min_connections(mut self, min_connections: u32) -> Result<Self, SqlxError> {
+        // 允许零连接下界，但不允许构造无法满足的最小/最大数量组合。
         if min_connections > self.max_connections {
             return Err(SqlxError::InvalidConfig {
                 field: "min_connections",
@@ -177,6 +205,7 @@ impl SqlxConfig {
     /// # }
     /// ```
     pub fn with_acquire_timeout(mut self, acquire_timeout: Duration) -> Result<Self, SqlxError> {
+        // 在建池前收敛等待预算，失败时不发布修改后的配置。
         if !(MIN_ACQUIRE_TIMEOUT..=MAX_ACQUIRE_TIMEOUT).contains(&acquire_timeout) {
             return Err(SqlxError::InvalidConfig {
                 field: "acquire_timeout",
@@ -203,6 +232,7 @@ impl SqlxConfig {
     /// # }
     /// ```
     pub fn with_max_rows(mut self, max_rows: usize) -> Result<Self, SqlxError> {
+        // 正行数预算同时保证查询阶段的 sentinel 行计算可表示。
         if !(1..=MAX_ROWS_LIMIT).contains(&max_rows) {
             return Err(SqlxError::InvalidConfig { field: "max_rows" });
         }
@@ -210,7 +240,9 @@ impl SqlxConfig {
         Ok(self)
     }
 
+    /// 建池之前再次核对内部配置不变量，防止内部装配绕过 builder 校验。
     pub(crate) fn validate(&self) -> Result<(), SqlxError> {
+        // 跨字段约束先于时间、结果预算检查，保持现有错误优先级。
         if !(1..=MAX_CONNECTIONS_LIMIT).contains(&self.max_connections)
             || self.min_connections > self.max_connections
             || (self.sqlite_memory && self.max_connections != 1)
@@ -231,6 +263,7 @@ impl SqlxConfig {
     }
 
     #[cfg(feature = "tracing")]
+    /// 返回固定且不敏感的驱动 token，供连接事件使用。
     pub(crate) fn driver_name(&self) -> &'static str {
         match self.driver {
             SqlxDriver::PostgreSql => "postgres",
@@ -241,6 +274,7 @@ impl SqlxConfig {
 }
 
 impl fmt::Debug for SqlxConfig {
+    /// 只展示驱动及公开预算，不调用原生连接选项的 Debug。
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("SqlxConfig")
@@ -254,11 +288,13 @@ impl fmt::Debug for SqlxConfig {
     }
 }
 
+/// 识别 SQLite 内存 URL 的特殊路径和 mode 参数，不进行文件或数据库访问。
 fn is_sqlite_memory(options: &AnyConnectOptions) -> bool {
     if options.database_url.scheme() != "sqlite" {
         return false;
     }
 
+    // 标准 :memory: 路径与显式 mode=memory 都需要同一连接生命周期保护。
     let path = options.database_url.path().trim_start_matches('/');
     path.eq_ignore_ascii_case(":memory:")
         || options.database_url.query_pairs().any(|(key, value)| {
@@ -266,7 +302,9 @@ fn is_sqlite_memory(options: &AnyConnectOptions) -> bool {
         })
 }
 
+/// 检查可以本地识别的显式 TLS 要求；不把未知 URL 参数解释成安全保证。
 fn has_unsupported_tls(options: &AnyConnectOptions) -> bool {
+    // 使用固定字段分类返回错误，不把证书路径、URL 参数或认证信息带入诊断。
     options.database_url.query_pairs().any(|(key, value)| {
         let key = key.to_ascii_lowercase();
         let value = value.to_ascii_lowercase();

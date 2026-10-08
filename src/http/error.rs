@@ -6,11 +6,13 @@ use std::fmt;
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub enum HttpTransportErrorKind {
-    /// DNS、连接建立或连接复用失败。
+    /// DNS、连接建立或连接复用失败；异步 reqwest 后端的 TLS 握手失败也归入此类。
     Connection,
     /// 连接或请求超过了时间预算。
     Timeout,
-    /// TLS 握手或证书验证失败。
+    /// 同步 ureq 后端可识别的 TLS 握手或证书验证失败。
+    ///
+    /// 异步后端未提供独立、稳定的 TLS 分类接口，本库将其连接阶段错误保留为 `Connection`。
     Tls,
     /// HTTP 协议、解析或响应格式失败。
     Protocol,
@@ -104,6 +106,7 @@ pub enum HttpError {
 }
 
 impl fmt::Display for HttpError {
+    /// 组合固定分类和非敏感预算元数据，永不回显 URL、header、正文或 provider 文本。
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::InvalidConfig { field } => {

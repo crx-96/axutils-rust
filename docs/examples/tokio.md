@@ -5,7 +5,7 @@
 
 ```toml
 [dependencies]
-axutils = { version = "1.2", features = ["tokio"] }
+axutils = { version = "2.0", features = ["tokio"] }
 ```
 
 部分公共签名保留 Tokio 原生的 `Handle`、`Runtime`、`mpsc` 和 `JoinHandle` 类型；应用若要在
@@ -50,7 +50,7 @@ async fn bounded_wait() -> Result<(), TokioError> {
 
 ```toml
 [dependencies]
-axutils = { version = "1.2", features = ["task-group"] }
+axutils = { version = "2.0", features = ["task-group"] }
 ```
 
 ```rust,no_run
@@ -67,6 +67,10 @@ async fn grouped_work() -> Result<(), TokioError> {
 ```
 
 应用应在其 shutdown 流程中给任务组有限的 grace period，并显式处理尚未完成或 panic 的任务。
+`close` 与接纳新任务之间有明确顺序：已接纳的任务在提交给 runtime 前即被计数，关闭后开始的
+登记会失败。向已经关闭的 runtime 提交时，Tokio 可能同步丢弃 future 或未开始的 blocking closure；
+这些任务仍拥有的捕获资源完成析构后才归还计数，析构可重入任务组。任务返回值归 `JoinHandle`
+或调用方持有，其资源生命周期不包含在任务组的等待范围内。
 
 ## 单任务取消守卫
 

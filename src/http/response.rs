@@ -12,14 +12,19 @@ use super::HttpError;
 /// 已读取并受大小限制的 HTTP 响应。
 #[derive(Clone)]
 pub struct HttpResponse {
+    /// 传输层解析出的 HTTP 状态码，4xx/5xx 不转为本地错误。
     status: u16,
+    /// 有界响应头集合，保留重复项的 provider 遍历顺序。
     headers: HttpHeaders,
+    /// 受响应预算限制的共享正文；克隆响应不会复制正文缓冲区。
     body: Arc<Vec<u8>>,
+    /// 取得此响应时发起的总网络尝试次数；缓存命中保留原值。
     attempts: u32,
 }
 
 impl HttpResponse {
-    pub(crate) fn new(status: u16, headers: HttpHeaders, body: Vec<u8>, attempts: u32) -> Self {
+    /// 从已完成有界读取的传输结果建立响应，正文从此通过 Arc 共享。
+    pub(super) fn new(status: u16, headers: HttpHeaders, body: Vec<u8>, attempts: u32) -> Self {
         Self {
             status,
             headers,
@@ -151,6 +156,7 @@ impl HttpResponse {
     /// # fn main() {}
     /// ```
     pub fn into_body(self) -> Vec<u8> {
+        // 独占正文时移出缓冲区；缓存或 follower 仍持有正文时才为调用方复制。
         Arc::try_unwrap(self.body).unwrap_or_else(|body| (*body).clone())
     }
 
@@ -171,6 +177,7 @@ impl HttpResponse {
     /// # }
     /// ```
     pub fn text(&self) -> Result<&str, HttpError> {
+        // 使用严格 UTF-8 校验，失败不把正文或解码器位置写入错误。
         std::str::from_utf8(&self.body).map_err(|_| HttpError::InvalidUtf8)
     }
 
@@ -229,11 +236,13 @@ impl HttpResponse {
     /// ```
     #[cfg(feature = "http-json")]
     pub fn json<T: DeserializeOwned>(&self) -> Result<T, HttpError> {
+        // 解析有界正文，抹去可能包含调用方数据的 Serde 错误详情。
         serde_json::from_slice(&self.body).map_err(|_| HttpError::JsonDeserialize)
     }
 }
 
 impl fmt::Debug for HttpResponse {
+    /// 输出状态、header 统计、正文长度和尝试次数，不回显响应内容。
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("HttpResponse")

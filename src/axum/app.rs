@@ -1,3 +1,5 @@
+//! 保留 Axum 状态类型并延迟组装中间件的应用构建器。
+
 use std::convert::Infallible;
 
 use axum::{
@@ -11,7 +13,9 @@ use tower::{Layer, Service};
 
 use super::{AxumConfig, AxumError, AxumServerBuilder};
 
+/// 尚未登记 layer 时的栈类型，不引入堆分配或动态分发。
 type IdentityLayerStack = fn(Router) -> Router;
+/// 空 layer 栈直接保留 Router。
 fn identity(router: Router) -> Router {
     router
 }
@@ -39,9 +43,13 @@ fn identity(router: Router) -> Router {
 /// let _builder = app.into_server_builder();
 /// ```
 pub struct AxumApp<S = (), G = IdentityLayerStack, R = IdentityLayerStack> {
+    /// 仍可能缺少 `S` 状态的路由集合，构建期间可继续注册。
     router: Router<S>,
+    /// 延迟应用于全 Router 的 layer 闭包；按声明顺序处理请求。
     global: G,
+    /// 延迟应用于已匹配路由的 layer 闭包，不覆盖 404 fallback。
     matched: R,
+    /// 是否登记过匹配路由 layer，用于在空路由上生成稳定构建错误。
     has_matched_layer: bool,
 }
 
@@ -271,6 +279,7 @@ where
         G: FnOnce(Router) -> Router,
     {
         let previous = self.global;
+        // 把新 layer 放入旧栈内侧，使先声明的 layer 先看到请求，并覆盖后续添加的路由。
         AxumApp {
             router: self.router,
             global: move |router: Router| previous(router.layer(layer)),
@@ -319,6 +328,7 @@ where
         R: FnOnce(Router) -> Router,
     {
         let previous = self.matched;
+        // 同样延迟到路由收敛后应用，但只装到已匹配 route 上。
         AxumApp {
             router: self.router,
             global: self.global,
@@ -359,10 +369,13 @@ where
     /// let _builder = AxumApp::from_router(router).with_state("axutils".to_owned());
     /// ```
     pub fn with_state(self, state: S) -> AxumServerBuilder {
+        // 先收敛 missing-state 类型，再统一应用延迟 layer，维持两条构建入口的相同行为。
         let router = self.router.clone().with_state(state);
         self.finish(router)
     }
+    /// 按 matched 内层、global 外层的顺序收敛 Router，并延迟报告空路由配置错误。
     fn finish(self, router: Router) -> AxumServerBuilder {
+        // Axum 对空 Router 调用 route_layer 会 panic；在此转换为后续 build 返回的错误。
         let invalid = self.has_matched_layer && !router.has_routes();
         let router = if invalid {
             (self.global)(router)
@@ -424,11 +437,13 @@ where
     /// # Ok::<(), AxumError>(())
     /// ```
     pub fn into_server_builder(self) -> AxumServerBuilder {
+        // 无状态入口复用同一套排序和延迟错误处理。
         let router = self.router.clone();
         self.finish(router)
     }
 }
 impl Default for AxumApp<()> {
+    /// 创建未绑定状态、未注册路由或 layer 的应用。
     fn default() -> Self {
         Self::new()
     }

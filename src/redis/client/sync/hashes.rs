@@ -1,7 +1,7 @@
 use serde::{de::DeserializeOwned, Serialize};
 
 use super::super::super::{codec, commands, error::RedisError};
-use super::super::{backend::RedisClient, decode};
+use super::super::{backend::RedisClient, decode, input};
 
 impl RedisClient {
     /// 读取 Hash 中的 MessagePack 值；field 不存在时返回 `None`。
@@ -18,10 +18,13 @@ impl RedisClient {
         key_value: K,
         field_value: F,
     ) -> Result<Option<T>, RedisError> {
+        // 在取得连接前校验并拥有 key；后续参数校验失败也不会发送命令。
         let key_value = commands::key(key_value, &self.inner.config)?;
         let field_value = commands::field(field_value, &self.inner.config)?;
+        // 按 Redis 参数顺序装配已校验输入，二进制内容不经字符串拼接。
         let command = commands::command("HGET", [key_value, field_value]);
         let value: Option<Vec<u8>> = self.execute_sync(&command)?;
+        // 缺失值保留 None；存在值经单值预算检查后才返回或反序列化。
         value
             .map(|bytes| codec::decode(&bytes, self.inner.config.max_value_bytes))
             .transpose()
@@ -41,10 +44,13 @@ impl RedisClient {
         key_value: K,
         field_value: F,
     ) -> Result<Option<Vec<u8>>, RedisError> {
+        // 在取得连接前校验并拥有 key；后续参数校验失败也不会发送命令。
         let key_value = commands::key(key_value, &self.inner.config)?;
         let field_value = commands::field(field_value, &self.inner.config)?;
+        // 按 Redis 参数顺序装配已校验输入，二进制内容不经字符串拼接。
         let command = commands::command("HGET", [key_value, field_value]);
         let value: Option<Vec<u8>> = self.execute_sync(&command)?;
+        // 缺失值保留 None；存在值经单值预算检查后才返回或反序列化。
         value
             .map(|bytes| commands::check_value_response(&bytes, &self.inner.config).map(|()| bytes))
             .transpose()
@@ -65,9 +71,11 @@ impl RedisClient {
         field_value: F,
         value: T,
     ) -> Result<u64, RedisError> {
+        // 在取得连接前校验并拥有 key；后续参数校验失败也不会发送命令。
         let key_value = commands::key(key_value, &self.inner.config)?;
         let field_value = commands::field(field_value, &self.inner.config)?;
         let value = commands::encoded(&value, &self.inner.config)?;
+        // 按 Redis 参数顺序装配已校验输入，二进制内容不经字符串拼接。
         let command = commands::command("HSET", [key_value, field_value, value]);
         self.execute_sync(&command)
     }
@@ -87,9 +95,11 @@ impl RedisClient {
         field_value: F,
         value: V,
     ) -> Result<u64, RedisError> {
+        // 在取得连接前校验并拥有 key；后续参数校验失败也不会发送命令。
         let key_value = commands::key(key_value, &self.inner.config)?;
         let field_value = commands::field(field_value, &self.inner.config)?;
         let value = commands::raw(value, &self.inner.config)?;
+        // 按 Redis 参数顺序装配已校验输入，二进制内容不经字符串拼接。
         let command = commands::command("HSET", [key_value, field_value, value]);
         self.execute_sync(&command)
     }
@@ -107,6 +117,7 @@ impl RedisClient {
         &self,
         key_value: K,
     ) -> Result<Vec<(Vec<u8>, T)>, RedisError> {
+        // 先复用 raw 响应的结构和预算检查，再按项解码，不返回部分成功结果。
         let entries = self.hgetall_bytes(key_value)?;
         entries
             .into_iter()
@@ -131,7 +142,9 @@ impl RedisClient {
         &self,
         key_value: K,
     ) -> Result<Vec<(Vec<u8>, Vec<u8>)>, RedisError> {
+        // 在取得连接前校验并拥有 key；后续参数校验失败也不会发送命令。
         let key_value = commands::key(key_value, &self.inner.config)?;
+        // 按 Redis 参数顺序装配已校验输入，二进制内容不经字符串拼接。
         let command = commands::command("HGETALL", [key_value]);
         let flat: Vec<Vec<u8>> = self.execute_sync(&command)?;
         decode::decode_hash_entries(flat, &self.inner.config)
@@ -151,8 +164,10 @@ impl RedisClient {
         key_value: K,
         field_value: F,
     ) -> Result<u64, RedisError> {
+        // 在取得连接前校验并拥有 key；后续参数校验失败也不会发送命令。
         let key_value = commands::key(key_value, &self.inner.config)?;
         let field_value = commands::field(field_value, &self.inner.config)?;
+        // 按 Redis 参数顺序装配已校验输入，二进制内容不经字符串拼接。
         let command = commands::command("HDEL", [key_value, field_value]);
         self.execute_sync(&command)
     }
@@ -171,8 +186,10 @@ impl RedisClient {
         key_value: K,
         field_value: F,
     ) -> Result<bool, RedisError> {
+        // 在取得连接前校验并拥有 key；后续参数校验失败也不会发送命令。
         let key_value = commands::key(key_value, &self.inner.config)?;
         let field_value = commands::field(field_value, &self.inner.config)?;
+        // 按 Redis 参数顺序装配已校验输入，二进制内容不经字符串拼接。
         let command = commands::command("HEXISTS", [key_value, field_value]);
         self.execute_sync(&command)
     }
@@ -187,7 +204,9 @@ impl RedisClient {
     /// let _ = RedisClient::hlen::<&str>;
     /// ```
     pub fn hlen<K: AsRef<[u8]>>(&self, key_value: K) -> Result<u64, RedisError> {
+        // 在取得连接前校验并拥有 key；后续参数校验失败也不会发送命令。
         let key_value = commands::key(key_value, &self.inner.config)?;
+        // 按 Redis 参数顺序装配已校验输入，二进制内容不经字符串拼接。
         let command = commands::command("HLEN", [key_value]);
         self.execute_sync(&command)
     }
@@ -208,25 +227,13 @@ impl RedisClient {
         F: AsRef<[u8]>,
         T: Serialize,
     {
-        let key_value = commands::key(key_value, &self.inner.config)?;
-        let mut args = vec![key_value];
-        let mut total = args[0].len();
-        for (field_value, value) in entries {
-            if (args.len() - 1) / 2 >= self.inner.config.max_batch_items {
-                return Err(RedisError::ValueTooLarge {
-                    limit: self.inner.config.max_batch_items,
-                });
-            }
-            let field_value = commands::field(field_value, &self.inner.config)?;
-            let value = commands::encoded(&value, &self.inner.config)?;
-            total = commands::add_batch_bytes(total, field_value.len(), &self.inner.config)?;
-            total = commands::add_batch_bytes(total, value.len(), &self.inner.config)?;
-            args.push(field_value);
-            args.push(value);
-        }
+        // 共享参数收集器按数量、字节和适用的 slot 约束完整校验后才返回命令参数。
+        let args = input::collect_hash_pairs(key_value, entries, &self.inner.config)?;
+        // 只有 Hash key 而没有 field/value 时，保持本地空操作。
         if args.len() == 1 {
             return Ok(0);
         }
+        // 按 Redis 参数顺序装配已校验输入，二进制内容不经字符串拼接。
         let command = commands::command("HSET", args);
         self.execute_sync(&command)
     }
@@ -247,25 +254,13 @@ impl RedisClient {
         F: AsRef<[u8]>,
         V: AsRef<[u8]>,
     {
-        let key_value = commands::key(key_value, &self.inner.config)?;
-        let mut args = vec![key_value];
-        let mut total = args[0].len();
-        for (field_value, value) in entries {
-            if (args.len() - 1) / 2 >= self.inner.config.max_batch_items {
-                return Err(RedisError::ValueTooLarge {
-                    limit: self.inner.config.max_batch_items,
-                });
-            }
-            let field_value = commands::field(field_value, &self.inner.config)?;
-            let value = commands::raw(value, &self.inner.config)?;
-            total = commands::add_batch_bytes(total, field_value.len(), &self.inner.config)?;
-            total = commands::add_batch_bytes(total, value.len(), &self.inner.config)?;
-            args.push(field_value);
-            args.push(value);
-        }
+        // 共享参数收集器按数量、字节和适用的 slot 约束完整校验后才返回命令参数。
+        let args = input::collect_hash_raw_pairs(key_value, entries, &self.inner.config)?;
+        // 只有 Hash key 而没有 field/value 时，保持本地空操作。
         if args.len() == 1 {
             return Ok(0);
         }
+        // 按 Redis 参数顺序装配已校验输入，二进制内容不经字符串拼接。
         let command = commands::command("HSET", args);
         self.execute_sync(&command)
     }

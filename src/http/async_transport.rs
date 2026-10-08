@@ -27,6 +27,7 @@ impl HttpClient {
     /// 该方法只在启用 `http-async` feature 时存在，并要求调用方已经运行在
     /// Tokio runtime 中；crate 不创建 runtime，也不会在异步入口中调用 `block_on`。
     pub async fn execute_async(&self, request: HttpRequest) -> Result<HttpResponse, HttpError> {
+        // 统一记录已完成调用；取消 future 不会留下虚假的完成事件。
         #[cfg(feature = "tracing")]
         let started = Instant::now();
         let result = self.execute_async_inner(request).await;
@@ -35,11 +36,14 @@ impl HttpClient {
         result
     }
 
+    /// 完成本地准备并选择缓存、follower 或独立异步网络执行。
     async fn execute_async_inner(&self, request: HttpRequest) -> Result<HttpResponse, HttpError> {
+        // 使用调用方 runtime；缺少 runtime 时在创建等待器或访问网络前返回稳定错误。
         if Handle::try_current().is_err() {
             return Err(HttpError::RuntimeRequired);
         }
 
+        // 重试与 follower 等待共用本次调用 deadline，不为每次重试重置预算。
         let prepared = self.prepare(request)?;
         let deadline = Instant::now() + prepared.timeout;
         let Some(key) = self.coalesce_key(&prepared) else {
@@ -48,6 +52,7 @@ impl HttpClient {
             return self.execute_network_async(&prepared, deadline).await;
         };
 
+        // 只在内存角色判定期间持同步锁；任何网络或 follower 等待都发生在锁释放后。
         let (flight, leader, cached, bypass) = {
             let mut state = policy::recover_lock(&self.async_state);
             let cached = if prepared.deduplication_policy.cache_enabled() {
@@ -68,6 +73,7 @@ impl HttpClient {
             }
         };
 
+        // 新键超过容量时独立执行；缓存命中直接返回，follower 只等待共享结果。
         if bypass {
             #[cfg(feature = "tracing")]
             http_trace::record_dispatch("async", &prepared.method, "capacity_bypass");
@@ -87,11 +93,13 @@ impl HttpClient {
         #[cfg(feature = "tracing")]
         http_trace::record_dispatch("async", &prepared.method, "leader");
 
+        // RAII 守卫随 future 取消而释放在途键并通知 follower，网络操作不会被后台续跑。
         let guard = AsyncLeaderGuard::new(self, key, flight, prepared);
         let result = self.execute_network_async(&guard.prepared, deadline).await;
         guard.finish(result)
     }
 
+    /// 在单一总 deadline 内执行有限异步尝试，保留网络次数与本地错误的区别。
     async fn execute_network_async(
         &self,
         prepared: &PreparedRequest,
@@ -100,6 +108,7 @@ impl HttpClient {
         let mut retries = 0;
         let mut attempts = 0;
         loop {
+            // 每次尝试仅获得尚未消耗的总预算，避免慢请求通过重试无限延长。
             let remaining = policy::remaining_until(deadline);
             if remaining.is_zero() {
                 return Err(policy::deadline_error(prepared, attempts));
@@ -107,6 +116,7 @@ impl HttpClient {
             attempts += 1;
             match self.run_async_attempt(prepared, remaining).await {
                 Ok(response) => {
+                    // 可重试状态直接释放响应并退避，不额外读取即将丢弃的正文。
                     let status = response.status().as_u16();
                     if policy::can_retry(prepared, attempts)
                         && prepared.retry_policy.should_retry_status(status)
@@ -122,6 +132,7 @@ impl HttpClient {
                         .await?;
                         continue;
                     }
+                    // 正文读取的本地限额失败立即返回；网络中断仍受方法和次数策略约束。
                     match read_async_response(
                         response,
                         self.config.max_response_body_bytes(),
@@ -153,6 +164,7 @@ impl HttpClient {
                 }
                 Err(AttemptError::Local(error)) => return Err(error),
                 Err(AttemptError::Transport(kind)) => {
+                    // exhausted 只反映网络尝试次数，方法不允许重试本身不会把它置为 true。
                     if policy::can_retry(prepared, attempts) {
                         retries += 1;
                         self.wait_for_retry_async(
@@ -174,11 +186,13 @@ impl HttpClient {
         }
     }
 
+    /// 将模型转换为一次 reqwest 请求，单次 timeout 使用总预算的剩余值。
     async fn run_async_attempt(
         &self,
         prepared: &PreparedRequest,
         remaining: Duration,
     ) -> Result<reqwest::Response, AttemptError> {
+        // 公开 Custom 变体可直接构造，因此方法和 header 在 provider 边界再次校验。
         let method = AsyncMethod::from_bytes(prepared.method.as_str().as_bytes())
             .map_err(|_| AttemptError::Local(HttpError::InvalidRequest { field: "method" }))?;
         let mut builder = self
@@ -192,6 +206,7 @@ impl HttpClient {
                 .map_err(|_| AttemptError::Local(HttpError::InvalidHeaderValue))?;
             builder = builder.header(name, value);
         }
+        // reqwest 请求拥有正文；重试所需的原始缓冲区继续由 PreparedRequest 持有。
         if let Some(body) = &prepared.body {
             builder = builder.body(body.clone());
         }
@@ -201,6 +216,7 @@ impl HttpClient {
             .map_err(|error| AttemptError::Transport(map_reqwest_error(&error)))
     }
 
+    /// 仅在总预算能容纳退避时异步等待，返回后重新确认 deadline。
     async fn wait_for_retry_async(
         &self,
         policy: &RetryPolicy,
@@ -208,6 +224,7 @@ impl HttpClient {
         deadline: Instant,
         attempts: u32,
     ) -> Result<(), HttpError> {
+        // 不让退避突破总预算，也不把预算不足误报为已经用尽网络尝试次数。
         let delay = policy.delay_for_retry(retry_number);
         let remaining = policy::remaining_until(deadline);
         if delay >= remaining {
@@ -219,6 +236,7 @@ impl HttpClient {
                 attempts >= policy.max_retries(),
             ));
         }
+        // 等待可被取消；调度延迟可能超过目标值，因此醒来后重新检查剩余时间。
         time::sleep(delay).await;
         if Instant::now() >= deadline {
             #[cfg(feature = "tracing")]
@@ -235,11 +253,13 @@ impl HttpClient {
     }
 }
 
+/// 读取有界响应 header 和正文；未知 Content-Length 时按 chunk 累计限制。
 async fn read_async_response(
     mut response: reqwest::Response,
     limit: usize,
     attempts: u32,
 ) -> Result<HttpResponse, AttemptError> {
+    // 先处理有界 header 与长度提示，避免为明显超限正文继续分配。
     let status = response.status().as_u16();
     let mut headers = HttpHeaders::new();
     for (name, value) in response.headers() {
@@ -253,6 +273,7 @@ async fn read_async_response(
     {
         return Err(AttemptError::Local(HttpError::ResponseTooLarge { limit }));
     }
+    // 每次追加前检查剩余字节预算，不能仅信任服务端声明的长度。
     let mut body = Vec::with_capacity(limit.min(8192));
     while let Some(chunk) = response
         .chunk()
@@ -267,7 +288,9 @@ async fn read_async_response(
     Ok(HttpResponse::new(status, headers, body, attempts))
 }
 
+/// 使用 reqwest 的稳定类别接口脱敏；连接阶段 TLS 失败保持 Connection。
 fn map_reqwest_error(error: &reqwest::Error) -> HttpTransportErrorKind {
+    // reqwest 没有独立 TLS 判定接口，不用错误字符串猜测证书或握手失败。
     if error.is_timeout() {
         HttpTransportErrorKind::Timeout
     } else if error.is_connect() {

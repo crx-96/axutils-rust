@@ -3,11 +3,11 @@
 use std::fmt;
 use std::time::Duration;
 
-use super::config::DeduplicationPolicy;
 use super::headers::HttpHeaders;
 #[cfg(feature = "http-json")]
 use super::request::HttpRequest;
 use super::retry::RetryPolicy;
+use super::DeduplicationPolicy;
 use super::HttpError;
 
 /// 单次便捷 HTTP 调用的可选配置。
@@ -16,9 +16,13 @@ use super::HttpError;
 /// 连接池、响应体总上限和基础 URL 等实例级配置仍由 [`super::HttpConfig`] 管理。
 #[derive(Clone, Default, Eq, PartialEq)]
 pub struct HttpRequestOptions {
+    /// 仅本次调用使用的 header 覆盖集合；普通同名项替换客户端默认项。
     headers: HttpHeaders,
+    /// 可选总网络预算；None 沿用客户端配置。
     timeout: Option<Duration>,
+    /// 可选完整重试策略；None 沿用客户端配置。
     retry_policy: Option<RetryPolicy>,
+    /// 可选合并策略；Some 表示调用方对本请求显式选择。
     deduplication_policy: Option<DeduplicationPolicy>,
 }
 
@@ -66,6 +70,7 @@ impl HttpRequestOptions {
         name: impl AsRef<[u8]>,
         value: impl AsRef<[u8]>,
     ) -> Result<Self, HttpError> {
+        // 交给 header 容器原子替换并校验大小，实际默认值合并在 execute 时进行。
         self.headers.set(name, value)?;
         Ok(self)
     }
@@ -94,6 +99,7 @@ impl HttpRequestOptions {
         name: impl AsRef<[u8]>,
         value: impl AsRef<[u8]>,
     ) -> Result<Self, HttpError> {
+        // 保留普通重复项顺序，敏感重复项由容器立即拒绝。
         self.headers.append(name, value)?;
         Ok(self)
     }
@@ -117,6 +123,7 @@ impl HttpRequestOptions {
     /// # fn main() {}
     /// ```
     pub fn with_timeout(mut self, timeout: Duration) -> Result<Self, HttpError> {
+        // 请求级预算与 HttpRequest 采用相同范围，不允许零值或无界时长。
         if timeout.is_zero() || timeout > Duration::from_secs(60 * 60) {
             return Err(HttpError::InvalidRequest { field: "timeout" });
         }
@@ -148,6 +155,8 @@ impl HttpRequestOptions {
     ///
     /// `max_retries` 包括首次请求；设置为 `1` 表示只发送一次请求，设置为 `3` 最多进行三次
     /// 网络尝试。方法名沿用现有 API 路径，不代表额外重试次数。
+    /// 如果本 options 已通过 `with_retry_policy` 设置策略，则保留其余选项；否则以
+    /// [`RetryPolicy::default`] 为基础生成完整覆盖，不继承客户端自定义的其他重试选项。
     ///
     /// # Examples
     ///
@@ -163,6 +172,7 @@ impl HttpRequestOptions {
     /// # fn main() {}
     /// ```
     pub fn with_max_retries(mut self, max_retries: u32) -> Result<Self, HttpError> {
+        // 修改本 options 已设置的策略；未设置时以 RetryPolicy 默认值为基础生成完整覆盖。
         let policy = self
             .retry_policy
             .take()
@@ -250,13 +260,16 @@ impl HttpRequestOptions {
     }
 
     #[cfg(feature = "http-json")]
-    pub(crate) fn apply_to_request(
+    /// 把已验证的可选项应用到便捷 API 新建的请求，保留重复 header 与显式策略语义。
+    pub(super) fn apply_to_request(
         &self,
         mut request: HttpRequest,
     ) -> Result<HttpRequest, HttpError> {
+        // 逐项追加以保留原顺序，任何合并错误直接中止构造而不执行网络请求。
         for (name, value) in self.headers.iter() {
             request = request.append_header(name, value)?;
         }
+        // 仅覆盖显式配置的选项，None 继续由客户端默认值决定。
         if let Some(timeout) = self.timeout {
             request = request.with_timeout(timeout)?;
         }
@@ -271,6 +284,7 @@ impl HttpRequestOptions {
 }
 
 impl fmt::Debug for HttpRequestOptions {
+    /// 仅显示预算、策略与 header 统计，不输出任何 header 值。
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("HttpRequestOptions")

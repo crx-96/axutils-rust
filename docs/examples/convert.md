@@ -10,7 +10,7 @@
 
 ```toml
 [dependencies]
-axutils = { version = "1.2", features = ["itoa", "ryu", "uuid"] }
+axutils = { version = "2.0", features = ["itoa", "ryu", "uuid"] }
 uuid = { version = "1", default-features = false, features = ["std"] }
 ```
 

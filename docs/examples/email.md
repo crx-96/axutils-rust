@@ -5,7 +5,7 @@
 
 ```toml
 [dependencies]
-axutils = { version = "1.2", features = ["email"] }
+axutils = { version = "2.0", features = ["email"] }
 ```
 
 ## 实例 API
@@ -44,6 +44,10 @@ fn send() -> Result<(), EmailError> {
 `send` 会连接 SMTP 服务并执行 I/O，因此应由应用在适当的重试、超时和审计边界内调用。输入、收件人
 和服务端错误均映射为 `axutils::email::EmailError`；不要将原始凭据或完整邮件正文拼接到错误输出。
 
+每个同步或异步连接池最多保留 10 条空闲连接，空闲达到 60 秒后由池清理。这不限制正在发送的
+连接数；应用应自行限制发送并发。SMTP 认证拒绝归为 `Authentication`，其他已解析的 4xx/5xx
+拒绝归为 `SmtpResponse`，错误中不保留服务端原始文本。
+
 ## 异步发送
 
 异步发送要求启用 `email-async`，并由调用方提供仍然存活的 Tokio runtime。client 可以在 runtime
@@ -52,7 +56,7 @@ runtime 中持续复用，不能假设可以跨已结束的 runtime 迁移。
 
 ```toml
 [dependencies]
-axutils = { version = "1.2", features = ["email-async"] }
+axutils = { version = "2.0", features = ["email-async"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 ```
 

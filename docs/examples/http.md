@@ -16,14 +16,14 @@ HTTP 是显式启用的客户端领域；类型和错误都从 `axutils::http` �
 
 ```toml
 [dependencies]
-axutils = { version = "1.2", features = ["http"] }
+axutils = { version = "2.0", features = ["http"] }
 ```
 
 异步 JSON 客户端：
 
 ```toml
 [dependencies]
-axutils = { version = "1.2", features = ["http-async", "http-json"] }
+axutils = { version = "2.0", features = ["http-async", "http-json"] }
 serde = { version = "1", features = ["derive"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
@@ -184,6 +184,9 @@ fn main() -> Result<(), HttpError> {
 
 - URL 仅接受 `http`/`https`，拒绝用户信息、片段、控制字符和不安全 scheme。Header 名和值、请求体、
   响应体均有本地上限；`HttpError` 不保留 URL、Header 值、body 或第三方错误文本。
+  原始 URL 的非空、8 KiB 及控制字符检查在规范化前执行；基地址和带查询参数的快捷 API 使用相同规则。
+  authority 中显式出现的空用户信息也会被拒绝，路径或查询参数里的 `@` 不受影响；带首尾空格的
+  `//host/path` 仍属于被拒绝的跨主机相对写法。
 - 默认总 timeout 为 30 秒、连接 timeout 为 10 秒。`RetryPolicy::max_retries` 是总网络尝试数，默认
   3，传入 1 禁用自动重试；只有安全方法默认参与重试，非幂等写入需显式允许并自行确认幂等语义。
 - 默认仅合并无 body 的 `GET`/`HEAD`/`OPTIONS` in-flight 请求。带 body 或写请求须在请求级显式
@@ -193,3 +196,9 @@ fn main() -> Result<(), HttpError> {
   无 body `GET`/`HEAD`。带认证、Cookie、Range、条件请求或禁止缓存指令的请求不会进入缓存。
 - 传输、TLS、超时、大小限制和本地校验才返回 `HttpError`；HTTP 4xx/5xx 通过 `HttpResponse` 返回。
   匹配 `HttpError` 或 `HttpTransportErrorKind` 时应保留 wildcard，因为它们是 `non_exhaustive`。
+  同步后端可将 TLS 失败单独归为 `Tls`；异步 reqwest 后端的连接阶段 TLS 失败归为 `Connection`，
+  不通过匹配底层错误文本猜测分类。
+
+`head<T>` 和 `head_async<T>` 保留了现有的 JSON 解码签名，但合规 HEAD 响应没有正文，因此这两个
+方法会返回 `JsonDeserialize`。需要状态码或响应头时，使用 `execute` / `execute_async` 配合
+`HttpMethod::Head`；`head_bytes` / `head_bytes_async` 返回空字节向量。

@@ -23,12 +23,17 @@ use super::{HttpConfig, HttpError};
 /// 与 `Content-Length`；响应体上限此时约束解压后的字节。需要逐字节保留原始压缩响应时使用
 /// 异步入口。
 pub struct HttpClient {
+    /// 客户端不可变配置，所有执行路径共用同一组预算。
     pub(super) config: HttpConfig,
+    /// 同步 ureq 客户端及其独立连接池。
     pub(super) sync_agent: SyncAgent,
+    /// 同步 single-flight 与完成缓存；锁仅覆盖内存状态操作。
     pub(super) sync_state: Mutex<SyncState>,
     #[cfg(feature = "http-async")]
+    /// 异步 reqwest 客户端及其独立连接池。
     pub(super) async_client: AsyncClient,
     #[cfg(feature = "http-async")]
+    /// 异步 single-flight 与完成缓存，不与同步请求合并。
     pub(super) async_state: Mutex<AsyncState>,
 }
 
@@ -44,6 +49,7 @@ impl HttpClient {
     /// let _ = client;
     /// ```
     pub fn new(config: HttpConfig) -> Result<Self, HttpError> {
+        // 同步与异步后端各自持有连接池，关闭代理/重定向并由本库统一控制显式重试。
         let sync_agent = SyncAgent::config_builder()
             .http_status_as_error(false)
             .proxy(None)
@@ -59,6 +65,7 @@ impl HttpClient {
             .build()
             .new_agent();
 
+        // 异步解压逐项关闭，避免下游 provider feature 合并改变响应字节语义。
         #[cfg(feature = "http-async")]
         let async_client = AsyncClient::builder()
             .redirect(RedirectPolicy::none())
@@ -77,6 +84,7 @@ impl HttpClient {
             .build()
             .map_err(|_| HttpError::ClientBuild)?;
 
+        // 客户端构造不访问网络；两条执行路径使用独立的合并状态和完成缓存。
         Ok(Self {
             config,
             sync_agent,
@@ -104,6 +112,7 @@ impl HttpClient {
 }
 
 impl fmt::Debug for HttpClient {
+    /// 只委托已经脱敏的配置展示，不展开后端连接池或请求状态。
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("HttpClient")

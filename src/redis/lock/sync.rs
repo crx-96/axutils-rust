@@ -19,14 +19,20 @@ use super::common::{
 /// TTL 严格大于 0 且不超过 24 小时，因此正常退出和 panic unwind 都可能让远端锁继续残留至
 /// 当前 TTL 到期；`Drop` 不提供释放确认，也不会创建线程或 runtime 来补做释放。
 pub struct RedisLockGuard {
+    /// 获取租约的共享客户端，只用于显式释放和续租。
     client: RedisClient,
+    /// 租约 key 的拥有型字节，不通过 Debug 或公开 getter 暴露。
     key: Vec<u8>,
+    /// 随机所有者 token，Lua 比较用以保护后来替代的持有者。
     token: [u8; TOKEN_BYTES],
+    /// 获取或最近一次可靠续租时确认的有效毫秒 TTL，不表示剩余时间。
     pub(super) ttl: Duration,
+    /// 本地尚未确认释放或所有权丢失；true 不能证明远端租约仍有效。
     pub(super) active: bool,
 }
 
 impl RedisLockGuard {
+    /// 接管成功获取租约后的客户端、key、token 和已校验的有效 TTL。
     pub(crate) fn new(
         client: RedisClient,
         key: Vec<u8>,
@@ -67,6 +73,7 @@ impl RedisLockGuard {
     /// let _ = release_lock;
     /// ```
     pub fn release(&mut self) -> Result<bool, RedisError> {
+        // 已失效 guard 不发送命令，重复操作保留本地幂等结果。
         if !self.active {
             return Ok(false);
         }
@@ -100,8 +107,10 @@ impl RedisLockGuard {
     /// let _ = renew_lock;
     /// ```
     pub fn renew(&mut self, ttl: Duration) -> Result<bool, RedisError> {
+        // 先校验新的租约预算，再判断活动状态，保留无效 TTL 的既有错误优先级。
         let ttl_millis = lock_ttl_millis(ttl)?;
         let effective_ttl = lock_ttl_duration(ttl)?;
+        // 已失效 guard 不发送命令，重复操作保留本地幂等结果。
         if !self.active {
             return Ok(false);
         }
@@ -113,10 +122,12 @@ impl RedisLockGuard {
 }
 
 impl Drop for RedisLockGuard {
+    /// 有意不执行网络或后台清理，未显式释放的远端租约依靠 TTL 到期。
     fn drop(&mut self) {}
 }
 
 impl fmt::Debug for RedisLockGuard {
+    /// 只输出本地活动标记和有效 TTL，不泄露 key、token 或客户端配置。
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("RedisLockGuard")

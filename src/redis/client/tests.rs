@@ -19,6 +19,59 @@ fn construction_is_local_and_supports_clone() {
 
 #[cfg(feature = "redis-cluster")]
 #[test]
+fn cluster_multi_key_input_rejects_cross_slot_before_transport() {
+    use super::input::collect_value_pairs;
+
+    let config = RedisConfig::cluster(["redis://127.0.0.1:7000/0"]).unwrap();
+    assert_eq!(
+        collect_keys(["{first}:a", "{second}:b"], &config),
+        Err(RedisError::CrossSlot)
+    );
+    assert_eq!(
+        collect_raw_pairs([("{first}:a", "value"), ("{second}:b", "value")], &config),
+        Err(RedisError::CrossSlot)
+    );
+    assert_eq!(
+        collect_value_pairs([("{first}:a", 1_u8), ("{second}:b", 2_u8)], &config),
+        Err(RedisError::CrossSlot)
+    );
+}
+
+#[cfg(feature = "redis-cluster")]
+#[test]
+fn cluster_multi_key_input_preserves_tags_values_and_validation_priority() {
+    use super::input::collect_value_pairs;
+
+    let config = RedisConfig::cluster(["redis://127.0.0.1:7000/0"]).unwrap();
+    let keys = [b"\x00{same}:a".as_slice(), b"\xff{same}:b".as_slice()];
+    assert_eq!(
+        collect_keys(keys, &config).unwrap(),
+        keys.map(<[u8]>::to_vec)
+    );
+    assert!(collect_keys(std::iter::empty::<&str>(), &config)
+        .unwrap()
+        .is_empty());
+    assert!(collect_keys(["one"], &config).is_ok());
+    assert_eq!(
+        collect_raw_pairs([("{same}:a", "{first}"), ("{same}:b", "{second}")], &config).unwrap(),
+        ["{same}:a", "{first}", "{same}:b", "{second}"].map(|value| value.as_bytes().to_vec())
+    );
+    assert!(collect_value_pairs([("{same}:a", 1_u8), ("{same}:b", 2_u8)], &config).is_ok());
+    assert_eq!(
+        collect_keys(["{first}:a", "{second}:b", ""], &config),
+        Err(RedisError::InvalidKey)
+    );
+    let one_item = config.with_max_batch_items(1).unwrap();
+    assert_eq!(
+        collect_keys(["{first}:a", "{second}:b"], &one_item),
+        Err(RedisError::ValueTooLarge { limit: 1 })
+    );
+    let single = RedisConfig::single("redis://127.0.0.1:6379/0").unwrap();
+    assert!(collect_keys(["{first}:a", "{second}:b"], &single).is_ok());
+}
+
+#[cfg(feature = "redis-cluster")]
+#[test]
 fn cluster_transaction_is_rejected_before_callback() {
     let client = RedisClient::new(RedisConfig::cluster(["redis://127.0.0.1:7000/0"]).unwrap())
         .expect("client construction should not connect");
@@ -53,6 +106,42 @@ fn local_batch_and_response_limits_are_checked_before_network() {
     assert_eq!(
         check_optional_values(vec![Some(vec![1, 2]), Some(vec![3, 4])], &config),
         Err(RedisError::ResponseTooLarge { limit: 3 })
+    );
+}
+
+#[test]
+fn hash_pair_collectors_keep_empty_and_exact_budget_contracts() {
+    use super::input::{collect_hash_pairs, collect_hash_raw_pairs};
+
+    let config = RedisConfig::single("redis://127.0.0.1:6379/0")
+        .unwrap()
+        .with_max_batch_items(1)
+        .unwrap()
+        .with_max_batch_bytes(3)
+        .unwrap();
+    assert_eq!(
+        collect_hash_raw_pairs("k", [("f", "v")], &config).unwrap(),
+        [b"k".to_vec(), b"f".to_vec(), b"v".to_vec()]
+    );
+    assert_eq!(
+        collect_hash_pairs("k", [("f", 1_u8)], &config).unwrap(),
+        [b"k".to_vec(), b"f".to_vec(), vec![1]]
+    );
+    assert_eq!(
+        collect_hash_raw_pairs("key", [("f", "v")], &config),
+        Err(RedisError::ValueTooLarge { limit: 3 })
+    );
+    assert_eq!(
+        collect_hash_pairs("k", [("f", 1_u8), ("g", 2_u8)], &config),
+        Err(RedisError::ValueTooLarge { limit: 1 })
+    );
+    assert_eq!(
+        collect_hash_pairs("long-key", std::iter::empty::<(&str, u8)>(), &config).unwrap(),
+        [b"long-key".to_vec()]
+    );
+    assert_eq!(
+        collect_hash_raw_pairs("long-key", std::iter::empty::<(&str, &str)>(), &config).unwrap(),
+        [b"long-key".to_vec()]
     );
 }
 

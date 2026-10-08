@@ -1,3 +1,5 @@
+//! Tower HTTP 配置校验及有序安装；request ID 始终覆盖本模块生成的错误响应。
+
 use super::super::{AxumError, AxumServerBuilder};
 use axum::{
     extract::{MatchedPath, Request},
@@ -16,6 +18,7 @@ use tower_http::{
     timeout::TimeoutLayer,
 };
 
+/// 内部请求关联 ID 的 header 名；入站值会被移除，响应值由本库覆盖。
 const REQUEST_ID: HeaderName = HeaderName::from_static("x-request-id");
 /// `tower-http` service timeout 的 HTTP 响应状态。
 ///
@@ -102,6 +105,7 @@ pub struct AxumCorsConfig {
     pub max_age: Option<Duration>,
 }
 impl Default for AxumCorsConfig {
+    /// 默认不开放任何跨源访问，也不安装 CORS layer。
     fn default() -> Self {
         Self {
             origins: AxumCorsOrigin::Disabled,
@@ -114,7 +118,9 @@ impl Default for AxumCorsConfig {
     }
 }
 impl AxumCorsConfig {
+    /// 检查大小与 wildcard/credentials 组合，生成可选 layer，避免 provider panic。
     fn layer(self) -> Result<Option<CorsLayer>, AxumError> {
+        // 列表总量和通配符先校验，即使 CORS 被禁用也不接受含混配置。
         if self.methods.len() > 64 || self.headers.len() > 64 || self.expose_headers.len() > 64 {
             return Err(AxumError::InvalidConfig { field: "cors_list" });
         }
@@ -145,6 +151,7 @@ impl AxumCorsConfig {
                 field: "cors_max_age",
             });
         }
+        // Disabled 或空 origin 列表不安装 layer；显式 Any 也不能隐式允许凭据。
         let mut layer = CorsLayer::new();
         match self.origins {
             AxumCorsOrigin::Disabled => return Ok(None),
@@ -171,6 +178,7 @@ impl AxumCorsConfig {
                 layer = layer.allow_origin(v)
             }
         }
+        // 仅转交调用方明确给定的规则，空集合不会扩大成通配权限。
         if !self.methods.is_empty() {
             layer = layer.allow_methods(self.methods)
         }
@@ -222,6 +230,7 @@ impl AxumServerBuilder {
         duration: Duration,
         status: AxumTimeoutStatus,
     ) -> Result<Self, AxumError> {
+        // 保存最后一次合法预算，最终统一安装以确保 request ID 包裹超时响应。
         if !(Duration::from_millis(1)..=Duration::from_secs(600)).contains(&duration) {
             return Err(AxumError::InvalidConfig {
                 field: "service_timeout",
@@ -242,6 +251,7 @@ impl AxumServerBuilder {
     /// # }
     /// ```
     pub fn with_body_limit(mut self, max_bytes: usize) -> Result<Self, AxumError> {
+        // 先校验静态预算；layer 同时限制已声明 Content-Length 和实际读取的流式正文。
         if !(1..=64 * 1024 * 1024).contains(&max_bytes) {
             return Err(AxumError::InvalidConfig {
                 field: "max_body_bytes",
@@ -275,12 +285,15 @@ impl AxumServerBuilder {
     /// # }
     /// ```
     pub fn with_cors(mut self, config: AxumCorsConfig) -> Result<Self, AxumError> {
+        // 配置先完整转换，禁用模式保留原 Router，不创建空壳 layer。
         if let Some(layer) = config.layer()? {
             self.router = self.router.layer(layer)
         }
         Ok(self)
     }
-    pub(crate) fn finalize_tower_http(mut self) -> Self {
+    /// 按固定内外顺序安装需要协调的 layer，保持调用 builder 方法的顺序无关性。
+    pub(in crate::axum) fn finalize_tower_http(mut self) -> Self {
+        // 请求经过 request-id → trace → timeout → catch-panic → 原 Router，响应反向。
         if self.catch_panic_installed {
             self.router = self.router.layer(CatchPanicLayer::new());
         }
@@ -303,7 +316,9 @@ impl AxumServerBuilder {
         self
     }
 }
+/// 为本次请求生成内部 ID，并强制让 handler 与最终响应使用同一个值。
 async fn force_request_id(mut request: Request, next: Next) -> Response {
+    // HeaderMap::remove 移除该名字的全部值，避免客户端伪造或注入多个关联 ID。
     request.headers_mut().remove(&REQUEST_ID);
     let mut maker = MakeRequestUuid;
     let id = maker
@@ -313,6 +328,7 @@ async fn force_request_id(mut request: Request, next: Next) -> Response {
         .headers_mut()
         .insert(REQUEST_ID, id.header_value().clone());
     request.extensions_mut().insert(id.clone());
+    // 扩展供 trace 读取；响应无论来自 handler、timeout 还是 panic layer，都覆盖冲突值。
     let mut response = next.run(request).await;
     response
         .headers_mut()
@@ -337,8 +353,10 @@ impl AxumServerBuilder {
     }
 }
 #[cfg(feature = "tracing")]
+/// 记录 HTTP 方法、已匹配路由、内部 ID 和结果指标，不记录 URI 查询、header 或正文。
 async fn trace_request(request: Request, next: Next) -> Response {
     use std::time::Instant;
+    // 在移动 request 前提取脱敏上下文；未匹配请求使用固定占位符。
     let method = request.method().clone();
     let route = request
         .extensions()
@@ -351,6 +369,7 @@ async fn trace_request(request: Request, next: Next) -> Response {
         .and_then(|id| id.header_value().to_str().ok())
         .unwrap_or("<missing>")
         .to_owned();
+    // 只有 service future 完成才记录响应指标；取消不产生完成事件。
     let start = Instant::now();
     let response = next.run(request).await;
     tracing::info!(target:"axutils::axum",method=%method,matched_route=%route,request_id,status=response.status().as_u16(),latency_micros=start.elapsed().as_micros(),"http request completed");

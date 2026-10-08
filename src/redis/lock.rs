@@ -10,9 +10,10 @@ mod tests;
 pub use asynchronous::RedisAsyncLockGuard;
 pub use sync::RedisLockGuard;
 
-pub(crate) use common::{acquire_command, lock_ttl_millis, release_command, renew_command, token};
+pub(crate) use common::{
+    acquire_command, lock_ttl_duration, lock_ttl_millis, release_command, renew_command, token,
+};
 #[cfg(test)]
 use common::{
-    finish_release, finish_renew, lock_ttl_duration, script_result, token_with_rng, RELEASE_SCRIPT,
-    RENEW_SCRIPT,
+    finish_release, finish_renew, script_result, token_with_rng, RELEASE_SCRIPT, RENEW_SCRIPT,
 };

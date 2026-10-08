@@ -1,14 +1,22 @@
+//! SMTP 配置校验与不会回显账号信息的诊断。
+
 use std::{fmt, net::IpAddr, str::FromStr, time::Duration};
 
 use lettre::{message::Mailbox, Address};
 
 use super::error::EmailError;
 
+/// ASCII DNS 主机名的最大字节数，不包含末尾根域点。
 const MAX_HOST_BYTES: usize = 253;
+/// 用户名、密码和发件地址各自允许的最大 UTF-8 字节数。
 const MAX_CREDENTIAL_BYTES: usize = 4 * 1024;
+/// 发件显示名允许的最大 UTF-8 字节数。
 const MAX_FROM_NAME_BYTES: usize = 512;
+/// 未覆盖配置时，每次 SMTP 命令的等待预算。
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
+/// 自定义 SMTP 命令预算的最小值。
 const MIN_TIMEOUT: Duration = Duration::from_secs(1);
+/// 自定义 SMTP 命令预算的最大值。
 const MAX_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 
 /// SMTP 连接的强制 TLS 模式。
@@ -26,14 +34,22 @@ pub enum EmailSecurity {
 /// 私有且不会实现 `Clone`；配置被 [`crate::email::EmailClient::new`] 消费后，调用方不能再读取密码。
 /// `host` 仅接受 ASCII DNS 主机名，不接受 SMTP URL、端口、路径或 IP 字面量。
 pub struct EmailConfig {
-    pub(crate) host: String,
-    pub(crate) port: u16,
-    pub(crate) security: EmailSecurity,
-    pub(crate) username: String,
-    pub(crate) password: String,
-    pub(crate) from: Address,
-    pub(crate) from_name: Option<String>,
-    pub(crate) timeout: Duration,
+    /// 已验证的 ASCII DNS 主机名；不接收 URL、端口或 IP 字面量。
+    pub(super) host: String,
+    /// 非零 SMTP TCP 端口；安全模式不会隐式覆盖此值。
+    pub(super) port: u16,
+    /// 强制 TLS 的连接模式，不允许降级为明文认证。
+    pub(super) security: EmailSecurity,
+    /// 非空认证用户名，最大 4 KiB，不含控制字符或首尾空白。
+    pub(super) username: String,
+    /// 原样保留的非空认证密码，最大 4 KiB，禁止回显。
+    pub(super) password: String,
+    /// 已由 Lettre 解析的发件地址，同时用于生成 envelope 和邮件头。
+    pub(super) from: Address,
+    /// 可选显示名；`None` 表示邮件头只使用发件地址。
+    pub(super) from_name: Option<String>,
+    /// SMTP 命令等待预算，默认 30 秒，允许 1 秒至 5 分钟。
+    pub(super) timeout: Duration,
 }
 
 impl EmailConfig {
@@ -75,6 +91,7 @@ impl EmailConfig {
         password: impl Into<String>,
         from_email: impl Into<String>,
     ) -> Result<Self, EmailError> {
+        // 先确认网络目标的语法与端口，不进行 DNS 查询或连接。
         let host = host.into();
         validate_host(&host)?;
 
@@ -82,6 +99,7 @@ impl EmailConfig {
             return Err(EmailError::invalid_config("port"));
         }
 
+        // 认证用户名限制格式；密码只限制非空和大小，保留调用方输入的精确字节。
         let username = username.into();
         validate_non_empty_bounded(&username, MAX_CREDENTIAL_BYTES, "username")?;
         if username.trim() != username || contains_control(&username) {
@@ -91,6 +109,7 @@ impl EmailConfig {
         let password = password.into();
         validate_non_empty_bounded(&password, MAX_CREDENTIAL_BYTES, "password")?;
 
+        // 发件地址独立校验，错误仅包含固定字段名而不传播解析器输入。
         let from_email = from_email.into();
         validate_non_empty_bounded(&from_email, MAX_CREDENTIAL_BYTES, "from_email")?;
         if from_email.trim() != from_email || contains_control(&from_email) {
@@ -141,6 +160,7 @@ impl EmailConfig {
     /// # }
     /// ```
     pub fn with_from_name(mut self, from_name: impl Into<String>) -> Result<Self, EmailError> {
+        // 显示名将进入邮件头，因此拒绝控制字符与含混的首尾空白。
         let from_name = from_name.into();
         if from_name.is_empty()
             || from_name.len() > MAX_FROM_NAME_BYTES
@@ -185,6 +205,7 @@ impl EmailConfig {
     /// # }
     /// ```
     pub fn with_timeout(mut self, timeout: Duration) -> Result<Self, EmailError> {
+        // 在构造 transport 前限制预算，避免零值或过大的底层等待时间。
         if !(MIN_TIMEOUT..=MAX_TIMEOUT).contains(&timeout) {
             return Err(EmailError::invalid_config("timeout"));
         }
@@ -193,12 +214,14 @@ impl EmailConfig {
         Ok(self)
     }
 
-    pub(crate) fn mailbox(&self) -> Mailbox {
+    /// 克隆已校验的地址和可选显示名，生成邮件构建器使用的发件 mailbox。
+    pub(super) fn mailbox(&self) -> Mailbox {
         Mailbox::new(self.from_name.clone(), self.from.clone())
     }
 }
 
 impl fmt::Debug for EmailConfig {
+    /// 仅展示端口、安全模式和预算；账号、主机及身份信息统一脱敏。
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("EmailConfig")
@@ -214,7 +237,9 @@ impl fmt::Debug for EmailConfig {
     }
 }
 
+/// 校验不带端口的 ASCII DNS 名称；只返回固定的 `host` 字段错误。
 fn validate_host(host: &str) -> Result<(), EmailError> {
+    // 先拒绝整体非法输入和 IP，再逐 label 检查 DNS 长度、字符与连字符位置。
     if host.is_empty()
         || host.len() > MAX_HOST_BYTES
         || host.trim() != host
@@ -241,6 +266,7 @@ fn validate_host(host: &str) -> Result<(), EmailError> {
     }
 }
 
+/// 对账号字段应用非空和字节预算，不改变输入，也不把输入写入错误。
 fn validate_non_empty_bounded(
     value: &str,
     max_bytes: usize,
@@ -255,6 +281,7 @@ fn validate_non_empty_bounded(
     Ok(())
 }
 
+/// 检测 Unicode 控制字符，阻止配置值被解释为邮件头或协议分隔符。
 fn contains_control(value: &str) -> bool {
     value.chars().any(char::is_control)
 }

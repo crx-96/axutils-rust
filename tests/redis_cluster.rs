@@ -40,6 +40,74 @@ fn cluster_transaction_is_rejected_without_network_access() {
 }
 
 #[test]
+fn cross_slot_command_families_fail_before_connecting() {
+    let (listener, client) = validation_client();
+    let keys = ["{first}:a", "{second}:b"];
+    assert_eq!(client.delete_many(keys), Err(RedisError::CrossSlot));
+    assert_eq!(client.mget::<_, _, u8>(keys), Err(RedisError::CrossSlot));
+    assert_eq!(client.mget_bytes(keys), Err(RedisError::CrossSlot));
+    assert_eq!(
+        client.mset([(keys[0], 1_u8), (keys[1], 2_u8)]),
+        Err(RedisError::CrossSlot)
+    );
+    assert_eq!(
+        client.mset_bytes([(keys[0], "one"), (keys[1], "two")]),
+        Err(RedisError::CrossSlot)
+    );
+    assert!(
+        matches!(listener.accept(), Err(error) if error.kind() == std::io::ErrorKind::WouldBlock)
+    );
+}
+
+#[cfg(feature = "redis-cluster-async")]
+#[tokio::test]
+async fn async_cross_slot_command_families_fail_before_connecting() {
+    let (listener, client) = validation_client();
+    let keys = ["{first}:a", "{second}:b"];
+    assert_eq!(
+        client.delete_many_async(keys).await,
+        Err(RedisError::CrossSlot)
+    );
+    assert_eq!(
+        client.mget_async::<_, _, u8>(keys).await,
+        Err(RedisError::CrossSlot)
+    );
+    assert_eq!(
+        client.mget_bytes_async(keys).await,
+        Err(RedisError::CrossSlot)
+    );
+    assert_eq!(
+        client.mset_async([(keys[0], 1_u8), (keys[1], 2_u8)]).await,
+        Err(RedisError::CrossSlot)
+    );
+    assert_eq!(
+        client
+            .mset_bytes_async([(keys[0], "one"), (keys[1], "two")])
+            .await,
+        Err(RedisError::CrossSlot)
+    );
+    assert!(
+        matches!(listener.accept(), Err(error) if error.kind() == std::io::ErrorKind::WouldBlock)
+    );
+}
+
+fn validation_client() -> (std::net::TcpListener, RedisClient) {
+    let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let config = RedisConfig::cluster([format!("redis://{}/0", listener.local_addr().unwrap())])
+        .unwrap()
+        .with_pool_size(1)
+        .unwrap()
+        .with_connection_timeout(std::time::Duration::from_millis(50))
+        .unwrap()
+        .with_pool_checkout_timeout(std::time::Duration::from_millis(100))
+        .unwrap()
+        .with_response_timeout(std::time::Duration::from_millis(50))
+        .unwrap();
+    (listener, RedisClient::new(config).unwrap())
+}
+
+#[test]
 #[ignore = "requires local Redis Cluster on 127.0.0.1:7000-7002 and explicit AXUTILS_REDIS_CLUSTER_LIVE_TEST=1"]
 fn cluster_live_fixture_covers_routing_and_cross_slot_boundaries() {
     require_cluster_live_authorization();
@@ -118,8 +186,9 @@ async fn cluster_async_fixture_covers_routing() {
             .expect("cluster async get"),
         Some(1)
     );
+    let lock_key = format!("{key}:lock");
     let mut lock = client
-        .try_lock_async(&key, std::time::Duration::from_secs(10))
+        .try_lock_async(&lock_key, std::time::Duration::from_secs(10))
         .await
         .expect("cluster async lock acquisition")
         .expect("cluster async lock should be available");
@@ -132,6 +201,10 @@ async fn cluster_async_fixture_covers_routing() {
         .delete_async(&key)
         .await
         .expect("cluster async cleanup");
+    let _ = client
+        .delete_async(&lock_key)
+        .await
+        .expect("cluster async lock cleanup");
 }
 
 #[test]

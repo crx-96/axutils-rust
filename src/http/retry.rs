@@ -5,20 +5,28 @@ use std::time::Duration;
 use super::error::HttpError;
 use super::request::HttpMethod;
 
+/// 包含首次发送在内允许配置的最大总网络尝试次数。
 const MAX_ATTEMPTS: u32 = 16;
+/// 单次退避允许的最大时长。
 const MAX_DELAY: Duration = Duration::from_secs(60);
 
 /// 请求重试策略。
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct RetryPolicy {
+    /// 包括首次发送的总尝试次数，默认 3，范围 1..=16。
     max_attempts: u32,
+    /// 第一次重试之前的退避时间，后续指数增长。
     base_delay: Duration,
+    /// 单次退避时长上限，最多 60 秒。
     max_delay: Duration,
+    /// 升序且无重复的可重试 HTTP 状态码，供二分查询。
     statuses: Vec<u16>,
+    /// 是否显式允许 GET/HEAD/OPTIONS 之外的方法自动重试，默认 false。
     allow_non_idempotent: bool,
 }
 
 impl Default for RetryPolicy {
+    /// 默认对安全方法最多尝试三次，使用有上限的指数退避和常见临时状态集合。
     fn default() -> Self {
         Self {
             max_attempts: 3,
@@ -40,6 +48,7 @@ impl RetryPolicy {
     ///
     /// `1` 表示只发送首次请求并禁用自动重试；默认值为 `3`，不是三次额外重试。
     pub fn with_max_retries(mut self, max_attempts: u32) -> Result<Self, HttpError> {
+        // 该历史方法名接收总次数；零次或超过上限均不能生成有效策略。
         if !(1..=MAX_ATTEMPTS).contains(&max_attempts) {
             return Err(HttpError::InvalidConfig {
                 field: "max_retries",
@@ -55,6 +64,7 @@ impl RetryPolicy {
         base_delay: Duration,
         max_delay: Duration,
     ) -> Result<Self, HttpError> {
+        // 保证初始延迟为正且不大于封顶值，后续计算可以安全饱和到 max_delay。
         if base_delay.is_zero()
             || base_delay > max_delay
             || max_delay > MAX_DELAY
@@ -69,6 +79,7 @@ impl RetryPolicy {
 
     /// 启用或禁用某个可重试响应状态。
     pub fn with_retry_status(mut self, status: u16, enabled: bool) -> Result<Self, HttpError> {
+        // 保持排序且去重，启停同一状态是幂等的。
         if !(100..=599).contains(&status) {
             return Err(HttpError::InvalidConfig {
                 field: "retry_status",
@@ -146,15 +157,19 @@ impl RetryPolicy {
         self.statuses.iter()
     }
 
-    pub(crate) fn can_retry_method(&self, method: &HttpMethod) -> bool {
+    /// 仅默认安全方法或显式允许的其他方法可以进入自动重试。
+    pub(super) fn can_retry_method(&self, method: &HttpMethod) -> bool {
         self.allow_non_idempotent || method.is_idempotent_safe()
     }
 
-    pub(crate) fn should_retry_status(&self, status: u16) -> bool {
+    /// 使用排序后的配置集合判断状态是否可重试，不隐式添加 provider 策略。
+    pub(super) fn should_retry_status(&self, status: u16) -> bool {
         self.statuses.binary_search(&status).is_ok()
     }
 
-    pub(crate) fn delay_for_retry(&self, retry_number: u32) -> Duration {
+    /// 返回从 1 开始的重试序号所对应的指数退避，溢出时饱和到配置上限。
+    pub(super) fn delay_for_retry(&self, retry_number: u32) -> Duration {
+        // 序号和乘法都显式有界；最终延迟还受整个请求 deadline 约束。
         let exponent = retry_number.saturating_sub(1).min(16);
         let factor = 1u32.checked_shl(exponent).unwrap_or(u32::MAX);
         self.base_delay

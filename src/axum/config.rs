@@ -1,14 +1,20 @@
+//! 服务声明配置的有限取值；对应执行限制由调用方显式安装 middleware。
+
 use super::AxumError;
 use std::time::Duration;
 
 /// Axum 服务的有限边界配置；middleware 默认不自动安装。
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AxumConfig {
+    /// 声明的 service future 预算，默认 30 秒，范围 1 毫秒至 10 分钟。
     service_timeout: Duration,
+    /// 声明的请求体字节预算，默认 1 MiB，范围 1 字节至 64 MiB。
     max_body_bytes: usize,
+    /// 声明的并发请求预算，默认 1,024，范围 1 至 65,536。
     max_concurrency: usize,
 }
 impl Default for AxumConfig {
+    /// 使用有限默认声明值，不自动向 Router 安装 provider layer。
     fn default() -> Self {
         Self {
             service_timeout: Duration::from_secs(30),
@@ -40,6 +46,7 @@ impl AxumConfig {
     /// # }
     /// ```
     pub fn with_service_timeout(mut self, value: Duration) -> Result<Self, AxumError> {
+        // 只接受可用于服务预算的有限时长；具体 timeout layer 必须显式安装。
         if !(Duration::from_millis(1)..=Duration::from_secs(600)).contains(&value) {
             return Err(AxumError::InvalidConfig {
                 field: "service_timeout",
@@ -57,6 +64,7 @@ impl AxumConfig {
     /// # }
     /// ```
     pub fn with_max_body_bytes(mut self, value: usize) -> Result<Self, AxumError> {
+        // 在保存声明前校验范围，防止后续按配置安装 layer 时得到无界预算。
         if !(1..=64 * 1024 * 1024).contains(&value) {
             return Err(AxumError::InvalidConfig {
                 field: "max_body_bytes",
@@ -74,6 +82,7 @@ impl AxumConfig {
     /// # }
     /// ```
     pub fn with_max_concurrency(mut self, value: usize) -> Result<Self, AxumError> {
+        // 零配额与超大配额都作为配置错误处理，不修改已有声明值。
         if !(1..=65_536).contains(&value) {
             return Err(AxumError::InvalidConfig {
                 field: "max_concurrency",

@@ -32,6 +32,7 @@ impl HttpClient {
         query: Option<Q>,
         options: Option<HttpRequestOptions>,
     ) -> Result<T, HttpError> {
+        // 先编码 query 并应用单次选项，再进入客户端的统一执行策略。
         let request = shared::build_query_request(HttpMethod::Get, url, query, options, true)?;
         shared::decode_json(self.execute_async(request).await?)
     }
@@ -56,6 +57,7 @@ impl HttpClient {
         body: Option<B>,
         options: Option<HttpRequestOptions>,
     ) -> Result<T, HttpError> {
+        // 先序列化 JSON 正文并校验请求选项，再进入客户端的统一执行策略。
         let request = shared::build_body_request(HttpMethod::Post, url, body, options, true)?;
         shared::decode_json(self.execute_async(request).await?)
     }
@@ -80,6 +82,7 @@ impl HttpClient {
         query: Option<Q>,
         options: Option<HttpRequestOptions>,
     ) -> Result<T, HttpError> {
+        // 先编码 query 并应用单次选项，再进入客户端的统一执行策略。
         let request = shared::build_query_request(HttpMethod::Delete, url, query, options, true)?;
         shared::decode_json(self.execute_async(request).await?)
     }
@@ -104,6 +107,7 @@ impl HttpClient {
         body: Option<B>,
         options: Option<HttpRequestOptions>,
     ) -> Result<T, HttpError> {
+        // 先序列化 JSON 正文并校验请求选项，再进入客户端的统一执行策略。
         let request = shared::build_body_request(HttpMethod::Patch, url, body, options, true)?;
         shared::decode_json(self.execute_async(request).await?)
     }
@@ -128,6 +132,7 @@ impl HttpClient {
         body: Option<B>,
         options: Option<HttpRequestOptions>,
     ) -> Result<T, HttpError> {
+        // 先序列化 JSON 正文并校验请求选项，再进入客户端的统一执行策略。
         let request = shared::build_body_request(HttpMethod::Put, url, body, options, true)?;
         shared::decode_json(self.execute_async(request).await?)
     }
@@ -152,11 +157,16 @@ impl HttpClient {
         query: Option<Q>,
         options: Option<HttpRequestOptions>,
     ) -> Result<T, HttpError> {
+        // 先编码 query 并应用单次选项，再进入客户端的统一执行策略。
         let request = shared::build_query_request(HttpMethod::Options, url, query, options, true)?;
         shared::decode_json(self.execute_async(request).await?)
     }
 
-    /// 异步发送 HEAD JSON 请求；query 会被编码并追加到 URL。
+    /// 异步发送 HEAD 并尝试按 JSON 解码；query 会被编码并追加到 URL。
+    ///
+    /// 为保持现有 API，本方法仍要求 JSON 响应体。合规的 HEAD 响应没有正文，因此会返回
+    /// [`HttpError::JsonDeserialize`]；需要状态码或响应头时使用 [`Self::execute_async`] 和
+    /// [`HttpMethod::Head`]，只需要空响应体时使用 [`Self::head_bytes_async`]。
     ///
     /// # Examples
     ///
@@ -165,8 +175,10 @@ impl HttpClient {
     /// #[tokio::main]
     /// async fn main() -> Result<(), HttpError> {
     ///     let client = HttpClient::new(HttpConfig::default())?;
-    ///     let _: std::collections::BTreeMap<String, bool> =
-    ///         client.head_async("https://example.com/health", None::<()>, None).await?;
+    ///     let result = client.head_async::<std::collections::BTreeMap<String, bool>, _>(
+    ///         "https://example.com/health", None::<()>, None,
+    ///     ).await;
+    ///     assert!(matches!(result, Err(HttpError::JsonDeserialize)));
     ///     Ok(())
     /// }
     /// ~~~
@@ -176,6 +188,7 @@ impl HttpClient {
         query: Option<Q>,
         options: Option<HttpRequestOptions>,
     ) -> Result<T, HttpError> {
+        // 先编码 query 并应用单次选项，再进入客户端的统一执行策略。
         let request = shared::build_query_request(HttpMethod::Head, url, query, options, true)?;
         shared::decode_json(self.execute_async(request).await?)
     }
@@ -199,6 +212,7 @@ impl HttpClient {
         query: Option<Q>,
         options: Option<HttpRequestOptions>,
     ) -> Result<Vec<u8>, HttpError> {
+        // 先编码 query 并应用单次选项，再进入客户端的统一执行策略。
         let request = shared::build_query_request(HttpMethod::Get, url, query, options, false)?;
         shared::decode_bytes(self.execute_async(request).await?)
     }
@@ -222,6 +236,7 @@ impl HttpClient {
         body: Option<B>,
         options: Option<HttpRequestOptions>,
     ) -> Result<Vec<u8>, HttpError> {
+        // 先序列化 JSON 正文并校验请求选项，再进入客户端的统一执行策略。
         let request = shared::build_body_request(HttpMethod::Post, url, body, options, false)?;
         shared::decode_bytes(self.execute_async(request).await?)
     }
@@ -245,6 +260,7 @@ impl HttpClient {
         query: Option<Q>,
         options: Option<HttpRequestOptions>,
     ) -> Result<Vec<u8>, HttpError> {
+        // 先编码 query 并应用单次选项，再进入客户端的统一执行策略。
         let request = shared::build_query_request(HttpMethod::Delete, url, query, options, false)?;
         shared::decode_bytes(self.execute_async(request).await?)
     }
@@ -268,6 +284,7 @@ impl HttpClient {
         body: Option<B>,
         options: Option<HttpRequestOptions>,
     ) -> Result<Vec<u8>, HttpError> {
+        // 先序列化 JSON 正文并校验请求选项，再进入客户端的统一执行策略。
         let request = shared::build_body_request(HttpMethod::Patch, url, body, options, false)?;
         shared::decode_bytes(self.execute_async(request).await?)
     }
@@ -291,6 +308,7 @@ impl HttpClient {
         body: Option<B>,
         options: Option<HttpRequestOptions>,
     ) -> Result<Vec<u8>, HttpError> {
+        // 先序列化 JSON 正文并校验请求选项，再进入客户端的统一执行策略。
         let request = shared::build_body_request(HttpMethod::Put, url, body, options, false)?;
         shared::decode_bytes(self.execute_async(request).await?)
     }
@@ -314,11 +332,14 @@ impl HttpClient {
         query: Option<Q>,
         options: Option<HttpRequestOptions>,
     ) -> Result<Vec<u8>, HttpError> {
+        // 先编码 query 并应用单次选项，再进入客户端的统一执行策略。
         let request = shared::build_query_request(HttpMethod::Options, url, query, options, false)?;
         shared::decode_bytes(self.execute_async(request).await?)
     }
 
-    /// 异步发送 HEAD 请求并返回原始响应体字节。
+    /// 异步发送 HEAD 请求；合规的响应正文为空，返回空字节向量。
+    ///
+    /// 需要状态码或响应头时使用 [`Self::execute_async`] 和 [`HttpMethod::Head`]。
     ///
     /// # Examples
     ///
@@ -337,6 +358,7 @@ impl HttpClient {
         query: Option<Q>,
         options: Option<HttpRequestOptions>,
     ) -> Result<Vec<u8>, HttpError> {
+        // 先编码 query 并应用单次选项，再进入客户端的统一执行策略。
         let request = shared::build_query_request(HttpMethod::Head, url, query, options, false)?;
         shared::decode_bytes(self.execute_async(request).await?)
     }

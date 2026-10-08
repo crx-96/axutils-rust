@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 #[cfg(feature = "config-async")]
 use std::fs;
 
-#[cfg(feature = "config-async")]
+#[cfg(any(feature = "config-async", feature = "config-toml"))]
 use axutils::config::ConfigLoader;
 use axutils::{
     config::{ConfigError, ConfigFormat},
@@ -82,6 +82,159 @@ fn reads_toml_fixture_untyped_and_typed() {
     let config: Config = ConfigUtils::load(&path).expect("toml fixture should load typed");
     assert_eq!(config.server.host, "localhost");
     assert_eq!(config.server.port, 8080);
+}
+
+#[cfg(feature = "config-toml")]
+#[test]
+fn toml_preserves_datetime_marker_keys_as_ordinary_user_data() {
+    let loader = ConfigLoader::new();
+    let marker = "$__toml_private_datetime";
+    for text in [
+        "\"$__toml_private_datetime\" = \"2024-02-29T01:02:03Z\"\n",
+        "\"$__toml_private_\\u0064atetime\" = \"2024-02-29T01:02:03Z\"\n",
+    ] {
+        let value = loader.parse_value(text, ConfigFormat::Toml).unwrap();
+        assert_eq!(
+            value.as_table().unwrap().get(marker).unwrap().as_str(),
+            Some("2024-02-29T01:02:03Z")
+        );
+    }
+}
+
+#[cfg(feature = "config-toml")]
+#[test]
+fn toml_escaped_datetime_marker_keeps_non_string_values() {
+    let loader = ConfigLoader::new();
+    for text in [
+        "\"$__toml_private_datetime\" = 123\n",
+        "\"$__toml_private_\\u0064atetime\" = 123\n",
+    ] {
+        let value = loader.parse_value(text, ConfigFormat::Toml).unwrap();
+        assert_eq!(
+            value
+                .as_table()
+                .unwrap()
+                .get("$__toml_private_datetime")
+                .unwrap()
+                .as_i64(),
+            Some(123)
+        );
+    }
+}
+
+#[cfg(feature = "config-toml")]
+#[test]
+fn toml_marker_fields_do_not_hide_sibling_fields_or_real_datetimes() {
+    let text = "[metadata]\n\"$__toml_private_datetime\" = \"2024-02-29T01:02:03Z\"\nother = true\ncreated = 2024-02-29T01:02:03Z\n";
+    let value = ConfigLoader::new()
+        .parse_value(text, ConfigFormat::Toml)
+        .unwrap();
+    let table = value.get("metadata").unwrap().as_table().unwrap();
+    assert_eq!(table.len(), 3);
+    assert_eq!(table.get("other").unwrap().as_bool(), Some(true));
+    for key in ["$__toml_private_datetime", "created"] {
+        assert_eq!(
+            table.get(key).unwrap().as_str(),
+            Some("2024-02-29T01:02:03Z")
+        );
+    }
+}
+
+#[cfg(feature = "config-toml")]
+#[test]
+fn toml_datetimes_use_scalar_depth_and_containers_keep_the_depth_budget() {
+    let loader = ConfigLoader::new().with_max_depth(1).unwrap();
+    let value = loader
+        .parse_value("created = 2024-02-29T01:02:03Z\n", ConfigFormat::Toml)
+        .unwrap();
+    assert_eq!(
+        value.get("created").unwrap().as_str(),
+        Some("2024-02-29T01:02:03Z")
+    );
+
+    for text in [
+        "[event]\ncreated = 2024-02-29T01:02:03Z\n",
+        "created = [2024-02-29T01:02:03Z]\n",
+    ] {
+        assert!(matches!(
+            loader.parse_value(text, ConfigFormat::Toml),
+            Err(ConfigError::DepthLimitExceeded { limit: 1 })
+        ));
+        assert!(ConfigLoader::new()
+            .with_max_depth(2)
+            .unwrap()
+            .parse_value(text, ConfigFormat::Toml)
+            .is_ok());
+    }
+}
+
+#[cfg(feature = "config-toml")]
+#[test]
+fn toml_numeric_conversion_retains_radices_bounds_and_error_categories() {
+    let loader = ConfigLoader::new();
+    let text = "negative = -9223372036854775808\npositive = +9223372036854775807\nhex = 0x7fff_ffff_ffff_ffff\noctal = 0o17\nbinary = 0b1010\nratio = -1.25e+2\n";
+    let value = loader.parse_value(text, ConfigFormat::Toml).unwrap();
+    for (key, expected) in [
+        ("negative", i64::MIN),
+        ("positive", i64::MAX),
+        ("hex", i64::MAX),
+        ("octal", 15),
+        ("binary", 10),
+    ] {
+        assert_eq!(value.get(key).unwrap().as_i64(), Some(expected));
+    }
+    assert_eq!(value.get("ratio").unwrap().as_f64(), Some(-125.0));
+
+    for number in [
+        "9223372036854775808",
+        "-9223372036854775809",
+        "0xffffffffffffffff",
+        "340282366920938463463374607431768211455",
+    ] {
+        assert!(
+            matches!(loader.parse_value(&format!("count = {number}\n"), ConfigFormat::Toml), Err(ConfigError::ValueOutOfRange { key }) if key == "count")
+        );
+    }
+    for number in [
+        "340282366920938463463374607431768211456",
+        "-170141183460469231731687303715884105729",
+        "1e999",
+    ] {
+        assert!(matches!(
+            loader.parse_value(&format!("count = {number}\n"), ConfigFormat::Toml),
+            Err(ConfigError::Parse {
+                format: "toml",
+                line: Some(1),
+                column: Some(9)
+            })
+        ));
+    }
+    for number in ["inf", "+inf", "-inf", "nan"] {
+        assert!(!loader
+            .parse_value(&format!("ratio = {number}\n"), ConfigFormat::Toml)
+            .unwrap()
+            .get("ratio")
+            .unwrap()
+            .as_f64()
+            .unwrap()
+            .is_finite());
+    }
+}
+
+#[cfg(feature = "config-toml")]
+#[test]
+fn toml_syntax_errors_precede_conversion_and_depth_errors() {
+    let loader = ConfigLoader::new().with_max_depth(1).unwrap();
+    for text in [
+        "[event]\ncreated = 1\ninvalid ===\n",
+        "count = 9223372036854775808\ninvalid ===\n",
+        "count = 1\ncount = 2\n",
+    ] {
+        assert!(matches!(
+            loader.parse_value(text, ConfigFormat::Toml),
+            Err(ConfigError::Parse { format: "toml", .. })
+        ));
+    }
 }
 
 #[cfg(feature = "config-ini")]

@@ -6,12 +6,14 @@ use crate::telemetry::http as http_trace;
 #[cfg(feature = "tracing")]
 use std::time::Instant;
 use std::{fmt, sync::OnceLock};
+/// 只发布一次的默认 HTTP 客户端，成功初始化后不允许覆盖。
 static HTTP_CLIENT: OnceLock<HttpClient> = OnceLock::new();
 /// HTTP 全局客户端入口。
 pub struct HttpUtils;
 impl HttpUtils {
     /// 初始化一次性的全局 HTTP 客户端。
     pub fn init(config: HttpConfig) -> Result<(), HttpError> {
+        // 构造不访问网络；只在成功后竞争全局槽位，失败不消耗初始化机会。
         #[cfg(feature = "tracing")]
         let started = Instant::now();
         let result = match HttpClient::new(config) {
@@ -34,6 +36,7 @@ impl HttpUtils {
     }
 }
 impl fmt::Debug for HttpUtils {
+    /// 只展示全局入口是否已初始化，不展开客户端状态或配置。
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("HttpUtils")

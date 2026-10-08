@@ -233,7 +233,8 @@ impl FsUtils {
     /// 源和已存在的目标最终路径项必须是普通文件；目录、符号链接和其他非普通文件在无
     /// 竞态预检时返回 [`FsError::UnsupportedEntry`]。预检不提供抗 TOCTOU 保证，也不创建
     /// 目标父目录；其他源/目标错误返回 [`FsError::PairIo`]，operation token 为 `copy_file`；
-    /// 失败或取消可能留下部分目标文件。
+    /// 失败或取消可能留下部分目标文件。源与目标词法路径相同时，在 I/O 前返回
+    /// [`FsError::PairIo`]，其 kind 为 `InvalidInput`；不检测硬链接或规范化后的路径别名。
     ///
     /// # Examples
     ///

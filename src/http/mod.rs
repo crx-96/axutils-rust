@@ -2,7 +2,8 @@
 //!
 //! `http` feature 提供同步 API；`http-async` feature 追加异步 API。单独启用 `tokio`
 //! 不会改变 HTTP 的公开能力。客户端默认关闭
-//! 系统代理、自动重定向、压缩和隐式重试，并对 URL、Header、请求体和响应体实施大小限制。
+//! 系统代理、自动重定向和隐式重试，并对 URL、Header、请求体和响应体实施大小限制。
+//! 异步入口显式关闭自动解压；同步默认不启用解压，下游 ureq feature 合并的影响见 [`HttpClient`]。
 //! 配置 builder 的字段均可省略；未设置 `base_url` 时只接受绝对 HTTP/HTTPS URL，配置的基
 //! 地址不会覆盖请求自身的绝对 URL。默认总超时为 30 秒、连接超时为 10 秒，重试策略默认
 //! 最多进行 3 次网络尝试（包括首次请求），设置为 1 可禁用自动重试。
@@ -10,6 +11,7 @@
 mod client;
 mod coalesce;
 mod config;
+mod deduplication;
 mod error;
 pub(crate) mod global;
 mod headers;
@@ -28,7 +30,8 @@ mod async_transport;
 mod serde_api;
 
 pub use client::HttpClient;
-pub use config::{DeduplicationMode, DeduplicationPolicy, HttpConfig, HttpConfigBuilder};
+pub use config::{HttpConfig, HttpConfigBuilder};
+pub use deduplication::{DeduplicationMode, DeduplicationPolicy};
 pub use error::{HttpError, HttpTransportErrorKind};
 pub use headers::HttpHeaders;
 pub use options::HttpRequestOptions;

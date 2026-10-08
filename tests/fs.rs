@@ -13,7 +13,9 @@ use axutils::{
 #[cfg(feature = "fs-async")]
 use axutils::fs::FsAsyncChunkProcessor;
 #[cfg(feature = "fs-async")]
-use tokio::time::timeout;
+use std::sync::Arc;
+#[cfg(feature = "fs-async")]
+use tokio::{sync::Notify, task::yield_now, time::timeout};
 
 #[cfg(any(feature = "fs-temp", feature = "fs-temp-async"))]
 use axutils::fs::{FsTempConfig, FsTempError};
@@ -159,6 +161,7 @@ impl FsAsyncChunkProcessor for AsyncDuplicateProcessor {
 #[cfg(feature = "fs-async")]
 struct AsyncCancelAfterFirst {
     processed: usize,
+    second_block: Arc<Notify>,
 }
 
 #[cfg(feature = "fs-async")]
@@ -174,6 +177,7 @@ impl FsAsyncChunkProcessor for AsyncCancelAfterFirst {
         if self.processed == 1 {
             Box::pin(std::future::ready(Ok(chunk)))
         } else {
+            self.second_block.notify_one();
             Box::pin(std::future::pending())
         }
     }
@@ -236,6 +240,51 @@ fn public_paths_cover_all_sync_methods() {
 
     let _: FsError = FsError::RuntimeRequired;
     let _: FsUtils = FsUtils;
+    temp.cleanup();
+}
+
+#[test]
+fn sync_copy_rejects_identical_paths_without_touching_contents() {
+    let temp = TempDir::new();
+    let file = temp.path().join("same.bin");
+    fs::write(&file, b"preserve").unwrap();
+    assert!(matches!(
+        FsUtils::copy_file(&file, &file),
+        Err(FsError::PairIo {
+            operation: "copy_file",
+            kind: io::ErrorKind::InvalidInput,
+            ..
+        })
+    ));
+    assert_eq!(fs::read(&file).unwrap(), b"preserve");
+    let missing = temp.path().join("missing.bin");
+    assert!(matches!(
+        FsUtils::copy_file(&missing, &missing),
+        Err(FsError::PairIo {
+            operation: "copy_file",
+            kind: io::ErrorKind::InvalidInput,
+            ..
+        })
+    ));
+    assert!(!missing.exists());
+    temp.cleanup();
+}
+
+#[cfg(feature = "fs-async")]
+#[tokio::test]
+async fn async_copy_rejects_identical_paths_without_touching_contents() {
+    let temp = TempDir::new();
+    let file = temp.path().join("same.bin");
+    fs::write(&file, b"preserve").unwrap();
+    assert!(matches!(
+        FsUtils::copy_file_async(&file, &file).await,
+        Err(FsError::PairIo {
+            operation: "copy_file",
+            kind: io::ErrorKind::InvalidInput,
+            ..
+        })
+    ));
+    assert_eq!(fs::read(&file).unwrap(), b"preserve");
     temp.cleanup();
 }
 
@@ -1022,6 +1071,14 @@ fn async_limits_are_checked_before_runtime() {
         std::task::Poll::Ready(Err(FsError::InvalidLimit { field: "max_bytes" }))
     ));
     assert!(matches!(
+        poll_once(FsUtils::copy_file_async("same", "same")),
+        std::task::Poll::Ready(Err(FsError::PairIo {
+            operation: "copy_file",
+            kind: io::ErrorKind::InvalidInput,
+            ..
+        }))
+    ));
+    assert!(matches!(
         poll_once(FsUtils::list_dir_async("missing", usize::MAX)),
         std::task::Poll::Ready(Err(FsError::InvalidLimit {
             field: "max_entries"
@@ -1342,23 +1399,35 @@ async fn async_stream_transfer_cancellation_keeps_written_prefix() {
     let destination = temp.path().join("destination.bin");
     FsUtils::write(&source, [b'x'; 2050]).expect("write cancellation source");
 
-    let result = timeout(
-        std::time::Duration::from_millis(20),
-        FsUtils::copy_file_with_async(
-            &source,
-            &destination,
-            FsTransferOptions {
-                chunk_size: 1024,
-                max_output_bytes: None,
-            },
-            AsyncCancelAfterFirst { processed: 0 },
-        ),
-    )
-    .await;
-    assert!(
-        result.is_err(),
-        "the second processor future should remain pending"
-    );
+    let second_block = Arc::new(Notify::new());
+    let mut transfer = Box::pin(FsUtils::copy_file_with_async(
+        &source,
+        &destination,
+        FsTransferOptions {
+            chunk_size: 1024,
+            max_output_bytes: None,
+        },
+        AsyncCancelAfterFirst {
+            processed: 0,
+            second_block: second_block.clone(),
+        },
+    ));
+    timeout(std::time::Duration::from_secs(5), async {
+        tokio::select! {
+            result = &mut transfer => panic!("第二块应保持等待：{result:?}"),
+            () = second_block.notified() => {},
+        }
+        // Tokio write_all 可能已有 blocking 写入在途；观察前缀落盘后再取消第二块。
+        loop {
+            if FsUtils::read_bytes_async(&destination, 1024).await.unwrap() == [b'x'; 1024] {
+                break;
+            }
+            yield_now().await;
+        }
+    })
+    .await
+    .expect("复制应到达第二块且完成第一块写入");
+    drop(transfer);
     assert_eq!(
         FsUtils::metadata(&destination)
             .expect("partial destination should remain after cancellation")

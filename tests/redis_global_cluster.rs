@@ -14,6 +14,18 @@ fn cluster_init_checks_connectivity_before_installing_the_global_client() {
     let url = format!("redis://{}/0", unavailable.address);
     assert!(RedisUtils::init(test_config(&url)).is_err());
     assert!(!RedisUtils::is_initialized());
+    let unavailable_cluster = RedisConfig::cluster([url])
+        .unwrap()
+        .with_pool_size(1)
+        .unwrap()
+        .with_connection_timeout(Duration::from_millis(200))
+        .unwrap()
+        .with_pool_checkout_timeout(Duration::from_millis(500))
+        .unwrap()
+        .with_response_timeout(Duration::from_millis(200))
+        .unwrap();
+    assert!(RedisUtils::init(unavailable_cluster).is_err());
+    assert!(!RedisUtils::is_initialized());
 
     let server = RedisTestServer::start(|command| {
         Some(if command[0] == "PING" {

@@ -1,23 +1,14 @@
+//! 有界任务登记、取消与完成清理；实际时间策略由 schedule 模块负责。
+
+use super::{schedule, SchedulerConfig, SchedulerError, TaskSchedule};
 use std::{
     collections::HashMap,
     future::Future,
     panic::{catch_unwind, AssertUnwindSafe},
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc, Mutex, MutexGuard, Weak,
-    },
+    sync::{Arc, Mutex, MutexGuard, Weak},
     time::Duration,
 };
-
-#[cfg(test)]
-use tokio::runtime::Builder as RuntimeBuilder;
-use tokio::{
-    runtime::Handle,
-    task::AbortHandle,
-    time::{self, Instant, MissedTickBehavior},
-};
-
-use super::{cron::CronSchedule, SchedulerConfig, SchedulerError, TaskSchedule};
+use tokio::{runtime::Handle, task::AbortHandle, time};
 
 /// 单个 [`Scheduler`](super::Scheduler) 内不复用的任务标识。
 ///
@@ -25,33 +16,37 @@ use super::{cron::CronSchedule, SchedulerConfig, SchedulerError, TaskSchedule};
 ///
 /// ```rust
 /// # use axutils::scheduler::*;
-/// # use axutils::scheduler::*;
 /// # #[cfg(feature="scheduler")] {
 /// let _cancel: fn(&Scheduler, TaskId)
 ///     -> Result<bool, SchedulerError> = Scheduler::cancel;
 /// # }
 /// ```
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub struct TaskId(u64);
+pub struct TaskId(
+    /// 调度器内单调递增的标识值，溢出时拒绝新登记而不复用。
+    u64,
+);
 
+/// 调度器所有登记操作共享的状态；不持有任务 callback。
 pub(crate) struct Shared {
+    /// 只在短暂登记/移除阶段持有的注册表锁。
     state: Mutex<State>,
 }
 
+/// 单个调度器的有界活动任务注册表。
 struct State {
+    /// 永久关闭标记，关闭后不接纳任何新任务。
     shutdown: bool,
+    /// 同时保留的登记数上限，包含正在提交的占位项。
     max_tasks: usize,
+    /// 下次登记使用的 ID；到达 u64 上界时返回容量错误。
     next_task_id: u64,
-    tasks: HashMap<TaskId, AbortHandle>,
-}
-
-enum ValidatedSchedule {
-    Once(Instant),
-    Interval { start: Instant, period: Duration },
-    Cron(Box<CronSchedule>, Duration),
+    /// None 为锁外提交期间的占位，Some 为已发布的取消句柄。
+    tasks: HashMap<TaskId, Option<AbortHandle>>,
 }
 
 impl Shared {
+    /// 建立空注册表，不获取 runtime 或启动后台工作。
     pub(crate) fn new(config: SchedulerConfig) -> Self {
         Self {
             state: Mutex::new(State {
@@ -63,6 +58,7 @@ impl Shared {
         }
     }
 
+    /// 校验运行条件、预留容量，再在锁外提交；失败或完成都会撤销自己的登记。
     pub(crate) fn register<F, Fut>(
         self: &Arc<Self>,
         schedule: TaskSchedule,
@@ -72,12 +68,30 @@ impl Shared {
         F: Fn() -> Fut + Send + 'static,
         Fut: Future<Output = ()> + Send + 'static,
     {
+        // 关闭错误优先；校验完成后仍在预留阶段重新检查，以覆盖并发关闭。
         if self.lock().shutdown {
             return Err(SchedulerError::Shutdown);
         }
-        let schedule = validate_schedule(schedule)?;
+        let schedule = schedule::validate(schedule)?;
         let handle = runtime_with_time_driver()?;
+        let task_id = self.reserve()?;
+        let cleanup = TaskCleanup {
+            shared: Arc::downgrade(self),
+            task_id,
+        };
 
+        // Tokio 可以同步析构拒绝接纳的任务；用户析构和完成清理均不能发生在注册表锁内。
+        let task = handle.spawn(async move {
+            let _cleanup = cleanup;
+            schedule::run(schedule, callback).await;
+        });
+        self.publish(task_id, task.abort_handle());
+        drop(task);
+        Ok(task_id)
+    }
+
+    /// 在同一临界区拒绝关闭/满额状态，并为锁外提交保留唯一 ID 与容量。
+    fn reserve(&self) -> Result<TaskId, SchedulerError> {
         let mut state = self.lock();
         if state.shutdown {
             return Err(SchedulerError::Shutdown);
@@ -90,102 +104,74 @@ impl Shared {
             .next_task_id
             .checked_add(1)
             .ok_or(SchedulerError::TaskLimitExceeded)?;
-
-        let lifecycle = Arc::new(TaskLifecycle {
-            shared: Arc::downgrade(self),
-            task_id,
-            published: AtomicBool::new(false),
-            finished: AtomicBool::new(false),
-        });
-        let cleanup = TaskCleanup {
-            lifecycle: Arc::clone(&lifecycle),
-        };
-        let task = handle.spawn(async move {
-            let _cleanup = cleanup;
-            run(schedule, callback).await;
-        });
-        publish_task(&mut state, &lifecycle, task.abort_handle());
-        drop(task);
+        state.tasks.insert(task_id, None);
         Ok(task_id)
     }
 
-    pub(crate) fn cancel(&self, task_id: TaskId) -> bool {
+    /// 仅填充仍存在的占位；完成、取消或关闭已移除占位时，在锁外取消新句柄。
+    fn publish(&self, task_id: TaskId, abort: AbortHandle) {
         let mut state = self.lock();
-        if let Some(abort) = state.tasks.remove(&task_id) {
-            abort.abort();
-            true
+        if let Some(slot) = state.tasks.get_mut(&task_id) {
+            *slot = Some(abort);
         } else {
-            false
+            // 不重新插入已取消/完成的任务，避免复活任务并泄漏容量。
+            drop(state);
+            abort.abort();
         }
     }
 
+    /// 移除单个登记后在锁外请求取消；尚未发布的占位由 publish 补发取消。
+    pub(crate) fn cancel(&self, task_id: TaskId) -> bool {
+        let removed = self.lock().tasks.remove(&task_id);
+        match removed {
+            Some(abort) => {
+                if let Some(abort) = abort {
+                    abort.abort();
+                }
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// 原子关闭并取出全部登记，在锁外取消任务与释放句柄。
     pub(crate) fn shutdown(&self) {
-        let mut state = self.lock();
-        state.shutdown = true;
-        for (_, task) in state.tasks.drain() {
-            task.abort();
+        let tasks = {
+            let mut state = self.lock();
+            state.shutdown = true;
+            std::mem::take(&mut state.tasks)
+        };
+        // 预留项无需句柄；提交方稍后观察占位消失后会取消自己的任务。
+        for abort in tasks.into_values().flatten() {
+            abort.abort();
         }
     }
 
+    /// 取得只保护内部登记元数据的锁，中毒后仍允许尽力关闭和清理。
     fn lock(&self) -> MutexGuard<'_, State> {
         self.state.lock().unwrap_or_else(|error| error.into_inner())
     }
 }
 
-fn publish_task(state: &mut State, lifecycle: &TaskLifecycle, abort: AbortHandle) {
-    state.tasks.insert(lifecycle.task_id, abort);
-    lifecycle.published.store(true, Ordering::SeqCst);
-    if lifecycle.finished.load(Ordering::SeqCst) {
-        state.tasks.remove(&lifecycle.task_id);
-    }
-}
-
-struct TaskLifecycle {
-    shared: Weak<Shared>,
-    task_id: TaskId,
-    published: AtomicBool,
-    finished: AtomicBool,
-}
-
+/// future 完成、panic、abort 或 runtime 拒绝接纳时均移除自己的登记。
 struct TaskCleanup {
-    lifecycle: Arc<TaskLifecycle>,
+    /// 不延长调度器生命周期；调度器已释放时无需再清理注册表。
+    shared: Weak<Shared>,
+    /// 本 future 独占的登记 ID，永不与后续任务复用。
+    task_id: TaskId,
 }
 
 impl Drop for TaskCleanup {
+    /// 清理占位或已发布句柄；发布方在占位消失时不会再恢复登记。
     fn drop(&mut self) {
-        self.lifecycle.finished.store(true, Ordering::SeqCst);
-        if self.lifecycle.published.load(Ordering::SeqCst) {
-            if let Some(shared) = self.lifecycle.shared.upgrade() {
-                shared.lock().tasks.remove(&self.lifecycle.task_id);
-            }
+        if let Some(shared) = self.shared.upgrade() {
+            let removed = shared.lock().tasks.remove(&self.task_id);
+            drop(removed);
         }
     }
 }
 
-fn validate_schedule(schedule: TaskSchedule) -> Result<ValidatedSchedule, SchedulerError> {
-    // 在发布任务前校验并保存 deadline，避免后台再次做不受检的时间加法。
-    let now = Instant::now();
-    match schedule {
-        TaskSchedule::Once(delay) => now
-            .checked_add(delay)
-            .map(ValidatedSchedule::Once)
-            .ok_or(SchedulerError::InvalidSchedule),
-        TaskSchedule::Interval(period) if period.is_zero() => Err(SchedulerError::InvalidSchedule),
-        TaskSchedule::Interval(period) => now
-            .checked_add(period)
-            .map(|start| ValidatedSchedule::Interval { start, period })
-            .ok_or(SchedulerError::InvalidSchedule),
-        TaskSchedule::Cron {
-            expression,
-            timezone,
-        } => {
-            let schedule = CronSchedule::parse(&expression, &timezone)?;
-            let first_delay = schedule.delay_from_now()?;
-            Ok(ValidatedSchedule::Cron(Box::new(schedule), first_delay))
-        }
-    }
-}
-
+/// 检查当前 context 和 timer driver；不创建 runtime 或修改全局 panic hook。
 fn runtime_with_time_driver() -> Result<Handle, SchedulerError> {
     let handle = Handle::try_current().map_err(|_| SchedulerError::RuntimeRequired)?;
     let timer_available = {
@@ -199,72 +185,6 @@ fn runtime_with_time_driver() -> Result<Handle, SchedulerError> {
     }
 }
 
-async fn run<F, Fut>(schedule: ValidatedSchedule, callback: F)
-where
-    F: Fn() -> Fut,
-    Fut: Future<Output = ()>,
-{
-    match schedule {
-        ValidatedSchedule::Once(deadline) => {
-            time::sleep_until(deadline).await;
-            callback().await;
-        }
-        ValidatedSchedule::Interval { start, period } => {
-            let mut interval = time::interval_at(start, period);
-            interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
-            loop {
-                interval.tick().await;
-                callback().await;
-            }
-        }
-        ValidatedSchedule::Cron(schedule, mut delay) => loop {
-            time::sleep(delay).await;
-            callback().await;
-            let Ok(next_delay) = schedule.delay_from_now() else {
-                break;
-            };
-            delay = next_delay;
-        },
-    }
-}
-
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn completion_before_publication_is_compensated() {
-        let shared = Arc::new(Shared::new(SchedulerConfig::new(1).unwrap()));
-        let lifecycle = Arc::new(TaskLifecycle {
-            shared: Arc::downgrade(&shared),
-            task_id: TaskId(1),
-            published: AtomicBool::new(false),
-            finished: AtomicBool::new(false),
-        });
-        drop(TaskCleanup {
-            lifecycle: Arc::clone(&lifecycle),
-        });
-
-        let runtime = RuntimeBuilder::new_current_thread().build().unwrap();
-        let task = runtime.spawn(std::future::pending::<()>());
-        publish_task(&mut shared.lock(), &lifecycle, task.abort_handle());
-
-        assert!(lifecycle.finished.load(Ordering::SeqCst));
-        assert!(shared.lock().tasks.is_empty());
-    }
-
-    #[test]
-    fn task_id_overflow_does_not_consume_capacity() {
-        let shared = Arc::new(Shared::new(SchedulerConfig::new(1).unwrap()));
-        shared.lock().next_task_id = u64::MAX;
-        let runtime = RuntimeBuilder::new_current_thread()
-            .enable_time()
-            .build()
-            .unwrap();
-        let result = runtime.block_on(async {
-            shared.register(TaskSchedule::once(Duration::from_secs(60)), || async {})
-        });
-        assert_eq!(result, Err(SchedulerError::TaskLimitExceeded));
-        assert!(shared.lock().tasks.is_empty());
-    }
-}
+#[path = "task/tests.rs"]
+mod tests;

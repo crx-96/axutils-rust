@@ -1,16 +1,15 @@
+//! SQLx 客户端状态及连接池生命周期；查询执行位于私有 query 模块。
+
 use std::fmt;
 
-use futures_util::StreamExt;
-use sqlx::{
-    any::{AnyArguments, AnyPoolOptions, AnyQueryResult},
-    query::{Query, QueryAs, QueryScalar},
-    Any, AnyPool, FromRow, SqlSafeStr,
-};
+use sqlx::{any::AnyPoolOptions, AnyPool};
 use tokio::runtime::Handle;
 
-use super::{driver, SqlxConfig, SqlxError, SqlxRow, SqlxTransaction};
+use super::{driver, SqlxConfig, SqlxError, SqlxTransaction};
 #[cfg(feature = "tracing")]
 use crate::telemetry::sqlx as sqlx_trace;
+
+mod query;
 
 /// 可克隆的 SQLx Any 连接池客户端。
 ///
@@ -19,8 +18,11 @@ use crate::telemetry::sqlx as sqlx_trace;
 /// 客户端 clone 共享 SQLx pool 的引用计数，`close_async` 会关闭共享 pool，且不会重新打开它。
 #[derive(Clone)]
 pub struct SqlxClient {
-    pub(crate) pool: AnyPool,
-    pub(crate) max_rows: usize,
+    /// 实例及其克隆共享的连接池；关闭任一实例会关闭全部共享入口。
+    pool: AnyPool,
+    /// 多行结果允许的最大行数；单行字节数仍由数据库和调用方控制。
+    max_rows: usize,
+    /// telemetry 使用的固定驱动名称，不保存 URL 或认证信息。
     #[cfg(feature = "tracing")]
     driver: &'static str,
 }
@@ -31,7 +33,10 @@ impl SqlxClient {
     /// 该方法会检查当前 Tokio runtime、校验配置、安装一次 SQLx 默认 Any drivers，并建立连接
     /// 池，因此可能产生网络、认证和 SQLite 文件 I/O。连接失败不会改变 `SqlxUtils` 的全局初始化
     /// 状态。若调用方已在本进程通过 SQLx 自定义注册器安装 Any drivers，默认安装函数可能 panic；
-    /// 首版要求本 crate 是进程中唯一的 Any driver 注册方，不捕获该 panic，也不提供 reset。
+    /// 本 crate 必须是进程中唯一的 Any driver 注册方；不捕获该 panic，也不提供 reset。
+    /// 内存 SQLite 保持唯一连接，不自动按空闲时间或寿命回收，也不在 checkout 前执行 ping；
+    /// 这避免上述自动回收或 checkout 前 ping 的取消丢失唯一连接；其他连接故障、连接丢失
+    /// 或显式关闭仍可能释放内存数据，不提供持久化保证。
     ///
     /// # Examples
     ///
@@ -46,6 +51,7 @@ impl SqlxClient {
     /// # }
     /// ```
     pub async fn connect(config: SqlxConfig) -> Result<Self, SqlxError> {
+        // 事件仅记录固定操作元数据和耗时，不格式化配置或底层错误。
         #[cfg(feature = "tracing")]
         let started = std::time::Instant::now();
         #[cfg(feature = "tracing")]
@@ -63,469 +69,40 @@ impl SqlxClient {
         result
     }
 
+    /// 在调用方 runtime 中校验配置并创建连接池，失败时只保留脱敏错误。
     async fn connect_inner(config: SqlxConfig) -> Result<Self, SqlxError> {
+        // 初始化依赖和访问数据库之前先检查上下文及配置，避免发布半初始化实例。
         ensure_runtime()?;
         config.validate()?;
         driver::install_default_drivers();
 
-        let pool = AnyPoolOptions::new()
+        // 普通数据库沿用 SQLx 的空闲回收、连接寿命及健康检查策略。
+        let options = AnyPoolOptions::new()
             .max_connections(config.max_connections)
             .min_connections(config.min_connections)
-            .acquire_timeout(config.acquire_timeout)
+            .acquire_timeout(config.acquire_timeout);
+        // 内存 SQLite 的唯一连接拥有整个数据库，不能被定期淘汰；取消 checkout
+        // 期间的异步 ping 也可能丢弃该连接，因此取消这一额外 await 边界。
+        let options = if config.sqlite_memory {
+            options
+                .idle_timeout(None)
+                .max_lifetime(None)
+                .test_before_acquire(false)
+        } else {
+            options
+        };
+        let pool = options
             .connect_with(config.connect_options.clone())
             .await
             .map_err(|error| SqlxError::from_upstream(&error))?;
 
+        // 仅在连接成功后交付共享所有者；原始配置不保留在公开 Debug 状态中。
         Ok(Self {
             pool,
             max_rows: config.max_rows,
             #[cfg(feature = "tracing")]
             driver: config.driver_name(),
         })
-    }
-
-    /// 创建固定为 SQLx `Any` 后端的参数化查询对象。
-    ///
-    /// 该方法只调用 SQLx 原生构造函数，不访问数据库。调用方继续使用 SQLx 的 `.bind(...)`、
-    /// `.persistent(...)` 等链式 API。SQLx 0.9 默认只接受静态 SQL 字面量；动态 SQL 必须由调用方
-    /// 审计后用 `sqlx::AssertSqlSafe` 显式标记，这个标记不会替调用方做转义或注入检查。
-    ///
-    /// # Examples
-    ///
-    /// ```rust,no_run
-    /// use axutils::sqlx::{SqlxClient, SqlxConfig, SqlxError};
-    /// # #[cfg(any(feature = "sqlx", feature = "sqlx-postgres", feature = "sqlx-mysql", feature = "sqlx-sqlite"))]
-    /// # async fn example() -> Result<(), SqlxError> {
-    /// let client = SqlxClient::connect(SqlxConfig::new("sqlite::memory:")?).await?;
-    /// let _query = client.query("SELECT 1");
-    /// # Ok(())
-    /// # }
-    /// ```
-    pub fn query<'q>(&self, sql: impl SqlSafeStr) -> Query<'q, Any, AnyArguments> {
-        sqlx::query::<Any>(sql)
-    }
-
-    /// 创建固定为 SQLx `Any` 后端、映射到 `T` 的查询对象。
-    ///
-    /// 该方法不执行 SQL；`T` 的 `FromRow`、类型兼容性和参数绑定仍由 SQLx 负责。
-    /// SQLx 0.9 默认只接受静态 SQL 字面量；动态 SQL 必须由调用方审计后用
-    /// `sqlx::AssertSqlSafe` 显式标记，这个标记不会替调用方做转义或注入检查。
-    ///
-    /// # Examples
-    ///
-    /// ```rust,no_run
-    /// use axutils::sqlx::{SqlxClient, SqlxConfig, SqlxError};
-    /// # #[cfg(any(feature = "sqlx", feature = "sqlx-postgres", feature = "sqlx-mysql", feature = "sqlx-sqlite"))]
-    /// # async fn example() -> Result<(), SqlxError> {
-    /// let client = SqlxClient::connect(SqlxConfig::new("sqlite::memory:")?).await?;
-    /// let _query = client.query_as::<(i64,)>("SELECT 1");
-    /// # Ok(())
-    /// # }
-    /// ```
-    pub fn query_as<'q, T>(&self, sql: impl SqlSafeStr) -> QueryAs<'q, Any, T, AnyArguments>
-    where
-        T: for<'r> FromRow<'r, SqlxRow>,
-    {
-        sqlx::query_as::<sqlx::Any, T>(sql)
-    }
-
-    /// 创建固定为 SQLx `Any` 后端、读取第一列为 `T` 的查询对象。
-    ///
-    /// 该方法不执行 SQL；标量的 `Decode`/`Type` 兼容性仍由 SQLx 负责。
-    /// SQLx 0.9 默认只接受静态 SQL 字面量；动态 SQL 必须由调用方审计后用
-    /// `sqlx::AssertSqlSafe` 显式标记，这个标记不会替调用方做转义或注入检查。
-    ///
-    /// # Examples
-    ///
-    /// ```rust,no_run
-    /// use axutils::sqlx::{SqlxClient, SqlxConfig, SqlxError};
-    /// # #[cfg(any(feature = "sqlx", feature = "sqlx-postgres", feature = "sqlx-mysql", feature = "sqlx-sqlite"))]
-    /// # async fn example() -> Result<(), SqlxError> {
-    /// let client = SqlxClient::connect(SqlxConfig::new("sqlite::memory:")?).await?;
-    /// let _query = client.query_scalar::<i64>("SELECT 1");
-    /// # Ok(())
-    /// # }
-    /// ```
-    pub fn query_scalar<'q, T>(&self, sql: impl SqlSafeStr) -> QueryScalar<'q, Any, T, AnyArguments>
-    where
-        (T,): for<'r> FromRow<'r, SqlxRow>,
-    {
-        sqlx::query_scalar::<sqlx::Any, T>(sql)
-    }
-
-    /// 执行一个 SQLx `Query` 并返回受 SQLx 定义的影响行数结果。
-    ///
-    /// SQL 文本和参数仍由 SQLx 处理；底层错误会映射为不含原始 SQL/URL/数据库消息的
-    /// [`SqlxError`]。
-    ///
-    /// # Examples
-    ///
-    /// ```rust,no_run
-    /// use axutils::sqlx::{SqlxClient, SqlxError};
-    /// # #[cfg(any(feature = "sqlx", feature = "sqlx-postgres", feature = "sqlx-mysql", feature = "sqlx-sqlite"))]
-    /// # async fn example(client: &SqlxClient) -> Result<(), SqlxError> {
-    /// client.execute_async(client.query("CREATE TABLE items (id INTEGER)")).await?;
-    /// # Ok(())
-    /// # }
-    /// ```
-    pub async fn execute_async<'q>(
-        &self,
-        query: Query<'q, Any, AnyArguments>,
-    ) -> Result<AnyQueryResult, SqlxError> {
-        #[cfg(feature = "tracing")]
-        let started = std::time::Instant::now();
-        let result = async {
-            ensure_runtime()?;
-            query
-                .execute(&self.pool)
-                .await
-                .map_err(|error| SqlxError::from_upstream(&error))
-        }
-        .await;
-        #[cfg(feature = "tracing")]
-        sqlx_trace::record_event("execute", self.driver, 0, 0, &result, started);
-        result
-    }
-
-    /// 读取一个原生 SQLx row；没有结果时返回 [`SqlxError::RowNotFound`]。
-    ///
-    /// # Examples
-    ///
-    /// ```rust,no_run
-    /// use axutils::sqlx::{SqlxClient, SqlxError};
-    /// # #[cfg(any(feature = "sqlx", feature = "sqlx-postgres", feature = "sqlx-mysql", feature = "sqlx-sqlite"))]
-    /// # async fn example(client: &SqlxClient) -> Result<(), SqlxError> {
-    /// let row = client.fetch_one_async(client.query("SELECT 1")).await?;
-    /// # let _ = row;
-    /// # Ok(())
-    /// # }
-    /// ```
-    pub async fn fetch_one_async<'q>(
-        &self,
-        query: Query<'q, Any, AnyArguments>,
-    ) -> Result<SqlxRow, SqlxError> {
-        #[cfg(feature = "tracing")]
-        let started = std::time::Instant::now();
-        let result = async {
-            ensure_runtime()?;
-            query
-                .fetch_one(&self.pool)
-                .await
-                .map_err(|error| SqlxError::from_upstream(&error))
-        }
-        .await;
-        #[cfg(feature = "tracing")]
-        sqlx_trace::record_event(
-            "fetch_one",
-            self.driver,
-            usize::from(result.is_ok()),
-            0,
-            &result,
-            started,
-        );
-        result
-    }
-
-    /// 读取一个映射为 `T` 的 row；没有结果时返回 [`SqlxError::RowNotFound`]。
-    ///
-    /// `T` 必须实现 `FromRow`，并满足 SQLx 异步查询所需的 `Send + Unpin`。
-    ///
-    /// # Examples
-    ///
-    /// ```rust,no_run
-    /// use axutils::sqlx::{SqlxClient, SqlxError};
-    /// # #[cfg(any(feature = "sqlx", feature = "sqlx-postgres", feature = "sqlx-mysql", feature = "sqlx-sqlite"))]
-    /// # async fn example(client: &SqlxClient) -> Result<(), SqlxError> {
-    /// let row: (i64,) = client.fetch_one_as_async(client.query_as::<(i64,)>("SELECT 1")).await?;
-    /// # let _ = row;
-    /// # Ok(())
-    /// # }
-    /// ```
-    pub async fn fetch_one_as_async<'q, T>(
-        &self,
-        query: QueryAs<'q, Any, T, AnyArguments>,
-    ) -> Result<T, SqlxError>
-    where
-        T: Send + Unpin + for<'r> FromRow<'r, SqlxRow>,
-    {
-        #[cfg(feature = "tracing")]
-        let started = std::time::Instant::now();
-        let result = async {
-            ensure_runtime()?;
-            query
-                .fetch_one(&self.pool)
-                .await
-                .map_err(|error| SqlxError::from_upstream(&error))
-        }
-        .await;
-        #[cfg(feature = "tracing")]
-        sqlx_trace::record_event(
-            "fetch_one_as",
-            self.driver,
-            usize::from(result.is_ok()),
-            0,
-            &result,
-            started,
-        );
-        result
-    }
-
-    /// 最多读取一个原生 row；没有结果时返回 `None`。
-    ///
-    /// # Examples
-    ///
-    /// ```rust,no_run
-    /// use axutils::sqlx::{SqlxClient, SqlxError};
-    /// # #[cfg(any(feature = "sqlx", feature = "sqlx-postgres", feature = "sqlx-mysql", feature = "sqlx-sqlite"))]
-    /// # async fn example(client: &SqlxClient) -> Result<(), SqlxError> {
-    /// let row = client.fetch_optional_async(client.query("SELECT 1 WHERE 0")).await?;
-    /// # let _ = row;
-    /// # Ok(())
-    /// # }
-    /// ```
-    pub async fn fetch_optional_async<'q>(
-        &self,
-        query: Query<'q, Any, AnyArguments>,
-    ) -> Result<Option<SqlxRow>, SqlxError> {
-        #[cfg(feature = "tracing")]
-        let started = std::time::Instant::now();
-        let result = async {
-            ensure_runtime()?;
-            query
-                .fetch_optional(&self.pool)
-                .await
-                .map_err(|error| SqlxError::from_upstream(&error))
-        }
-        .await;
-        #[cfg(feature = "tracing")]
-        sqlx_trace::record_event(
-            "fetch_optional",
-            self.driver,
-            usize::from(result.as_ref().ok().is_some_and(Option::is_some)),
-            0,
-            &result,
-            started,
-        );
-        result
-    }
-
-    /// 最多读取一个映射为 `T` 的 row；没有结果时返回 `None`。
-    ///
-    /// # Examples
-    ///
-    /// ```rust,no_run
-    /// use axutils::sqlx::{SqlxClient, SqlxError};
-    /// # #[cfg(any(feature = "sqlx", feature = "sqlx-postgres", feature = "sqlx-mysql", feature = "sqlx-sqlite"))]
-    /// # async fn example(client: &SqlxClient) -> Result<(), SqlxError> {
-    /// let row: Option<(i64,)> = client
-    ///     .fetch_optional_as_async(client.query_as::<(i64,)>("SELECT 1 WHERE 0"))
-    ///     .await?;
-    /// # let _ = row;
-    /// # Ok(())
-    /// # }
-    /// ```
-    pub async fn fetch_optional_as_async<'q, T>(
-        &self,
-        query: QueryAs<'q, Any, T, AnyArguments>,
-    ) -> Result<Option<T>, SqlxError>
-    where
-        T: Send + Unpin + for<'r> FromRow<'r, SqlxRow>,
-    {
-        #[cfg(feature = "tracing")]
-        let started = std::time::Instant::now();
-        let result = async {
-            ensure_runtime()?;
-            query
-                .fetch_optional(&self.pool)
-                .await
-                .map_err(|error| SqlxError::from_upstream(&error))
-        }
-        .await;
-        #[cfg(feature = "tracing")]
-        sqlx_trace::record_event(
-            "fetch_optional_as",
-            self.driver,
-            usize::from(result.as_ref().ok().is_some_and(Option::is_some)),
-            0,
-            &result,
-            started,
-        );
-        result
-    }
-
-    /// 逐行收集原生 row，并在消费第 `max_rows + 1` 行时返回 [`SqlxError::RowLimitExceeded`]。
-    ///
-    /// 不会调用无界的 SQLx `fetch_all`；刚好达到上限仍成功，超限后立即停止 stream 并释放连接。
-    /// 上限只限制返回行数，不限制单行字段大小。
-    ///
-    /// # Examples
-    ///
-    /// ```rust,no_run
-    /// use axutils::sqlx::{SqlxClient, SqlxError};
-    /// # #[cfg(any(feature = "sqlx", feature = "sqlx-postgres", feature = "sqlx-mysql", feature = "sqlx-sqlite"))]
-    /// # async fn example(client: &SqlxClient) -> Result<(), SqlxError> {
-    /// let rows = client.fetch_all_async(client.query("SELECT 1")).await?;
-    /// # let _ = rows;
-    /// # Ok(())
-    /// # }
-    /// ```
-    pub async fn fetch_all_async<'q>(
-        &self,
-        query: Query<'q, Any, AnyArguments>,
-    ) -> Result<Vec<SqlxRow>, SqlxError> {
-        #[cfg(feature = "tracing")]
-        let started = std::time::Instant::now();
-        let result = async {
-            ensure_runtime()?;
-            let sentinel_limit = self
-                .max_rows
-                .checked_add(1)
-                .ok_or(SqlxError::InvalidConfig { field: "max_rows" })?;
-            let mut stream = query.fetch(&self.pool);
-            let mut rows = Vec::new();
-
-            while let Some(result) = stream.next().await {
-                let row = result.map_err(|error| SqlxError::from_upstream(&error))?;
-                let seen = rows
-                    .len()
-                    .checked_add(1)
-                    .ok_or(SqlxError::InvalidConfig { field: "max_rows" })?;
-                if seen == sentinel_limit {
-                    return Err(SqlxError::RowLimitExceeded {
-                        limit: self.max_rows,
-                    });
-                }
-                rows.push(row);
-            }
-            Ok(rows)
-        }
-        .await;
-        #[cfg(feature = "tracing")]
-        let observed_rows = match &result {
-            Ok(rows) => rows.len(),
-            Err(SqlxError::RowLimitExceeded { limit }) => *limit,
-            Err(_) => 0,
-        };
-        #[cfg(feature = "tracing")]
-        sqlx_trace::record_event(
-            "fetch_all",
-            self.driver,
-            observed_rows,
-            self.max_rows,
-            &result,
-            started,
-        );
-        result
-    }
-
-    /// 逐行收集映射为 `T` 的结果，并在消费第 `max_rows + 1` 行时返回限制错误。
-    ///
-    /// # Examples
-    ///
-    /// ```rust,no_run
-    /// use axutils::sqlx::{SqlxClient, SqlxError};
-    /// # #[cfg(any(feature = "sqlx", feature = "sqlx-postgres", feature = "sqlx-mysql", feature = "sqlx-sqlite"))]
-    /// # async fn example(client: &SqlxClient) -> Result<(), SqlxError> {
-    /// let rows: Vec<(i64,)> = client
-    ///     .fetch_all_as_async(client.query_as::<(i64,)>("SELECT 1"))
-    ///     .await?;
-    /// # let _ = rows;
-    /// # Ok(())
-    /// # }
-    /// ```
-    pub async fn fetch_all_as_async<'q, T>(
-        &self,
-        query: QueryAs<'q, Any, T, AnyArguments>,
-    ) -> Result<Vec<T>, SqlxError>
-    where
-        T: Send + Unpin + for<'r> FromRow<'r, SqlxRow>,
-    {
-        #[cfg(feature = "tracing")]
-        let started = std::time::Instant::now();
-        let result = async {
-            ensure_runtime()?;
-            let sentinel_limit = self
-                .max_rows
-                .checked_add(1)
-                .ok_or(SqlxError::InvalidConfig { field: "max_rows" })?;
-            let mut stream = query.fetch(&self.pool);
-            let mut rows = Vec::new();
-
-            while let Some(result) = stream.next().await {
-                let row = result.map_err(|error| SqlxError::from_upstream(&error))?;
-                let seen = rows
-                    .len()
-                    .checked_add(1)
-                    .ok_or(SqlxError::InvalidConfig { field: "max_rows" })?;
-                if seen == sentinel_limit {
-                    return Err(SqlxError::RowLimitExceeded {
-                        limit: self.max_rows,
-                    });
-                }
-                rows.push(row);
-            }
-            Ok(rows)
-        }
-        .await;
-        #[cfg(feature = "tracing")]
-        let observed_rows = match &result {
-            Ok(rows) => rows.len(),
-            Err(SqlxError::RowLimitExceeded { limit }) => *limit,
-            Err(_) => 0,
-        };
-        #[cfg(feature = "tracing")]
-        sqlx_trace::record_event(
-            "fetch_all_as",
-            self.driver,
-            observed_rows,
-            self.max_rows,
-            &result,
-            started,
-        );
-        result
-    }
-
-    /// 读取标量查询的第一列；无行时返回 [`SqlxError::RowNotFound`]。
-    ///
-    /// # Examples
-    ///
-    /// ```rust,no_run
-    /// use axutils::sqlx::{SqlxClient, SqlxError};
-    /// # #[cfg(any(feature = "sqlx", feature = "sqlx-postgres", feature = "sqlx-mysql", feature = "sqlx-sqlite"))]
-    /// # async fn example(client: &SqlxClient) -> Result<(), SqlxError> {
-    /// let value: i64 = client.fetch_scalar_async(client.query_scalar::<i64>("SELECT 1")).await?;
-    /// # let _ = value;
-    /// # Ok(())
-    /// # }
-    /// ```
-    pub async fn fetch_scalar_async<'q, T>(
-        &self,
-        query: QueryScalar<'q, Any, T, AnyArguments>,
-    ) -> Result<T, SqlxError>
-    where
-        T: Send + Unpin,
-        (T,): for<'r> FromRow<'r, SqlxRow>,
-    {
-        #[cfg(feature = "tracing")]
-        let started = std::time::Instant::now();
-        let result = async {
-            ensure_runtime()?;
-            query
-                .fetch_one(&self.pool)
-                .await
-                .map_err(|error| SqlxError::from_upstream(&error))
-        }
-        .await;
-        #[cfg(feature = "tracing")]
-        sqlx_trace::record_event(
-            "fetch_scalar",
-            self.driver,
-            usize::from(result.is_ok()),
-            0,
-            &result,
-            started,
-        );
-        result
     }
 
     /// 开启原生 SQLx Any 事务。
@@ -547,9 +124,11 @@ impl SqlxClient {
     /// # }
     /// ```
     pub async fn begin_async(&self) -> Result<SqlxTransaction<'static>, SqlxError> {
+        // 事件仅记录固定操作元数据和耗时，不格式化配置或底层错误。
         #[cfg(feature = "tracing")]
         let started = std::time::Instant::now();
         let result = async {
+            // 异步资源操作依赖调用方的 runtime；后端错误只转换为本库固定分类。
             ensure_runtime()?;
             self.pool
                 .begin()
@@ -579,9 +158,11 @@ impl SqlxClient {
     /// # }
     /// ```
     pub async fn close_async(&self) -> Result<(), SqlxError> {
+        // 事件仅记录固定操作元数据和耗时，不格式化配置或底层错误。
         #[cfg(feature = "tracing")]
         let started = std::time::Instant::now();
         let result = async {
+            // 异步资源操作依赖调用方的 runtime；后端错误只转换为本库固定分类。
             ensure_runtime()?;
             self.pool.close().await;
             Ok(())
@@ -611,6 +192,7 @@ impl SqlxClient {
 }
 
 impl fmt::Debug for SqlxClient {
+    /// 输出预算和关闭状态，不暴露连接选项、URL 或认证信息。
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("SqlxClient")
@@ -620,8 +202,43 @@ impl fmt::Debug for SqlxClient {
     }
 }
 
+/// 只检查现有 Tokio 上下文，不创建 runtime，也不承诺其 I/O/time driver 已启用。
 fn ensure_runtime() -> Result<(), SqlxError> {
     Handle::try_current()
         .map(|_| ())
         .map_err(|_| SqlxError::RuntimeRequired)
+}
+
+#[cfg(all(test, feature = "sqlx-sqlite"))]
+mod tests {
+    use super::{SqlxClient, SqlxConfig};
+
+    #[tokio::test]
+    async fn memory_pool_preserves_its_only_connection() {
+        for url in [
+            "sqlite::memory:",
+            "sqlite://axutils-pool-contract?mode=memory",
+        ] {
+            let client = SqlxClient::connect(SqlxConfig::new(url).unwrap())
+                .await
+                .unwrap();
+            let options = client.pool.options();
+            assert_eq!(options.get_idle_timeout(), None);
+            assert_eq!(options.get_max_lifetime(), None);
+            assert!(!options.get_test_before_acquire());
+            client.close_async().await.unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn non_memory_pool_keeps_standard_recycling_policy() {
+        let client = SqlxClient::connect(SqlxConfig::new("sqlite:").unwrap())
+            .await
+            .unwrap();
+        let options = client.pool.options();
+        assert!(options.get_idle_timeout().is_some());
+        assert!(options.get_max_lifetime().is_some());
+        assert!(options.get_test_before_acquire());
+        client.close_async().await.unwrap();
+    }
 }

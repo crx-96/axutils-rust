@@ -1,7 +1,63 @@
 # Changelog
 
-本文件仅记录 `axutils` 各版本的源码、公共 API、运行时行为、错误与安全边界，以及面向使用者的兼容性变化。
+本文件记录 `axutils` 各版本的公共 API、运行时行为、错误与安全边界，以及面向使用者的兼容性变化。
+重大重构同时提供简短的结构与维护摘要；检查结果由实际验收交付说明，不将未执行的测试记为通过。
 每次修改或增加功能时，先读取 `Cargo.toml` 中的 `[package].version`，再在对应版本条目中补充记录。
+
+## [2.0.0]
+
+### Compatibility
+
+- 保留 1.2 的公共类型、方法签名、canonical path 和 feature 集合；默认生产依赖仍为空，
+  edition 2021 与 MSRV 1.95 不变。下游将依赖版本要求从 `1.2` 更新为 `2.0` 后可沿用现有调用。
+- 普通 `FsUtils::copy_file` / `copy_file_async` 现在在 I/O 前拒绝词法相同的源与目标，稳定返回
+  `FsError::PairIo { operation: "copy_file", kind: InvalidInput, .. }`；异步入口也先检查该参数。
+  这不包含 canonicalize、硬链接或 TOCTOU 防护。
+- HTTP 基地址及带查询参数的便捷入口会在 URL 规范化前拒绝空输入、ASCII 控制字符和超长输入；
+  authority 中的空用户信息（如 `http://@host/`）也会在被解析器删除前拒绝。先前可能被 URL
+  后端删除或改写的非法输入不再被接受，路径和查询参数中的 `@` 仍合法。带首尾空格的 `//host`
+  也按跨主机相对地址拒绝，避免在基地址解析时绕过原有限制。
+- Redis Cluster 的 `DEL` / `MGET` / `MSET` 多 key 操作在发送前检查 hash slot 并返回 `CrossSlot`，
+  落实原文档的同 slot 契约；不再由上游库拆分为可能部分成功的跨 slot 操作。
+- SQLx 默认关闭底层语句及慢语句日志，避免 SQL 字面量绕过本库脱敏；本库的结构化事件继续保留。
+  这不承诺控制所有第三方诊断，也不影响调用方自行使用 SQLx 原生接口。
+
+### Fixed
+
+- Axum 全局并发限制改用共享 permit，多个路由、HTTP 方法和 fallback 共同遵守同一上限；
+  服务在 shutdown future 首次 poll 前取消时保留关闭通知，避免后台 future 及其捕获资源遗留。
+  宿主关闭 future panic 后返回 `BackgroundTask` 并进入 `Abandoned`，不再误报为正常停止。
+- SMTP 根据实际返回的 4xx/5xx 状态分类认证失败与服务器拒收，修复其被错误归为 `Network`；
+  错误仍不包含原始响应或凭据。
+- TOML 无类型解析直接转换真实节点，保留与内部日期标记同名、转义后的用户键及其兄弟字段；
+  日期作为字符串标量处理，不再额外消耗容器深度。整数范围、进制、浮点及语法错误分类保持一致。
+- JWT 从 EC PKCS#8 的 `AlgorithmIdentifier` 读取曲线，修复合法 P-384 私钥标量中恰含 P-256
+  OID 字节时的误判；完整密钥有效性仍由后端验证，PKCS#8 支持范围不变。
+- 内存 SQLite 的单连接池禁用自动空闲/寿命回收及 checkout 前 ping，避免正常池管理丢失数据库；
+  显式关闭或真实连接故障仍可能丢失内存数据，普通数据库池策略不变。
+- Redis 锁获取后的 guard 保存向上取整到毫秒的实际 TTL，与发送到 Redis 的值及续租后的状态一致。
+- Tokio TaskGroup 先在门闩内登记计数、再锁外提交，修复已关闭 runtime 同步析构任务时的重入死锁；
+  任务仍拥有的捕获资源完成析构前保留 tracker 计数，返回值生命周期仍由调用方管理。
+- Scheduler 将容量预留与任务提交分开，完成、取消或关闭后不会重新发布任务；用户任务析构和
+  abort 不在登记锁内执行。Cron 首次触发使用注册时确定的 deadline，首 poll 晚到不再重新等待。
+
+### Refactored
+
+- Config 分离加载器、公开值树及 serde 预算访问器；FS 分离共享校验、同步执行及异步执行。
+- HTTP 分离客户端配置与去重策略；Axum 分离服务编排、关闭状态与 Tower/Governor 适配。
+- Redis 分离同步池管理与拓扑装配，复用批量输入校验；SQLx 分离池生命周期与查询执行；
+  Scheduler 分离任务登记与时间策略。新增实现模块均保持私有。
+- HTTP/Axum 集成用例按职责移入同名目录，保留原 test target 和进程隔离；文件取消回归改用
+  明确的阶段通知，修正 Redis live 用例的重复锁 key 与并发释放竞态，live 测试仍单独运行。
+- HTTP JSON 测试服务显式将 accepted socket 切回阻塞模式，修复 Windows 下请求数据稍晚到达
+  时的 `WouldBlock` 竞态；原读取超时与 JSON 错误断言保持不变。
+
+### Documentation
+
+- 将六类已确认个人风格集中到 `docs/rules/personal.md`，由 AGENTS 要求必读；AGENTS、架构、
+  模块映射、审查 Skill 与开发命令重新明确归属，重构流程保留旧测试基线和新回归证据。
+- 同步示例依赖到 2.0，JWT 示例实际执行签验与初始化；补充配置类型错误、SMTP 空闲池、
+  HEAD 空响应与异步 TLS 错误粒度的实际边界，并完善本次触及源码的定义及步骤注释。
 
 ## [1.2.0]
 

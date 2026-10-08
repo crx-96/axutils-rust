@@ -21,8 +21,8 @@ Feature matrix、Markdown harness 的组织、代码块 metadata、MSRV 检查�
 
 ## 文档、CHANGELOG 与发布包
 
-- 公共项提供中文 API doc，按接口需要说明用途、参数、返回、错误、feature、限制和副作用；
-  简单接口以清晰说明为主，复杂接口展开非直观契约。
+- API doc 按接口需要说明用途、参数、返回、错误、feature、限制和副作用；语言及定义/步骤的
+  注释要求见 [personal](../../../rules/personal.md#中文与注释)，这里重点核对契约准确性。
 - `docs/examples/<domain>.md` 使用 canonical path 和语义 feature，覆盖领域模型、典型流程、
   错误/安全/runtime 边界，保持私有实现路径的封装。
 - README 提供定位、短示例、feature 概览和文档链接；module map 维护职责、路径、feature 和
@@ -33,6 +33,7 @@ Feature matrix、Markdown harness 的组织、代码块 metadata、MSRV 检查�
   关键调用和断言；仅声明未调用的 `example` 函数只能提供编译证据。文档验收检查 Rustdoc 的警告、
   公共项缺失说明、示例编译与运行，不能只检查存在注释或生成了 HTML。
 - 当前版本的用户可见 API、feature、行为、错误、安全及 runtime/资源所有权变化记入 CHANGELOG；
-  测试组织、性能 harness、规则和纯文档整理通常不记入。
+  测试组织、性能 harness、规则和纯文档整理通常不记入。用户明确要求记录重构全貌时，可附简短
+  的结构与维护摘要，仍需区分纯移动、错误修复和需要下游注意的兼容性变化。
 - 发布包以 `package.include` 中的库源码、用户文档及发布元数据为准；包含与排除项在 develop
   的发布前检查维护，发布及版本操作的授权边界见 AGENTS。

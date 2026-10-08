@@ -13,7 +13,7 @@
 
 ```toml
 [dependencies]
-axutils = { version = "1.2", default-features = false, features = [
+axutils = { version = "2.0", default-features = false, features = [
     "config",       # JSON 与 .env
     "config-yaml",  # 同时包含 config
     "config-toml",  # 同时包含 config
@@ -39,8 +39,9 @@ let _ = (ConfigFormat::Json, ConfigLoader::new(), ConfigUtils, Option::<ConfigVa
 ## 默认 loader 与内存解析
 
 `ConfigLoader::new()` 的默认文件上限为 1 MiB、嵌套深度上限为 64；可接受范围分别为 1 KiB–16 MiB
-和 1–256。设置越界返回 `ConfigError::InvalidLimit`。内存解析的原始文本不经过文件读取上限，但
-仍受深度限制；解析 `.env` 时，插值展开后的累计内容继续受 `max_bytes` 约束。
+和 1–256。设置越界返回 `ConfigError::InvalidLimit`。内存解析的原始文本不经过文件读取上限。
+无类型解析以及 YAML/INI 的有类型解析使用加载器的深度预算；JSON/TOML 的有类型解析使用后端
+自身的递归保护。解析 `.env` 时，插值展开后的累计内容继续受 `max_bytes` 约束。
 
 `ConfigUtils` 等价于默认 `ConfigLoader`，适合不需要改变限制或 `.env` 行为的调用点：
 
@@ -75,6 +76,9 @@ let _value = loader.parse_value(r#"{"enabled":true}"#, ConfigFormat::Json)?;
 
 `parse::<T>`/`load::<T>` 和 `ConfigUtils` 的同名方法通过 `serde::Deserialize` 将内容映射到调用方类型；
 调用方应直接声明 `serde` 依赖并为其配置类型派生或实现 `Deserialize`。
+类型或字段不匹配时，JSON/TOML/YAML 返回不含原始内容的 `ConfigError::Parse`，INI/`.env` 返回
+`ConfigError::TypeMismatch`；INI/`.env` 可以将字符串解析为目标数值或布尔类型，其他格式保持
+后端的原生类型语义。
 
 ## 文件读取与显式格式
 
@@ -132,6 +136,10 @@ assert_eq!(value.get("server.port").and_then(|value| value.as_i64()), Some(8080)
 上例要求 `config-toml`。YAML 与 INI 分别使用 `ConfigFormat::Yaml` 和 `ConfigFormat::Ini`，要求
 `config-yaml` 与 `config-ini`。INI 无类型值通常保留为字符串；不要假设所有格式都会自动把字符串
 转换为数值或布尔值。
+
+TOML 日期时间保留为字符串，按标量处理，不额外占用表/数组的深度预算。普通用户键即使与
+后端日期标记 `$__toml_private_datetime` 同名，或在 TOML 中使用转义拼写，也按普通字段保留。
+TOML 的显式 `inf`/`nan` 字面量保留为非有限浮点值；普通指数溢出仍返回解析错误。
 
 ## 异步文件读取（`config-async`）
 

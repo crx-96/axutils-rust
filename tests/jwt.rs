@@ -1,8 +1,48 @@
 #![cfg(feature = "jwt")]
 
 use axutils::jwt::{
-    JwtAlgorithm, JwtConfig, JwtError, JwtSigningKey, JwtValidation, JwtVerificationKey,
+    JwtAlgorithm, JwtCodec, JwtConfig, JwtError, JwtSigningKey, JwtValidation, JwtVerificationKey,
 };
+
+#[test]
+fn ec_private_curve_comes_from_algorithm_identifier_not_scalar_bytes() {
+    let mut der = vec![
+        0x30, 0x4e, 0x02, 0x01, 0x00, 0x30, 0x10, 0x06, 0x07, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02,
+        0x01, 0x06, 0x05, 0x2b, 0x81, 0x04, 0x00, 0x22, 0x04, 0x37, 0x30, 0x35, 0x02, 0x01, 0x01,
+        0x04, 0x30, 0x01, 0x06, 0x08, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x03, 0x01, 0x07,
+    ];
+    der.resize(80, 0);
+    let pem = b"-----BEGIN PRIVATE KEY-----\nME4CAQAwEAYHKoZIzj0CAQYFK4EEACIENzA1AgEBBDABBggqhkjOPQMBBwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=\n-----END PRIVATE KEY-----";
+    for from_pem in [false, true] {
+        let signing_key = || {
+            if from_pem {
+                JwtSigningKey::from_ec_pem(pem).unwrap()
+            } else {
+                JwtSigningKey::from_ec_der(&der).unwrap()
+            }
+        };
+        assert!(JwtConfig::new(
+            JwtAlgorithm::Es256,
+            Some(signing_key()),
+            None,
+            JwtValidation::new(),
+        )
+        .is_err());
+        let codec = JwtCodec::new(
+            JwtConfig::new(
+                JwtAlgorithm::Es384,
+                Some(signing_key()),
+                None,
+                JwtValidation::new(),
+            )
+            .expect("the P-384 AlgorithmIdentifier must determine the curve"),
+        );
+        let token = codec
+            .encode(&serde_json::json!({"sub": "curve-regression", "exp": 4_000_000_000u64}))
+            .expect("the valid P-384 private scalar must sign successfully");
+        assert_eq!(token.split('.').count(), 3);
+    }
+}
 
 #[test]
 fn exposes_only_the_frozen_algorithm_set() {

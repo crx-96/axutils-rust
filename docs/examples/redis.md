@@ -18,14 +18,14 @@ Redis 是显式分层的领域能力。客户端、配置、错误、事务与�
 
 ```toml
 [dependencies]
-axutils = { version = "1.2", features = ["redis"] }
+axutils = { version = "2.0", features = ["redis"] }
 ```
 
 异步 Cluster：
 
 ```toml
 [dependencies]
-axutils = { version = "1.2", features = ["redis-cluster-async"] }
+axutils = { version = "2.0", features = ["redis-cluster-async"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 serde = { version = "1", features = ["derive"] }
 ```
@@ -56,8 +56,9 @@ fn main() -> Result<(), RedisError> {
 ```
 
 Cluster 需要 `redis-cluster`；配置节点时用户名、密码和 database 必须保持一致。客户端第一阶段只
-接受 `redis://`，不启用 TLS。Cluster 的多 key 操作必须位于同一 hash slot；否则返回
-`RedisError::CrossSlot`。
+接受 `redis://`，不启用 TLS。Cluster 的多 key 操作必须位于同一 hash slot；否则在本地校验
+输入后、发送命令前返回 `RedisError::CrossSlot`。`DEL`、`MGET`、`MSET` 不会被隐式拆成跨 slot
+子命令；可以通过相同的非空 `{hash-tag}` 归组 key，MSET 的 value 不参与 slot 判断。
 
 ```rust,no_run
 use axutils::redis::{RedisClient, RedisConfig, RedisError};
@@ -95,6 +96,8 @@ fn main() -> Result<(), RedisError> {
 输入 key/field、单值、批量、响应和集合结果均受 `RedisConfig` 预算约束。`RedisError` 不包含 endpoint、
 凭据、key、value、服务端原始回复或第三方错误文本；匹配它和 `RedisTransportErrorKind` 时应保留
 wildcard，因为两者均为 `non_exhaustive`。
+响应预算在底层接收并解析响应后检查，限制返回结果而非网络解析器的峰值内存；不能把它当成
+不可信服务端的传输层硬内存上限。
 
 ## 事务与单键租约锁
 
@@ -216,7 +219,7 @@ async fn main() -> Result<(), RedisError> {
 
 ```toml
 [dependencies]
-axutils = { version = "1.2", default-features = false, features = ["redis-invalidation"] }
+axutils = { version = "2.0", default-features = false, features = ["redis-invalidation"] }
 tokio = { version = "1", default-features = false, features = ["macros", "rt-multi-thread", "time", "net"] }
 ```
 

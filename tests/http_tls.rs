@@ -232,7 +232,14 @@ async fn async_http_client_uses_platform_verifier_and_redacts_untrusted_tls_erro
         .execute_async(request)
         .await
         .expect_err("self-signed fixture must not be trusted");
-    assert!(matches!(error, HttpError::Transport { attempts: 1, .. }));
+    assert!(matches!(
+        error,
+        HttpError::Transport {
+            kind: HttpTransportErrorKind::Connection,
+            attempts: 1,
+            exhausted: true,
+        }
+    ));
     let display = error.to_string();
     assert!(!display.contains(&sensitive_url));
     assert!(!display.contains("sensitive-token"));

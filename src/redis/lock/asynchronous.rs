@@ -22,15 +22,21 @@ use super::common::{
 /// 显式 `await release()`，取消、panic unwind 或 runtime 关闭时只能依赖获取时或最近一次
 /// 成功续租后的有效 TTL 兜底，TTL 上限为 24 小时。
 pub struct RedisAsyncLockGuard {
+    /// 获取租约的共享客户端，只用于显式释放和续租。
     client: RedisClient,
+    /// 租约 key 的拥有型字节，不通过 Debug 或公开 getter 暴露。
     key: Vec<u8>,
+    /// 随机所有者 token，Lua 比较用以保护后来替代的持有者。
     token: [u8; TOKEN_BYTES],
+    /// 获取或最近一次可靠续租时确认的有效毫秒 TTL，不表示剩余时间。
     ttl: Duration,
+    /// 本地尚未确认释放或所有权丢失；true 不能证明远端租约仍有效。
     pub(super) active: bool,
 }
 
 #[cfg(feature = "redis-async")]
 impl RedisAsyncLockGuard {
+    /// 接管成功获取租约后的客户端、key、token 和已校验的有效 TTL。
     pub(crate) fn new(
         client: RedisClient,
         key: Vec<u8>,
@@ -73,6 +79,7 @@ impl RedisAsyncLockGuard {
     /// let _ = release_lock;
     /// ```
     pub async fn release(&mut self) -> Result<bool, RedisError> {
+        // 已失效 guard 不发送命令，重复操作保留本地幂等结果。
         if !self.active {
             return Ok(false);
         }
@@ -108,8 +115,10 @@ impl RedisAsyncLockGuard {
     /// let _ = renew_lock;
     /// ```
     pub async fn renew(&mut self, ttl: Duration) -> Result<bool, RedisError> {
+        // 先校验新的租约预算，再判断活动状态，保留无效 TTL 的既有错误优先级。
         let ttl_millis = lock_ttl_millis(ttl)?;
         let effective_ttl = lock_ttl_duration(ttl)?;
+        // 已失效 guard 不发送命令，重复操作保留本地幂等结果。
         if !self.active {
             return Ok(false);
         }
@@ -123,11 +132,13 @@ impl RedisAsyncLockGuard {
 
 #[cfg(feature = "redis-async")]
 impl Drop for RedisAsyncLockGuard {
+    /// 有意不执行网络或后台清理，未显式释放的远端租约依靠 TTL 到期。
     fn drop(&mut self) {}
 }
 
 #[cfg(feature = "redis-async")]
 impl fmt::Debug for RedisAsyncLockGuard {
+    /// 只输出本地活动标记和有效 TTL，不泄露 key、token 或客户端配置。
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("RedisAsyncLockGuard")

@@ -176,6 +176,20 @@ use axutils::{
 - `src/utils/*_utils.rs` 聚合对应领域工具；Format/Path/Random/Reg 在 `utils` 内实现。
 - 事件适配位于 `src/telemetry/<domain>.rs`；与 Logging 的职责边界见架构文档。
 
+主要内部协作边界：
+
+| 领域 | 实现位置 | 职责边界 |
+| --- | --- | --- |
+| Config | `loader.rs`、`value.rs`、`value/de.rs`、各格式后端 | 加载器策略、公开值树、serde 预算访问器及真实格式解析分别维护；TOML 使用原始节点区分日期与用户表 |
+| FS | `ops.rs`、`ops/sync.rs`、`ops/asynchronous.rs` | 共享纯校验/错误映射，同步与异步执行分开 |
+| HTTP | `config.rs`、`deduplication.rs`、`coalesce.rs` | 客户端配置、公开去重策略与内部缓存/合并状态分开 |
+| Axum | `server.rs`、`shutdown.rs`、`middleware/` | 服务编排、启动/运行/关闭状态、各 provider 适配分开；Tower 配额及 Governor 清理在对应适配模块 |
+| Redis | `client/backend.rs`、`client/backend/pool.rs`、`client/input.rs`、`commands.rs` | 拓扑装配、同步池生命周期、批量输入收集与命令/slot 校验分开；`backend/fake.rs` 仅供测试 |
+| SQLx | `client.rs`、`client/query.rs` | 池/事务生命周期与查询执行/受限结果收集分开 |
+| Scheduler | `task.rs`、`schedule.rs` | 有界登记/取消/发布与时间锚点/串行执行分开 |
+
+以上均为私有实现路径，外部继续使用本文件前文列出的 canonical API。
+
 跨模块调用可导入有业务含义的模块限定符，例如：
 
 ```rust,ignore
@@ -186,8 +200,7 @@ sqlx_trace::record_client_init(&result, started);
 transfer::copy_file_with(source, destination, options, processor);
 ```
 
-路径风格及现有 lint 的适用方式见
-[项目 Skill 的路径与命名](skills/review-rust-library-change/references/api-and-features.md#路径与命名)。
+路径风格及现有 lint 的适用方式见 [personal](rules/personal.md#路径与目录风格)。
 
 ## 新增或调整能力
 

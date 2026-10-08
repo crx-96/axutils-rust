@@ -6,11 +6,12 @@ use super::super::{
     error::{RedisError, RedisTransportErrorKind},
 };
 
-#[cfg(any(test, feature = "redis-async"))]
+/// 检查所有存在值的单值与累计响应预算，保留缺失位置及原始二进制内容。
 pub(super) fn check_optional_values(
     values: Vec<Option<Vec<u8>>>,
     config: &RedisConfig,
 ) -> Result<Vec<Option<Vec<u8>>>, RedisError> {
+    // 累计只包含实际存在的有效载荷，None 不增加字节但保留结果位置。
     let mut response_bytes = 0;
     values
         .into_iter()
@@ -26,11 +27,12 @@ pub(super) fn check_optional_values(
 }
 
 #[cfg(feature = "redis-async")]
-#[cfg(feature = "redis-async")]
+/// 先完成全响应预算检查，再解码异步 MGET 结果，保留现有错误优先级。
 pub(super) fn decode_optional_values<T: DeserializeOwned>(
     values: Vec<Option<Vec<u8>>>,
     config: &RedisConfig,
 ) -> Result<Vec<Option<T>>, RedisError> {
+    // 先判预算再反序列化，避免异步路径的错误分类随解码顺序改变。
     check_optional_values(values, config)?
         .into_iter()
         .map(|value| {
@@ -42,10 +44,12 @@ pub(super) fn decode_optional_values<T: DeserializeOwned>(
 }
 
 #[allow(clippy::type_complexity)]
+/// 将扁平 HGETALL 响应转为 field/value 对，并检查形状、field、项数与字节预算。
 pub(super) fn decode_hash_entries(
     flat: Vec<Vec<u8>>,
     config: &RedisConfig,
 ) -> Result<Vec<(Vec<u8>, Vec<u8>)>, RedisError> {
+    // HGETALL 必须交替给出 field 和 value；先拒绝不完整的协议结构。
     if !flat.len().is_multiple_of(2) {
         return Err(RedisError::Transport(RedisTransportErrorKind::Protocol));
     }
@@ -58,6 +62,7 @@ pub(super) fn decode_hash_entries(
     let mut response_bytes = 0;
     let mut entries = Vec::with_capacity(count);
     let mut values = flat.into_iter();
+    // 逐对校验并转移拥有权，不复制值内容；任何异常都放弃整批返回值。
     for _ in 0..count {
         let Some(field_value) = values.next() else {
             return Err(RedisError::Transport(RedisTransportErrorKind::Protocol));
@@ -75,10 +80,12 @@ pub(super) fn decode_hash_entries(
     Ok(entries)
 }
 
+/// 按原顺序检查集合项数和响应字节，再逐项解码，失败时不返回部分结果。
 pub(super) fn decode_collection<T: DeserializeOwned>(
     values: Vec<Vec<u8>>,
     config: &RedisConfig,
 ) -> Result<Vec<T>, RedisError> {
+    // 数量超限优先于逐项字节及 MessagePack 检查。
     if values.len() > config.max_collection_items {
         return Err(RedisError::CollectionTooLarge {
             limit: config.max_collection_items,
@@ -94,6 +101,7 @@ pub(super) fn decode_collection<T: DeserializeOwned>(
         .collect()
 }
 
+/// 将 Hash field 字节计入累计响应预算；field 大小已按 key 限制单独校验。
 fn add_response_part(
     current: usize,
     bytes: usize,

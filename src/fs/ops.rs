@@ -1,39 +1,63 @@
-//! `FsUtils` 使用的文件系统操作实现。
+//! 文件系统执行入口及同步/异步共用的纯校验和错误映射。
 
-use std::{
-    fs::{self, File, OpenOptions},
-    io::{self, Read, Write},
-    path::{Path, PathBuf},
+#[cfg(feature = "fs-async")]
+mod asynchronous;
+mod sync;
+
+#[cfg(feature = "fs-async")]
+pub(crate) use asynchronous::{
+    append_async, copy_file_async, create_dir_all_async, create_dir_async, create_file_async,
+    ensure_runtime, is_dir_async, is_file_async, list_dir_async, metadata_async, move_path_async,
+    read_bytes_async, read_to_string_async, remove_dir_all_async, remove_dir_async,
+    remove_file_async, symlink_metadata_async, try_exists_async, write_async,
+};
+pub(crate) use sync::{
+    append, copy_file, create_dir, create_dir_all, create_file, is_dir, is_file, list_dir,
+    metadata, move_path, read_bytes, read_to_string, remove_dir, remove_dir_all, remove_file,
+    symlink_metadata, try_exists, write,
 };
 
 use super::FsError;
+use std::{fs, io, path::Path};
 
-#[cfg(feature = "fs-async")]
-use tokio::{
-    fs::{self as async_fs, File as AsyncFile, OpenOptions as AsyncOpenOptions},
-    io::{AsyncReadExt, AsyncWriteExt},
-    runtime::Handle,
-};
-
+/// try_exists 操作在公开错误中的稳定分类标记。
 const OP_TRY_EXISTS: &str = "try_exists";
+/// is_file 操作在公开错误中的稳定分类标记。
 const OP_IS_FILE: &str = "is_file";
+/// is_dir 操作在公开错误中的稳定分类标记。
 const OP_IS_DIR: &str = "is_dir";
+/// metadata 操作在公开错误中的稳定分类标记。
 const OP_METADATA: &str = "metadata";
+/// symlink_metadata 操作在公开错误中的稳定分类标记。
 const OP_SYMLINK_METADATA: &str = "symlink_metadata";
+/// create_file 操作在公开错误中的稳定分类标记。
 const OP_CREATE_FILE: &str = "create_file";
+/// create_dir 操作在公开错误中的稳定分类标记。
 const OP_CREATE_DIR: &str = "create_dir";
+/// create_dir_all 操作在公开错误中的稳定分类标记。
 const OP_CREATE_DIR_ALL: &str = "create_dir_all";
+/// list_dir 操作在公开错误中的稳定分类标记。
 const OP_LIST_DIR: &str = "list_dir";
+/// remove_file 操作在公开错误中的稳定分类标记。
 const OP_REMOVE_FILE: &str = "remove_file";
+/// remove_dir 操作在公开错误中的稳定分类标记。
 const OP_REMOVE_DIR: &str = "remove_dir";
+/// remove_dir_all 操作在公开错误中的稳定分类标记。
 const OP_REMOVE_DIR_ALL: &str = "remove_dir_all";
+/// move_path 操作在公开错误中的稳定分类标记。
 const OP_MOVE_PATH: &str = "move_path";
+/// copy_file 操作在公开错误中的稳定分类标记。
 const OP_COPY_FILE: &str = "copy_file";
+/// read_bytes 操作在公开错误中的稳定分类标记。
 const OP_READ_BYTES: &str = "read_bytes";
+/// read_to_string 操作在公开错误中的稳定分类标记。
 const OP_READ_TO_STRING: &str = "read_to_string";
+/// write 操作在公开错误中的稳定分类标记。
 const OP_WRITE: &str = "write";
+/// append 操作在公开错误中的稳定分类标记。
 const OP_APPEND: &str = "append";
 
+/// 将单路径 I/O 失败压缩为稳定操作、调用方路径与错误分类，不保存后端文本。
 fn io_error(operation: &'static str, path: &Path, error: &io::Error) -> FsError {
     FsError::Io {
         operation,
@@ -42,6 +66,7 @@ fn io_error(operation: &'static str, path: &Path, error: &io::Error) -> FsError 
     }
 }
 
+/// 保留复制或移动两端路径与稳定错误分类，不传播原始操作系统消息。
 fn pair_io_error(
     operation: &'static str,
     source: &Path,
@@ -56,6 +81,7 @@ fn pair_io_error(
     }
 }
 
+/// 拒绝无法保留额外观察余量的条目上界；零表示只接受空目录。
 fn validate_max_entries(max_entries: usize) -> Result<(), FsError> {
     if max_entries == usize::MAX {
         Err(FsError::InvalidLimit {
@@ -66,104 +92,16 @@ fn validate_max_entries(max_entries: usize) -> Result<(), FsError> {
     }
 }
 
+/// 为读取上限保留一个额外探测字节，并检查 usize/u64 的可表示范围。
 fn read_budget(max_bytes: usize) -> Result<u64, FsError> {
+    // 先在平台 usize 内保留探测字节，再转换为 Read::take 接受的 u64 上限。
     max_bytes
         .checked_add(1)
         .and_then(|value| u64::try_from(value).ok())
         .ok_or(FsError::InvalidLimit { field: "max_bytes" })
 }
 
-#[cfg(feature = "fs-async")]
-pub(crate) fn ensure_runtime() -> Result<(), FsError> {
-    Handle::try_current()
-        .map(|_| ())
-        .map_err(|_| FsError::RuntimeRequired)
-}
-
-pub(crate) fn try_exists(path: &Path) -> Result<bool, FsError> {
-    match fs::metadata(path) {
-        Ok(_) => Ok(true),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
-        Err(error) => Err(io_error(OP_TRY_EXISTS, path, &error)),
-    }
-}
-
-pub(crate) fn is_file(path: &Path) -> Result<bool, FsError> {
-    match fs::metadata(path) {
-        Ok(metadata) => Ok(metadata.is_file()),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
-        Err(error) => Err(io_error(OP_IS_FILE, path, &error)),
-    }
-}
-
-pub(crate) fn is_dir(path: &Path) -> Result<bool, FsError> {
-    match fs::metadata(path) {
-        Ok(metadata) => Ok(metadata.is_dir()),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
-        Err(error) => Err(io_error(OP_IS_DIR, path, &error)),
-    }
-}
-
-pub(crate) fn metadata(path: &Path) -> Result<fs::Metadata, FsError> {
-    fs::metadata(path).map_err(|error| io_error(OP_METADATA, path, &error))
-}
-
-pub(crate) fn symlink_metadata(path: &Path) -> Result<fs::Metadata, FsError> {
-    fs::symlink_metadata(path).map_err(|error| io_error(OP_SYMLINK_METADATA, path, &error))
-}
-
-pub(crate) fn create_file(path: &Path) -> Result<(), FsError> {
-    OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(path)
-        .map(|_| ())
-        .map_err(|error| io_error(OP_CREATE_FILE, path, &error))
-}
-
-pub(crate) fn create_dir(path: &Path) -> Result<(), FsError> {
-    fs::create_dir(path).map_err(|error| io_error(OP_CREATE_DIR, path, &error))
-}
-
-pub(crate) fn create_dir_all(path: &Path) -> Result<(), FsError> {
-    fs::create_dir_all(path).map_err(|error| io_error(OP_CREATE_DIR_ALL, path, &error))
-}
-
-pub(crate) fn list_dir(path: &Path, max_entries: usize) -> Result<Vec<PathBuf>, FsError> {
-    validate_max_entries(max_entries)?;
-
-    let entries = fs::read_dir(path).map_err(|error| io_error(OP_LIST_DIR, path, &error))?;
-    let mut paths = Vec::new();
-    for entry in entries {
-        let entry = entry.map_err(|error| io_error(OP_LIST_DIR, path, &error))?;
-        if paths.len() == max_entries {
-            return Err(FsError::DirectoryEntriesTooMany {
-                path: path.to_path_buf(),
-                limit: max_entries,
-            });
-        }
-        paths.push(entry.path());
-    }
-    Ok(paths)
-}
-
-pub(crate) fn remove_file(path: &Path) -> Result<(), FsError> {
-    fs::remove_file(path).map_err(|error| io_error(OP_REMOVE_FILE, path, &error))
-}
-
-pub(crate) fn remove_dir(path: &Path) -> Result<(), FsError> {
-    fs::remove_dir(path).map_err(|error| io_error(OP_REMOVE_DIR, path, &error))
-}
-
-pub(crate) fn remove_dir_all(path: &Path) -> Result<(), FsError> {
-    fs::remove_dir_all(path).map_err(|error| io_error(OP_REMOVE_DIR_ALL, path, &error))
-}
-
-pub(crate) fn move_path(source: &Path, destination: &Path) -> Result<(), FsError> {
-    fs::rename(source, destination)
-        .map_err(|error| pair_io_error(OP_MOVE_PATH, source, destination, &error))
-}
-
+/// 校验最终路径项为普通文件，按调用方策略允许目标不存在；不提供抗竞态保证。
 fn ensure_regular_file(
     operation: &'static str,
     path: &Path,
@@ -172,6 +110,7 @@ fn ensure_regular_file(
     destination: &Path,
     allow_missing: bool,
 ) -> Result<bool, FsError> {
+    // 使用 symlink_metadata 的最终项类型；仅允许目标缺失，其他错误保留源/目标角色。
     match metadata {
         Ok(metadata) if metadata.file_type().is_file() => Ok(true),
         Ok(_) => Err(FsError::UnsupportedEntry {
@@ -183,306 +122,18 @@ fn ensure_regular_file(
     }
 }
 
-pub(crate) fn copy_file(source: &Path, destination: &Path) -> Result<u64, FsError> {
-    let source_is_file = ensure_regular_file(
-        OP_COPY_FILE,
-        source,
-        fs::symlink_metadata(source),
-        source,
-        destination,
-        false,
-    )?;
-    debug_assert!(source_is_file);
-
-    let _destination_exists = ensure_regular_file(
-        OP_COPY_FILE,
-        destination,
-        fs::symlink_metadata(destination),
-        source,
-        destination,
-        true,
-    )?;
-
-    fs::copy(source, destination)
-        .map_err(|error| pair_io_error(OP_COPY_FILE, source, destination, &error))
-}
-
-fn read_bytes_with_operation(
-    path: &Path,
-    max_bytes: usize,
-    operation: &'static str,
-) -> Result<Vec<u8>, FsError> {
-    let budget = read_budget(max_bytes)?;
-    let mut file = File::open(path).map_err(|error| io_error(operation, path, &error))?;
-    let mut buffer = Vec::new();
-    Read::by_ref(&mut file)
-        .take(budget)
-        .read_to_end(&mut buffer)
-        .map_err(|error| io_error(operation, path, &error))?;
-
-    if buffer.len() > max_bytes {
-        return Err(FsError::FileTooLarge {
-            path: path.to_path_buf(),
-            limit: max_bytes,
+/// 在任何复制副作用前拒绝相同词法路径；不检测硬链接或规范化路径别名。
+fn validate_copy_paths(source: &Path, destination: &Path) -> Result<(), FsError> {
+    // 路径比较不访问磁盘；无法证明别名不同的输入仍遵循底层复制语义。
+    if source == destination {
+        return Err(FsError::PairIo {
+            operation: OP_COPY_FILE,
+            source: source.to_path_buf(),
+            destination: destination.to_path_buf(),
+            kind: io::ErrorKind::InvalidInput,
         });
     }
-    Ok(buffer)
-}
-
-pub(crate) fn read_bytes(path: &Path, max_bytes: usize) -> Result<Vec<u8>, FsError> {
-    read_bytes_with_operation(path, max_bytes, OP_READ_BYTES)
-}
-
-pub(crate) fn read_to_string(path: &Path, max_bytes: usize) -> Result<String, FsError> {
-    let buffer = read_bytes_with_operation(path, max_bytes, OP_READ_TO_STRING)?;
-    String::from_utf8(buffer).map_err(|_| FsError::NotUtf8 {
-        path: path.to_path_buf(),
-    })
-}
-
-pub(crate) fn write(path: &Path, contents: &[u8]) -> Result<(), FsError> {
-    fs::write(path, contents).map_err(|error| io_error(OP_WRITE, path, &error))
-}
-
-pub(crate) fn append(path: &Path, contents: &[u8]) -> Result<(), FsError> {
-    let mut file = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(path)
-        .map_err(|error| io_error(OP_APPEND, path, &error))?;
-    file.write_all(contents)
-        .map_err(|error| io_error(OP_APPEND, path, &error))
-}
-
-#[cfg(feature = "fs-async")]
-pub(crate) async fn try_exists_async(path: PathBuf) -> Result<bool, FsError> {
-    ensure_runtime()?;
-    match async_fs::metadata(&path).await {
-        Ok(_) => Ok(true),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
-        Err(error) => Err(io_error(OP_TRY_EXISTS, &path, &error)),
-    }
-}
-
-#[cfg(feature = "fs-async")]
-pub(crate) async fn is_file_async(path: PathBuf) -> Result<bool, FsError> {
-    ensure_runtime()?;
-    match async_fs::metadata(&path).await {
-        Ok(metadata) => Ok(metadata.is_file()),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
-        Err(error) => Err(io_error(OP_IS_FILE, &path, &error)),
-    }
-}
-
-#[cfg(feature = "fs-async")]
-pub(crate) async fn is_dir_async(path: PathBuf) -> Result<bool, FsError> {
-    ensure_runtime()?;
-    match async_fs::metadata(&path).await {
-        Ok(metadata) => Ok(metadata.is_dir()),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
-        Err(error) => Err(io_error(OP_IS_DIR, &path, &error)),
-    }
-}
-
-#[cfg(feature = "fs-async")]
-pub(crate) async fn metadata_async(path: PathBuf) -> Result<fs::Metadata, FsError> {
-    ensure_runtime()?;
-    async_fs::metadata(&path)
-        .await
-        .map_err(|error| io_error(OP_METADATA, &path, &error))
-}
-
-#[cfg(feature = "fs-async")]
-pub(crate) async fn symlink_metadata_async(path: PathBuf) -> Result<fs::Metadata, FsError> {
-    ensure_runtime()?;
-    async_fs::symlink_metadata(&path)
-        .await
-        .map_err(|error| io_error(OP_SYMLINK_METADATA, &path, &error))
-}
-
-#[cfg(feature = "fs-async")]
-pub(crate) async fn create_file_async(path: PathBuf) -> Result<(), FsError> {
-    ensure_runtime()?;
-    AsyncOpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&path)
-        .await
-        .map(|_| ())
-        .map_err(|error| io_error(OP_CREATE_FILE, &path, &error))
-}
-
-#[cfg(feature = "fs-async")]
-pub(crate) async fn create_dir_async(path: PathBuf) -> Result<(), FsError> {
-    ensure_runtime()?;
-    async_fs::create_dir(&path)
-        .await
-        .map_err(|error| io_error(OP_CREATE_DIR, &path, &error))
-}
-
-#[cfg(feature = "fs-async")]
-pub(crate) async fn create_dir_all_async(path: PathBuf) -> Result<(), FsError> {
-    ensure_runtime()?;
-    async_fs::create_dir_all(&path)
-        .await
-        .map_err(|error| io_error(OP_CREATE_DIR_ALL, &path, &error))
-}
-
-#[cfg(feature = "fs-async")]
-pub(crate) async fn list_dir_async(
-    path: PathBuf,
-    max_entries: usize,
-) -> Result<Vec<PathBuf>, FsError> {
-    validate_max_entries(max_entries)?;
-    ensure_runtime()?;
-
-    let mut entries = async_fs::read_dir(&path)
-        .await
-        .map_err(|error| io_error(OP_LIST_DIR, &path, &error))?;
-    let mut paths = Vec::new();
-    while let Some(entry) = entries
-        .next_entry()
-        .await
-        .map_err(|error| io_error(OP_LIST_DIR, &path, &error))?
-    {
-        if paths.len() == max_entries {
-            return Err(FsError::DirectoryEntriesTooMany {
-                path,
-                limit: max_entries,
-            });
-        }
-        paths.push(entry.path());
-    }
-    Ok(paths)
-}
-
-#[cfg(feature = "fs-async")]
-pub(crate) async fn remove_file_async(path: PathBuf) -> Result<(), FsError> {
-    ensure_runtime()?;
-    async_fs::remove_file(&path)
-        .await
-        .map_err(|error| io_error(OP_REMOVE_FILE, &path, &error))
-}
-
-#[cfg(feature = "fs-async")]
-pub(crate) async fn remove_dir_async(path: PathBuf) -> Result<(), FsError> {
-    ensure_runtime()?;
-    async_fs::remove_dir(&path)
-        .await
-        .map_err(|error| io_error(OP_REMOVE_DIR, &path, &error))
-}
-
-#[cfg(feature = "fs-async")]
-pub(crate) async fn remove_dir_all_async(path: PathBuf) -> Result<(), FsError> {
-    ensure_runtime()?;
-    async_fs::remove_dir_all(&path)
-        .await
-        .map_err(|error| io_error(OP_REMOVE_DIR_ALL, &path, &error))
-}
-
-#[cfg(feature = "fs-async")]
-pub(crate) async fn move_path_async(source: PathBuf, destination: PathBuf) -> Result<(), FsError> {
-    ensure_runtime()?;
-    async_fs::rename(&source, &destination)
-        .await
-        .map_err(|error| pair_io_error(OP_MOVE_PATH, &source, &destination, &error))
-}
-
-#[cfg(feature = "fs-async")]
-pub(crate) async fn copy_file_async(source: PathBuf, destination: PathBuf) -> Result<u64, FsError> {
-    ensure_runtime()?;
-
-    let source_is_file = ensure_regular_file(
-        OP_COPY_FILE,
-        &source,
-        async_fs::symlink_metadata(&source).await,
-        &source,
-        &destination,
-        false,
-    )?;
-    debug_assert!(source_is_file);
-
-    let _destination_exists = ensure_regular_file(
-        OP_COPY_FILE,
-        &destination,
-        async_fs::symlink_metadata(&destination).await,
-        &source,
-        &destination,
-        true,
-    )?;
-
-    async_fs::copy(&source, &destination)
-        .await
-        .map_err(|error| pair_io_error(OP_COPY_FILE, &source, &destination, &error))
-}
-
-#[cfg(feature = "fs-async")]
-async fn read_bytes_with_operation_async(
-    path: PathBuf,
-    max_bytes: usize,
-    operation: &'static str,
-) -> Result<Vec<u8>, FsError> {
-    let budget = read_budget(max_bytes)?;
-    ensure_runtime()?;
-
-    let file = AsyncFile::open(&path)
-        .await
-        .map_err(|error| io_error(operation, &path, &error))?;
-    let mut buffer = Vec::new();
-    file.take(budget)
-        .read_to_end(&mut buffer)
-        .await
-        .map_err(|error| io_error(operation, &path, &error))?;
-
-    if buffer.len() > max_bytes {
-        return Err(FsError::FileTooLarge {
-            path,
-            limit: max_bytes,
-        });
-    }
-    Ok(buffer)
-}
-
-#[cfg(feature = "fs-async")]
-pub(crate) async fn read_bytes_async(path: PathBuf, max_bytes: usize) -> Result<Vec<u8>, FsError> {
-    read_bytes_with_operation_async(path, max_bytes, OP_READ_BYTES).await
-}
-
-#[cfg(feature = "fs-async")]
-pub(crate) async fn read_to_string_async(
-    path: PathBuf,
-    max_bytes: usize,
-) -> Result<String, FsError> {
-    let path_for_error = path.clone();
-    let buffer = read_bytes_with_operation_async(path, max_bytes, OP_READ_TO_STRING).await?;
-    String::from_utf8(buffer).map_err(|_| FsError::NotUtf8 {
-        path: path_for_error,
-    })
-}
-
-#[cfg(feature = "fs-async")]
-pub(crate) async fn write_async(path: PathBuf, contents: Vec<u8>) -> Result<(), FsError> {
-    ensure_runtime()?;
-    async_fs::write(&path, contents)
-        .await
-        .map_err(|error| io_error(OP_WRITE, &path, &error))
-}
-
-#[cfg(feature = "fs-async")]
-pub(crate) async fn append_async(path: PathBuf, contents: Vec<u8>) -> Result<(), FsError> {
-    ensure_runtime()?;
-    let mut file = AsyncOpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&path)
-        .await
-        .map_err(|error| io_error(OP_APPEND, &path, &error))?;
-    file.write_all(&contents)
-        .await
-        .map_err(|error| io_error(OP_APPEND, &path, &error))?;
-    file.flush()
-        .await
-        .map_err(|error| io_error(OP_APPEND, &path, &error))
+    Ok(())
 }
 
 #[cfg(test)]

@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use axutils::http::{HttpClient, HttpConfig, HttpError, HttpRequestOptions};
+use axutils::http::{HttpClient, HttpConfig, HttpError, HttpRequestOptions, RetryPolicy};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Deserialize, PartialEq)]
@@ -52,7 +52,12 @@ fn spawn_server(expected_requests: usize) -> (String, CapturedRequests, thread::
                     Err(error) => panic!("accept test request: {error}"),
                 }
             };
+            // Windows 的 accepted socket 可能继承非阻塞模式；读取超时不会切换该模式。
+            stream
+                .set_nonblocking(false)
+                .expect("set test request stream blocking");
             let request = read_request(&mut stream);
+            let is_head = request.starts_with(b"HEAD ");
             let is_bytes = request
                 .split(|byte| *byte == b'\n')
                 .next()
@@ -84,7 +89,9 @@ fn spawn_server(expected_requests: usize) -> (String, CapturedRequests, thread::
             stream
                 .write_all(header.as_bytes())
                 .expect("write response headers");
-            stream.write_all(body).expect("write response body");
+            if !is_head {
+                stream.write_all(body).expect("write response body");
+            }
             stream.flush().expect("flush response");
         }
     });
@@ -353,6 +360,138 @@ fn serde_shortcuts_hide_json_decode_details() {
     assert_eq!(error, HttpError::JsonDeserialize);
     assert!(!error.to_string().contains("not-json"));
     server.join().expect("server thread");
+}
+
+#[test]
+fn serde_shortcuts_reject_empty_userinfo_before_normalization() {
+    let (listener, client, address) = invalid_url_fixture();
+    for userinfo in ["@", ":@"] {
+        let url = format!("http://{userinfo}{address}/query");
+        for query in [None, Some([("page", "1")])] {
+            assert_eq!(
+                client.get::<Reply, _>(&url, query, None).unwrap_err(),
+                HttpError::InvalidUrl
+            );
+            assert_eq!(
+                client.get_bytes(&url, query, None).unwrap_err(),
+                HttpError::InvalidUrl
+            );
+        }
+        assert_eq!(
+            client
+                .post::<Reply, _>(&url, Some(["body"]), None)
+                .unwrap_err(),
+            HttpError::InvalidUrl
+        );
+    }
+    assert_eq!(listener.accept().unwrap_err().kind(), ErrorKind::WouldBlock);
+}
+
+#[cfg(feature = "http-async")]
+#[tokio::test]
+async fn async_serde_shortcuts_reject_empty_userinfo_before_normalization() {
+    let (listener, client, address) = invalid_url_fixture();
+    for userinfo in ["@", ":@"] {
+        let url = format!("http://{userinfo}{address}/query");
+        for query in [None, Some([("page", "1")])] {
+            assert_eq!(
+                client
+                    .get_async::<Reply, _>(&url, query, None)
+                    .await
+                    .unwrap_err(),
+                HttpError::InvalidUrl
+            );
+            assert_eq!(
+                client.get_bytes_async(&url, query, None).await.unwrap_err(),
+                HttpError::InvalidUrl
+            );
+        }
+        assert_eq!(
+            client
+                .post_async::<Reply, _>(&url, Some(["body"]), None)
+                .await
+                .unwrap_err(),
+            HttpError::InvalidUrl
+        );
+    }
+    assert_eq!(listener.accept().unwrap_err().kind(), ErrorKind::WouldBlock);
+}
+
+fn invalid_url_fixture() -> (TcpListener, HttpClient, String) {
+    let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let address = listener.local_addr().unwrap().to_string();
+    let config = HttpConfig::builder()
+        .request_timeout(Duration::from_millis(100))
+        .unwrap()
+        .retry_policy(RetryPolicy::default().with_max_retries(1).unwrap())
+        .build()
+        .unwrap();
+    (listener, HttpClient::new(config).unwrap(), address)
+}
+
+#[test]
+fn head_shortcuts_preserve_empty_body_and_json_error_contract() {
+    use axutils::http::{HttpMethod, HttpRequest};
+
+    let (address, requests, server) = spawn_server(3);
+    let client = client(&address);
+    assert_eq!(
+        client
+            .head::<Reply, _>("/head", None::<()>, None)
+            .unwrap_err(),
+        HttpError::JsonDeserialize
+    );
+    assert!(client
+        .head_bytes("/head", None::<()>, None)
+        .unwrap()
+        .is_empty());
+    let response = client
+        .execute(HttpRequest::new(HttpMethod::Head, "/head").unwrap())
+        .unwrap();
+    assert_eq!(response.status(), 200);
+    assert!(response.headers().contains("content-length"));
+    assert!(response.body().is_empty());
+    server.join().unwrap();
+    assert!(requests
+        .lock()
+        .unwrap()
+        .iter()
+        .all(|request| request_line(request).starts_with("HEAD /head HTTP/1.1")));
+}
+
+#[cfg(feature = "http-async")]
+#[tokio::test]
+async fn async_head_shortcuts_preserve_empty_body_and_json_error_contract() {
+    use axutils::http::{HttpMethod, HttpRequest};
+
+    let (address, requests, server) = spawn_server(3);
+    let client = client(&address);
+    assert_eq!(
+        client
+            .head_async::<Reply, _>("/head", None::<()>, None)
+            .await
+            .unwrap_err(),
+        HttpError::JsonDeserialize
+    );
+    assert!(client
+        .head_bytes_async("/head", None::<()>, None)
+        .await
+        .unwrap()
+        .is_empty());
+    let response = client
+        .execute_async(HttpRequest::new(HttpMethod::Head, "/head").unwrap())
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+    assert!(response.headers().contains("content-length"));
+    assert!(response.body().is_empty());
+    server.join().unwrap();
+    assert!(requests
+        .lock()
+        .unwrap()
+        .iter()
+        .all(|request| request_line(request).starts_with("HEAD /head HTTP/1.1")));
 }
 
 #[cfg(feature = "http-async")]

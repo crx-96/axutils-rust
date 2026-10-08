@@ -1,3 +1,5 @@
+//! 服务构造和生命周期错误的稳定展示。
+
 use std::{error::Error, fmt, io};
 
 /// Axum 服务构建和生命周期错误。Display/Debug 不包含请求、Header、body 或 provider 原始消息。
@@ -38,6 +40,7 @@ pub enum AxumError {
     BackgroundTask,
 }
 impl fmt::Debug for AxumError {
+    /// 调试输出只包含稳定类别，不展开 I/O 或信号错误的原始文本。
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::InvalidConfig { field } => f
@@ -57,6 +60,7 @@ impl fmt::Debug for AxumError {
     }
 }
 impl fmt::Display for AxumError {
+    /// 以固定消息解释构造与生命周期失败，不拼接请求或 provider 输入。
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::InvalidConfig { field } => write!(f, "invalid Axum configuration: {field}"),
@@ -73,6 +77,7 @@ impl fmt::Display for AxumError {
     }
 }
 impl Error for AxumError {
+    /// 保留 listener 和信号注册的操作系统错误链，供调用方诊断本地环境。
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
             Self::Io(e) | Self::Signal(e) => Some(e),
@@ -81,6 +86,7 @@ impl Error for AxumError {
     }
 }
 impl From<io::Error> for AxumError {
+    /// 将本地 listener I/O 失败转换为服务错误并保留原错误链。
     fn from(value: io::Error) -> Self {
         Self::Io(value)
     }

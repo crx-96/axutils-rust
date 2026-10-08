@@ -8,271 +8,38 @@ use url::Url;
 use super::headers::HttpHeaders;
 use super::request;
 use super::retry::RetryPolicy;
-use super::HttpError;
+use super::{DeduplicationPolicy, HttpError};
 
+/// 客户端请求或响应体可配置的绝对字节上限。
 const MAX_REQUEST_OR_RESPONSE_BYTES: usize = 16 * 1024 * 1024;
-
-/// single-flight 的合并模式。
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub enum DeduplicationMode {
-    /// 不合并请求。
-    Disabled,
-    /// 只合并当前正在执行的相同请求。
-    InFlight,
-    /// 合并正在执行的请求，并在成功响应上保留显式 TTL 缓存。
-    WithCompletedTtl,
-}
-
-/// HTTP 请求去重和短期完成缓存策略。
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
-pub struct DeduplicationPolicy {
-    mode: DeduplicationMode,
-    ttl: Duration,
-    max_inflight_keys: usize,
-    max_completed_entries: usize,
-    max_cached_body_bytes: usize,
-}
-
-impl Default for DeduplicationPolicy {
-    fn default() -> Self {
-        Self {
-            mode: DeduplicationMode::InFlight,
-            ttl: Duration::ZERO,
-            max_inflight_keys: 1024,
-            max_completed_entries: 128,
-            max_cached_body_bytes: 8 * 1024 * 1024,
-        }
-    }
-}
-
-impl DeduplicationPolicy {
-    /// 禁用请求去重。
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use axutils::http::DeduplicationPolicy;
-    ///
-    /// let policy = DeduplicationPolicy::disabled();
-    /// assert!(!policy.is_enabled());
-    /// ```
-    pub fn disabled() -> Self {
-        Self {
-            mode: DeduplicationMode::Disabled,
-            ..Self::default()
-        }
-    }
-
-    /// 创建只合并 in-flight 请求的策略。
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use axutils::http::DeduplicationPolicy;
-    ///
-    /// let policy = DeduplicationPolicy::in_flight(16).unwrap();
-    /// assert_eq!(policy.max_inflight_keys(), 16);
-    /// ```
-    pub fn in_flight(max_inflight_keys: usize) -> Result<Self, HttpError> {
-        validate_key_limit(max_inflight_keys)?;
-        Ok(Self {
-            mode: DeduplicationMode::InFlight,
-            max_inflight_keys,
-            ..Self::default()
-        })
-    }
-
-    /// 创建带完成缓存 TTL 的策略。
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use axutils::http::DeduplicationPolicy;
-    /// use std::time::Duration;
-    ///
-    /// let policy = DeduplicationPolicy::with_completed_ttl(
-    ///     Duration::from_secs(5),
-    ///     16,
-    ///     8,
-    ///     1024,
-    /// )
-    /// .unwrap();
-    /// assert!(policy.cache_enabled());
-    /// ```
-    pub fn with_completed_ttl(
-        ttl: Duration,
-        max_inflight_keys: usize,
-        max_completed_entries: usize,
-        max_cached_body_bytes: usize,
-    ) -> Result<Self, HttpError> {
-        validate_key_limit(max_inflight_keys)?;
-        if ttl.is_zero() || ttl > Duration::from_secs(60 * 60) {
-            return Err(HttpError::InvalidConfig {
-                field: "deduplication_ttl",
-            });
-        }
-        if !(1..=1024).contains(&max_completed_entries) {
-            return Err(HttpError::InvalidConfig {
-                field: "max_completed_entries",
-            });
-        }
-        if !(1..=64 * 1024 * 1024).contains(&max_cached_body_bytes) {
-            return Err(HttpError::InvalidConfig {
-                field: "max_cached_body_bytes",
-            });
-        }
-        Ok(Self {
-            mode: DeduplicationMode::WithCompletedTtl,
-            ttl,
-            max_inflight_keys,
-            max_completed_entries,
-            max_cached_body_bytes,
-        })
-    }
-
-    /// 返回去重模式。
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use axutils::http::{DeduplicationMode, DeduplicationPolicy};
-    ///
-    /// let policy = DeduplicationPolicy::disabled();
-    /// assert_eq!(policy.mode(), DeduplicationMode::Disabled);
-    /// ```
-    pub fn mode(&self) -> DeduplicationMode {
-        self.mode
-    }
-
-    /// 返回完成缓存 TTL；仅 `WithCompletedTtl` 模式生效。
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use axutils::http::DeduplicationPolicy;
-    /// use std::time::Duration;
-    ///
-    /// let policy = DeduplicationPolicy::with_completed_ttl(
-    ///     Duration::from_secs(5),
-    ///     16,
-    ///     8,
-    ///     1024,
-    /// )
-    /// .unwrap();
-    /// assert_eq!(policy.ttl(), Duration::from_secs(5));
-    /// ```
-    pub fn ttl(&self) -> Duration {
-        self.ttl
-    }
-
-    /// 返回允许同时追踪的 in-flight key 数量。
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use axutils::http::DeduplicationPolicy;
-    ///
-    /// let policy = DeduplicationPolicy::in_flight(16).unwrap();
-    /// assert_eq!(policy.max_inflight_keys(), 16);
-    /// ```
-    pub fn max_inflight_keys(&self) -> usize {
-        self.max_inflight_keys
-    }
-
-    /// 返回完成缓存最大条目数。
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use axutils::http::DeduplicationPolicy;
-    /// use std::time::Duration;
-    ///
-    /// let policy = DeduplicationPolicy::with_completed_ttl(
-    ///     Duration::from_secs(5),
-    ///     16,
-    ///     8,
-    ///     1024,
-    /// )
-    /// .unwrap();
-    /// assert_eq!(policy.max_completed_entries(), 8);
-    /// ```
-    pub fn max_completed_entries(&self) -> usize {
-        self.max_completed_entries
-    }
-
-    /// 返回完成缓存允许占用的响应体总字节数。
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use axutils::http::DeduplicationPolicy;
-    /// use std::time::Duration;
-    ///
-    /// let policy = DeduplicationPolicy::with_completed_ttl(
-    ///     Duration::from_secs(5),
-    ///     16,
-    ///     8,
-    ///     1024,
-    /// )
-    /// .unwrap();
-    /// assert_eq!(policy.max_cached_body_bytes(), 1024);
-    /// ```
-    pub fn max_cached_body_bytes(&self) -> usize {
-        self.max_cached_body_bytes
-    }
-
-    /// 返回是否开启请求去重。
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use axutils::http::DeduplicationPolicy;
-    ///
-    /// assert!(DeduplicationPolicy::in_flight(16).unwrap().is_enabled());
-    /// assert!(!DeduplicationPolicy::disabled().is_enabled());
-    /// ```
-    pub fn is_enabled(&self) -> bool {
-        self.mode != DeduplicationMode::Disabled
-    }
-
-    /// 返回是否开启成功响应缓存。
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use axutils::http::DeduplicationPolicy;
-    /// use std::time::Duration;
-    ///
-    /// let policy = DeduplicationPolicy::with_completed_ttl(
-    ///     Duration::from_secs(5),
-    ///     16,
-    ///     8,
-    ///     1024,
-    /// )
-    /// .unwrap();
-    /// assert!(policy.cache_enabled());
-    /// ```
-    pub fn cache_enabled(&self) -> bool {
-        self.mode == DeduplicationMode::WithCompletedTtl && !self.ttl.is_zero()
-    }
-}
 
 /// HTTP 客户端配置。
 #[derive(Clone, Eq, PartialEq)]
 pub struct HttpConfig {
+    /// 解析相对请求的可选 HTTP(S) 基地址；None 时只允许绝对 URL。
     base_url: Option<Url>,
+    /// 已验证的默认 header，跨源请求会过滤敏感项。
     default_headers: HttpHeaders,
+    /// 一次 execute 的总网络预算，默认 30 秒，包含重试与等待。
     request_timeout: Duration,
+    /// 单次连接建立预算，默认不超过 10 秒或请求总预算。
     connect_timeout: Duration,
+    /// 单次请求体字节上限，默认 1 MiB，最大 16 MiB。
     max_request_body_bytes: usize,
+    /// 返回响应体的字节上限，默认 1 MiB，最大 16 MiB。
     max_response_body_bytes: usize,
+    /// 每个主机可保留的空闲连接数，默认 8，范围 1..=64。
     max_idle_connections_per_host: usize,
+    /// 空闲连接保留时长，默认 60 秒，范围 1 秒至 1 小时。
     idle_connection_timeout: Duration,
+    /// 未被请求覆盖时使用的总尝试次数、退避和安全方法策略。
     retry_policy: RetryPolicy,
+    /// 未被请求覆盖时使用的合并与有限完成缓存策略。
     deduplication_policy: DeduplicationPolicy,
 }
 
 impl Default for HttpConfig {
+    /// 通过同一 builder 路径生成有限默认值，避免两套校验和默认值漂移。
     fn default() -> Self {
         Self::builder()
             .build()
@@ -291,7 +58,8 @@ impl HttpConfig {
         self.base_url.as_ref().map(Url::as_str)
     }
 
-    pub(crate) fn base_url_ref(&self) -> Option<&Url> {
+    /// 内部借用已解析基地址，避免每次请求重新解析配置文本。
+    pub(super) fn base_url_ref(&self) -> Option<&Url> {
         self.base_url.as_ref()
     }
 
@@ -342,6 +110,7 @@ impl HttpConfig {
 }
 
 impl fmt::Debug for HttpConfig {
+    /// 仅输出预算和策略；URL 只显示是否配置，header 只显示数量和大小。
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("HttpConfig")
@@ -365,19 +134,30 @@ impl fmt::Debug for HttpConfig {
 /// [`HttpConfig`] 的 builder。
 #[derive(Clone, Default)]
 pub struct HttpConfigBuilder {
+    /// 可选基地址；None 在 build 后保持未配置。
     base_url: Option<Url>,
+    /// 已通过 header 校验的默认集合，初始为空。
     default_headers: HttpHeaders,
+    /// 可选请求总预算；None 使用 30 秒。
     request_timeout: Option<Duration>,
+    /// 可选连接预算；None 使用 10 秒与请求预算的较小值。
     connect_timeout: Option<Duration>,
+    /// 可选请求体字节上限；None 使用 1 MiB。
     max_request_body_bytes: Option<usize>,
+    /// 可选响应体字节上限；None 使用 1 MiB。
     max_response_body_bytes: Option<usize>,
+    /// 可选单主机空闲连接数；None 使用 8。
     max_idle_connections_per_host: Option<usize>,
+    /// 可选空闲连接寿命；None 使用 60 秒。
     idle_connection_timeout: Option<Duration>,
+    /// 可选默认重试策略；None 使用 RetryPolicy::default。
     retry_policy: Option<RetryPolicy>,
+    /// 可选默认合并策略；None 仅合并正在执行的安全请求。
     deduplication_policy: Option<DeduplicationPolicy>,
 }
 
 impl fmt::Debug for HttpConfigBuilder {
+    /// 展示配置项的存在与预算，不回显 URL 和默认 header 值。
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("HttpConfigBuilder")
@@ -404,6 +184,8 @@ impl HttpConfigBuilder {
     /// 不调用此方法时基地址保持为空；此时请求仍可使用完整的绝对 HTTP/HTTPS URL，
     /// 但相对 URL 会在执行时返回 [`HttpError::InvalidUrl`]。
     pub fn base_url(mut self, value: impl AsRef<str>) -> Result<Self, HttpError> {
+        // parser 会忽略部分控制字符，因此必须在规范化前校验原始文本。
+        request::validate_raw_url(value.as_ref())?;
         let url = Url::parse(value.as_ref()).map_err(|_| HttpError::InvalidUrl)?;
         request::validate_absolute_url(&url)?;
         self.base_url = Some(url);
@@ -422,12 +204,14 @@ impl HttpConfigBuilder {
         name: impl AsRef<[u8]>,
         value: impl AsRef<[u8]>,
     ) -> Result<Self, HttpError> {
+        // 容器负责原子替换和大小检查，失败不留下半更新的 header 集合。
         self.default_headers.set(name, value)?;
         Ok(self)
     }
 
     /// 设置请求总时间预算。
     pub fn request_timeout(mut self, timeout: Duration) -> Result<Self, HttpError> {
+        // 保存前校验有限预算；与连接预算的相对关系在 build 时检查。
         validate_timeout(timeout, "request_timeout")?;
         self.request_timeout = Some(timeout);
         Ok(self)
@@ -435,6 +219,7 @@ impl HttpConfigBuilder {
 
     /// 设置连接建立时间预算。
     pub fn connect_timeout(mut self, timeout: Duration) -> Result<Self, HttpError> {
+        // 先限制单值范围，最终 build 再保证连接预算不超过请求总预算。
         validate_timeout(timeout, "connect_timeout")?;
         self.connect_timeout = Some(timeout);
         Ok(self)
@@ -442,6 +227,7 @@ impl HttpConfigBuilder {
 
     /// 设置请求体上限。
     pub fn max_request_body_bytes(mut self, limit: usize) -> Result<Self, HttpError> {
+        // 请求级 16 MiB 上限之外，客户端可以采用更小的实际发送预算。
         validate_byte_limit(limit, "max_request_body_bytes")?;
         self.max_request_body_bytes = Some(limit);
         Ok(self)
@@ -449,6 +235,7 @@ impl HttpConfigBuilder {
 
     /// 设置响应体上限。
     pub fn max_response_body_bytes(mut self, limit: usize) -> Result<Self, HttpError> {
+        // 响应按读取后的字节计数，拒绝零值和超过绝对上限的配置。
         validate_byte_limit(limit, "max_response_body_bytes")?;
         self.max_response_body_bytes = Some(limit);
         Ok(self)
@@ -456,6 +243,7 @@ impl HttpConfigBuilder {
 
     /// 设置每个主机允许保留的最大空闲连接数。
     pub fn max_idle_connections_per_host(mut self, max: usize) -> Result<Self, HttpError> {
+        // 只控制连接池保留数量，不把此值解释为并发请求上限。
         if !(1..=64).contains(&max) {
             return Err(HttpError::InvalidConfig {
                 field: "max_idle_connections_per_host",
@@ -467,6 +255,7 @@ impl HttpConfigBuilder {
 
     /// 设置空闲连接保留时间。
     pub fn idle_connection_timeout(mut self, timeout: Duration) -> Result<Self, HttpError> {
+        // 保留时间有界，防止无期限维持空闲连接。
         if !(Duration::from_secs(1)..=Duration::from_secs(60 * 60)).contains(&timeout) {
             return Err(HttpError::InvalidConfig {
                 field: "idle_connection_timeout",
@@ -495,6 +284,7 @@ impl HttpConfigBuilder {
     /// 3 次最大网络尝试。未设置 `base_url` 时只允许执行绝对 URL。若显式设置的
     /// `connect_timeout` 大于 `request_timeout`，返回 `InvalidConfig { field: "connect_timeout" }`。
     pub fn build(self) -> Result<HttpConfig, HttpError> {
+        // 默认连接预算随较短的请求预算收缩；调用方显式提供的冲突值则报错。
         let request_timeout = self.request_timeout.unwrap_or(Duration::from_secs(30));
         let connect_timeout = self
             .connect_timeout
@@ -504,6 +294,7 @@ impl HttpConfigBuilder {
                 field: "connect_timeout",
             });
         }
+        // 只有各字段与组合都合法，才发布不可变配置；无基地址仍是有效配置。
         Ok(HttpConfig {
             base_url: self.base_url,
             default_headers: self.default_headers,
@@ -521,15 +312,7 @@ impl HttpConfigBuilder {
     }
 }
 
-fn validate_key_limit(value: usize) -> Result<(), HttpError> {
-    if !(1..=4096).contains(&value) {
-        return Err(HttpError::InvalidConfig {
-            field: "max_inflight_keys",
-        });
-    }
-    Ok(())
-}
-
+/// 检查大于零且不超过 1 小时的网络预算，错误仅包含固定字段名。
 fn validate_timeout(value: Duration, field: &'static str) -> Result<(), HttpError> {
     if value.is_zero() || value > Duration::from_secs(60 * 60) {
         return Err(HttpError::InvalidConfig { field });
@@ -537,9 +320,38 @@ fn validate_timeout(value: Duration, field: &'static str) -> Result<(), HttpErro
     Ok(())
 }
 
+/// 检查请求/响应正文预算位于 1 字节至 16 MiB。
 fn validate_byte_limit(value: usize, field: &'static str) -> Result<(), HttpError> {
     if !(1..=MAX_REQUEST_OR_RESPONSE_BYTES).contains(&value) {
         return Err(HttpError::InvalidConfig { field });
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{HttpConfig, HttpError};
+
+    #[test]
+    fn regression_base_url_rejects_raw_input_before_normalization() {
+        for url in [
+            "",
+            "https://exa\nmple.com/",
+            "\rhttps://example.com/",
+            "https://example.com/\tpath",
+        ] {
+            assert!(
+                matches!(
+                    HttpConfig::builder().base_url(url),
+                    Err(HttpError::InvalidUrl)
+                ),
+                "accepted {url:?}"
+            );
+        }
+        let too_long = format!("{}https://example.com/", "\t".repeat(8192));
+        assert!(matches!(
+            HttpConfig::builder().base_url(too_long),
+            Err(HttpError::InvalidUrl)
+        ));
+    }
 }

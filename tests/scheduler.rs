@@ -511,3 +511,21 @@ fn multi_thread_runtime_drives_tasks() {
             .unwrap();
     });
 }
+
+#[tokio::test(start_paused = true)]
+async fn cron_first_deadline_is_not_restarted_by_delayed_first_poll() {
+    let scheduler = Scheduler::new(SchedulerConfig::new(1).unwrap()).unwrap();
+    let calls = Arc::new(AtomicUsize::new(0));
+    let callback_calls = Arc::clone(&calls);
+    scheduler
+        .register(TaskSchedule::cron("* * * * * *", "UTC"), move || {
+            let calls = Arc::clone(&callback_calls);
+            async move {
+                calls.fetch_add(1, Ordering::SeqCst);
+            }
+        })
+        .unwrap();
+    tokio_time::advance(Duration::from_secs(2)).await;
+    tokio_task::yield_now().await;
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+}

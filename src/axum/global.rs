@@ -1,7 +1,10 @@
+//! 默认服务的一次初始化入口；运行仍由实例显式控制。
+
 use std::sync::OnceLock;
 
 use super::{AxumError, AxumServer};
 
+/// 首个成功发布的默认服务，停止后也不允许替换或重新初始化。
 static SERVER: OnceLock<AxumServer> = OnceLock::new();
 
 /// 进程内唯一默认 [`AxumServer`] 的生命周期入口。
@@ -13,6 +16,7 @@ pub struct AxumUtils;
 impl AxumUtils {
     /// 初始化默认服务；并发调用只有一个成功，失败值不占用初始化机会。
     pub fn init(server: AxumServer) -> Result<(), AxumError> {
+        // 原子发布已经构建的实例；竞争落败的输入随错误路径释放，不触发监听。
         SERVER
             .set(server)
             .map_err(|_| AxumError::AlreadyInitialized)

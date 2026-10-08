@@ -1,89 +1,106 @@
 //! `toml` 后端：TOML 文本到 [`ConfigValue`] 或调用方类型的转换。
 
-use serde::de::{DeserializeOwned, DeserializeSeed};
-use toml::{
-    self,
-    de::{Deserializer as TomlDeserializer, Error as TomlError},
-    Value as TomlValue,
-};
+use std::collections::BTreeMap;
 
-use super::{error as config_error, value as config_value};
-use super::{
-    error::ConfigError,
-    value::{ConfigValueSeed, ErrorMarker, TOML_DATETIME_FIELD},
-    ConfigValue,
-};
+use serde::de::DeserializeOwned;
+use toml::de::{DeTable, DeValue, Error as TomlError};
 
-pub(crate) fn parse_value(text: &str, max_depth: usize) -> Result<ConfigValue, ConfigError> {
-    // `toml_datetime` represents a datetime through a map whose sole key is a private
-    // string. A user is nevertheless allowed to create a TOML table with that same key.
-    // When the marker occurs in the source, parse the public TOML value tree first so the
-    // actual node kind remains distinguishable from the serde pseudo-table representation.
-    if text.contains(TOML_DATETIME_FIELD) {
-        if let Ok(value) = toml::from_str::<TomlValue>(text) {
-            return convert_toml_value(value, max_depth, max_depth);
-        }
-    }
-    let deserializer =
-        TomlDeserializer::parse(text).map_err(|error| map_parse_error(text, &error))?;
-    ConfigValueSeed::root_for_toml(max_depth)
-        .deserialize(deserializer)
-        .map_err(|error| map_value_error(text, &error, max_depth))
+use super::{error as config_error, ConfigError, ConfigValue};
+
+/// 先完成 TOML 语法校验，再按真实节点类型转换无类型值并施加容器深度预算。
+///
+/// `DeTable` 保留日期与普通表的区别，避免 serde 的日期伪表标记与用户键名冲突。
+pub(super) fn parse_value(text: &str, max_depth: usize) -> Result<ConfigValue, ConfigError> {
+    // 沿用后端的完整文档解析，使语法错误、重复键及后端递归保护先于值转换生效。
+    let table = DeTable::parse(text).map_err(|error| map_parse_error(text, &error))?;
+    convert_table(table.into_inner(), text, max_depth, max_depth)
 }
 
-fn convert_toml_value(
-    value: TomlValue,
+/// 转换一层实际 TOML 表；键名仅用于子值的脱敏错误分类，输出使用稳定的有序表。
+fn convert_table(
+    table: DeTable<'_>,
+    text: &str,
+    remaining_depth: usize,
+    limit: usize,
+) -> Result<ConfigValue, ConfigError> {
+    // 根表和嵌套表各消耗一层预算；日期标量不经过本函数。
+    let child_depth = remaining_depth
+        .checked_sub(1)
+        .ok_or(ConfigError::DepthLimitExceeded { limit })?;
+    let mut output = BTreeMap::new();
+    for (key, value) in table {
+        let key = key.into_inner().into_owned();
+        let offset = value.span().start;
+        let value = convert_value(value.into_inner(), text, offset, &key, child_depth, limit)?;
+        output.insert(key, value);
+    }
+    Ok(ConfigValue::Table(output))
+}
+
+/// 转换真实 TOML 节点；`key` 为最近的表字段名，`offset` 用于保留后端数值错误的位置。
+fn convert_value(
+    value: DeValue<'_>,
+    text: &str,
+    offset: usize,
+    key: &str,
     remaining_depth: usize,
     limit: usize,
 ) -> Result<ConfigValue, ConfigError> {
     match value {
-        TomlValue::String(value) => Ok(ConfigValue::String(value)),
-        TomlValue::Integer(value) => Ok(ConfigValue::Integer(value)),
-        TomlValue::Float(value) => Ok(ConfigValue::Float(value)),
-        TomlValue::Boolean(value) => Ok(ConfigValue::Bool(value)),
-        TomlValue::Datetime(value) => Ok(ConfigValue::String(value.to_string())),
-        TomlValue::Array(values) => {
-            let remaining_depth = remaining_depth
+        // 文本、布尔和日期均为标量；普通用户表即使使用日期内部标记键，也只进入 Table 分支。
+        DeValue::String(value) => Ok(ConfigValue::String(value.into_owned())),
+        DeValue::Boolean(value) => Ok(ConfigValue::Bool(value)),
+        DeValue::Datetime(value) => Ok(ConfigValue::String(value.to_string())),
+        DeValue::Integer(value) => {
+            // 后端已去除进制前缀与分隔下划线；as_str 保留十进制正负号，radix 指明原进制。
+            let raw = value.as_str();
+            let radix = value.radix();
+            if let Ok(value) = i64::from_str_radix(raw, radix) {
+                return Ok(ConfigValue::Integer(value));
+            }
+            // 保留旧 serde visitor 的分类：后端能表示但 ConfigValue 无法表示时属于范围错误。
+            if i128::from_str_radix(raw, radix).is_ok() || u128::from_str_radix(raw, radix).is_ok()
+            {
+                return Err(ConfigError::ValueOutOfRange {
+                    key: key.to_owned(),
+                });
+            }
+            Err(parse_error_at(text, offset))
+        }
+        DeValue::Float(value) => {
+            // 仅 TOML 的显式 inf 字面量可以成为无穷大；指数溢出仍按后端语义返回解析错误。
+            let raw = value.as_str();
+            match raw.parse::<f64>() {
+                Ok(value) if !value.is_infinite() || raw.contains("inf") => {
+                    Ok(ConfigValue::Float(value))
+                }
+                _ => Err(parse_error_at(text, offset)),
+            }
+        }
+        DeValue::Array(values) => {
+            // 数组自身消耗一层预算，元素沿用最近的表字段名，避免把配置值加入错误上下文。
+            let child_depth = remaining_depth
                 .checked_sub(1)
                 .ok_or(ConfigError::DepthLimitExceeded { limit })?;
             values
                 .into_iter()
-                .map(|value| convert_toml_value(value, remaining_depth, limit))
+                .map(|value| {
+                    let offset = value.span().start;
+                    convert_value(value.into_inner(), text, offset, key, child_depth, limit)
+                })
                 .collect::<Result<Vec<_>, _>>()
                 .map(ConfigValue::Array)
         }
-        TomlValue::Table(values) => {
-            let remaining_depth = remaining_depth
-                .checked_sub(1)
-                .ok_or(ConfigError::DepthLimitExceeded { limit })?;
-            values
-                .into_iter()
-                .map(|(key, value)| {
-                    convert_toml_value(value, remaining_depth, limit).map(|value| (key, value))
-                })
-                .collect::<Result<_, _>>()
-                .map(ConfigValue::Table)
-        }
+        DeValue::Table(table) => convert_table(table, text, remaining_depth, limit),
     }
 }
 
-pub(crate) fn parse<T: DeserializeOwned>(text: &str) -> Result<T, ConfigError> {
+/// 使用 TOML 原生反序列化保留调用方类型和后端自身的递归保护。
+pub(super) fn parse<T: DeserializeOwned>(text: &str) -> Result<T, ConfigError> {
     toml::from_str(text).map_err(|error| map_parse_error(text, &error))
 }
 
-fn map_value_error(text: &str, error: &TomlError, max_depth: usize) -> ConfigError {
-    match config_value::classify_marker(error.message()) {
-        ErrorMarker::DepthLimitExceeded => ConfigError::DepthLimitExceeded { limit: max_depth },
-        ErrorMarker::DuplicateKey(key) => ConfigError::DuplicateKey {
-            key: key.to_owned(),
-        },
-        ErrorMarker::ValueOutOfRange(key) => ConfigError::ValueOutOfRange {
-            key: key.to_owned(),
-        },
-        ErrorMarker::None => map_parse_error(text, error),
-    }
-}
-
+/// 将原始解析错误收敛为格式和位置，不保留可能含配置值的上游消息。
 fn map_parse_error(text: &str, error: &TomlError) -> ConfigError {
     let (line, column) = match error.span() {
         Some(span) => {
@@ -96,6 +113,16 @@ fn map_parse_error(text: &str, error: &TomlError) -> ConfigError {
         format: "toml",
         line,
         column,
+    }
+}
+
+/// 用节点的起始字节位置构造数值转换错误，与后端的 span 定位保持一致。
+fn parse_error_at(text: &str, byte_offset: usize) -> ConfigError {
+    let (line, column) = config_error::line_column_at(text, byte_offset);
+    ConfigError::Parse {
+        format: "toml",
+        line: Some(line),
+        column: Some(column),
     }
 }
 

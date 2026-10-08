@@ -14,6 +14,14 @@ async fn async_cluster_init_checks_connectivity_before_installing_the_global_cli
     let url = format!("redis://{}/0", unavailable.address);
     assert!(RedisUtils::init_async(test_config(&url)).await.is_err());
     assert!(!RedisUtils::is_initialized());
+    let unavailable_cluster = RedisConfig::cluster([url])
+        .unwrap()
+        .with_connection_timeout(Duration::from_millis(200))
+        .unwrap()
+        .with_response_timeout(Duration::from_millis(200))
+        .unwrap();
+    assert!(RedisUtils::init_async(unavailable_cluster).await.is_err());
+    assert!(!RedisUtils::is_initialized());
 
     let server = RedisTestServer::start(|command| {
         Some(if command[0] == "PING" {

@@ -1,3 +1,5 @@
+//! SMTP 错误的稳定分类和脱敏边界。
+
 use std::{error::Error as StdError, fmt};
 
 use lettre::transport::smtp::Error as SmtpError;
@@ -28,6 +30,7 @@ pub enum EmailTransportErrorKind {
 }
 
 impl fmt::Display for EmailTransportErrorKind {
+    /// 将稳定分类转换为不含 SMTP 原始响应的固定标签。
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         let label = match self {
             Self::Connection => "connection",
@@ -77,23 +80,30 @@ pub enum EmailError {
 }
 
 impl EmailError {
-    pub(crate) fn invalid_config(field: &'static str) -> Self {
+    /// 构造仅含固定字段名的配置错误。
+    pub(super) fn invalid_config(field: &'static str) -> Self {
         Self::InvalidConfig { field }
     }
 
-    pub(crate) fn invalid_message(field: &'static str) -> Self {
+    /// 构造仅含固定字段名的消息错误。
+    pub(super) fn invalid_message(field: &'static str) -> Self {
         Self::InvalidMessage { field }
     }
 
-    pub(crate) fn from_smtp(error: &SmtpError) -> Self {
+    /// 从 Lettre 错误中提取分类，不保留其服务端文本或错误链。
+    pub(super) fn from_smtp(error: &SmtpError) -> Self {
+        // 超时、TLS 与池关闭优先保留专门分类；真实 4xx/5xx 由 status() 判定。
+        // Lettre 的 is_response() 仅表示响应解析失败，不包含正常解析出的拒绝状态。
         let kind = if error.is_timeout() {
             EmailTransportErrorKind::Timeout
         } else if error.is_tls() {
             EmailTransportErrorKind::Tls
         } else if error.is_transport_shutdown() {
             EmailTransportErrorKind::Shutdown
+        } else if let Some(status) = error.status() {
+            classify_response_status(Some(status.into()))
         } else if error.is_response() {
-            classify_response_status(error.status().map(u16::from))
+            EmailTransportErrorKind::SmtpResponse
         } else if error.is_client() {
             EmailTransportErrorKind::Client
         } else if is_connection_error(error) {
@@ -106,6 +116,7 @@ impl EmailError {
     }
 }
 
+/// 将已知 SMTP 认证状态归为认证失败，其余状态或无状态解析失败归为响应错误。
 fn classify_response_status(status: Option<u16>) -> EmailTransportErrorKind {
     if matches!(status, Some(432 | 454 | 530 | 534 | 535)) {
         EmailTransportErrorKind::Authentication
@@ -114,7 +125,9 @@ fn classify_response_status(status: Option<u16>) -> EmailTransportErrorKind {
     }
 }
 
+/// 只检查错误链中的 I/O 类型，不读取或输出底层错误文本。
 fn is_connection_error(error: &SmtpError) -> bool {
+    // 遍历 provider 的包装层，保留能由标准 I/O 类型确认的连接失败语义。
     let mut source = StdError::source(error);
     while let Some(current) = source {
         if current
@@ -139,6 +152,7 @@ fn is_connection_error(error: &SmtpError) -> bool {
 }
 
 impl fmt::Debug for EmailError {
+    /// 展示固定分类、字段或索引，省略所有调用方与服务端内容。
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::InvalidConfig { field } => formatter
@@ -165,6 +179,7 @@ impl fmt::Debug for EmailError {
 }
 
 impl fmt::Display for EmailError {
+    /// 生成人类可读的脱敏错误，不暴露 SMTP 原始响应或凭据。
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::InvalidConfig { field } => {
@@ -189,6 +204,60 @@ impl std::error::Error for EmailError {}
 #[cfg(test)]
 mod tests {
     use super::{classify_response_status, EmailError, EmailTransportErrorKind};
+
+    #[test]
+    fn regression_smtp_negative_replies_keep_their_public_classification() {
+        use lettre::SmtpTransport;
+        use std::{
+            io::{ErrorKind, Write},
+            net::TcpListener,
+            thread,
+            time::{Duration, Instant},
+        };
+
+        for (status, expected) in [
+            (535, EmailTransportErrorKind::Authentication),
+            (550, EmailTransportErrorKind::SmtpResponse),
+            (421, EmailTransportErrorKind::SmtpResponse),
+        ] {
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            let port = listener.local_addr().unwrap().port();
+            listener.set_nonblocking(true).unwrap();
+            let fixture = thread::spawn(move || {
+                let deadline = Instant::now() + Duration::from_secs(3);
+                let mut stream = loop {
+                    match listener.accept() {
+                        Ok((stream, _)) => break stream,
+                        Err(error) if error.kind() == ErrorKind::WouldBlock => {
+                            assert!(Instant::now() < deadline, "SMTP fixture accept timed out");
+                            thread::sleep(Duration::from_millis(2));
+                        }
+                        Err(error) => panic!("SMTP fixture accept: {error}"),
+                    }
+                };
+                stream.set_nonblocking(false).unwrap();
+                stream
+                    .set_write_timeout(Some(Duration::from_secs(1)))
+                    .unwrap();
+                stream
+                    .write_all(format!("{status} private-server-detail\r\n").as_bytes())
+                    .unwrap();
+            });
+            let transport = SmtpTransport::builder_dangerous("127.0.0.1")
+                .port(port)
+                .timeout(Some(Duration::from_secs(2)))
+                .build();
+            let error = transport.test_connection().unwrap_err();
+            fixture.join().unwrap();
+            assert_eq!(error.status().map(u16::from), Some(status));
+            let mapped = EmailError::from_smtp(&error);
+            assert!(
+                matches!(mapped, EmailError::Transport(kind) if kind == expected),
+                "status {status}: {mapped:?}"
+            );
+            assert!(!format!("{mapped:?} {mapped}").contains("private-server-detail"));
+        }
+    }
 
     #[test]
     fn classifies_authentication_response_codes_without_network() {

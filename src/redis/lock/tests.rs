@@ -37,6 +37,28 @@ fn lock_ttl_debug_state_matches_redis_rounding() {
 }
 
 #[test]
+fn acquired_guard_reports_the_effective_millisecond_ttl() {
+    let (client, _) = RedisClient::test_fake(Ok(1));
+    let guard = client
+        .try_lock("lease", Duration::from_nanos(1_000_001))
+        .unwrap()
+        .unwrap();
+    assert!(format!("{guard:?}").contains("ttl: 2ms"));
+}
+
+#[cfg(feature = "redis-async")]
+#[tokio::test]
+async fn acquired_async_guard_reports_the_effective_millisecond_ttl() {
+    let (client, _) = RedisClient::test_fake(Ok(1));
+    let guard = client
+        .try_lock_async("lease", Duration::from_nanos(1_000_001))
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(format!("{guard:?}").contains("ttl: 2ms"));
+}
+
+#[test]
 fn guard_result_transitions_are_explicit_and_preserve_retry_after_errors() {
     let mut active = true;
     assert_eq!(finish_release(&mut active, Ok(1)), Ok(true));

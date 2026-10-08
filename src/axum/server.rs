@@ -1,18 +1,14 @@
-use super::shutdown::{Phase, Shared};
+//! Server 构造和监听编排；状态迁移与 provider 后台任务由各自模块管理。
+
+#[cfg(feature = "axum-governor")]
+use super::middleware::GovernorCleanupGuard;
+use super::shutdown::{self, ActiveGuard, Phase, Shared, StartGuard};
 #[cfg(feature = "axum-tower-http")]
 use super::AxumTimeoutStatus;
 use super::{AxumConfig, AxumError, AxumServeOutcome, AxumShutdownHandle, AxumShutdownReason};
 use axum::Router;
-#[cfg(feature = "axum-governor")]
-use futures_timer::Delay;
 use std::{future::Future, net::SocketAddr, sync::Arc};
 use tokio::net::TcpListener;
-use tokio::signal;
-#[cfg(feature = "axum-governor")]
-use tokio::{
-    sync::watch::{channel as watch_channel, Sender as WatchSender},
-    task::JoinHandle,
-};
 
 /// 已收敛 state 的 Axum server builder；构造和 build 不访问网络。
 /// # Examples
@@ -23,22 +19,31 @@ use tokio::{
 /// # }
 /// ```
 pub struct AxumServerBuilder {
-    pub(crate) router: Router,
+    /// 已注入应用状态、尚未开始监听的 Router；provider 仅在构造期间添加 layer。
+    pub(super) router: Router,
+    /// 供调用方查询的有限声明值，不隐式安装 middleware。
     config: AxumConfig,
+    /// 路由收敛时延迟记录的错误，build 时返回。
     build_error: Option<AxumError>,
+    /// 是否在最终最外层生成并传播内部 request ID。
     #[cfg(feature = "axum-tower-http")]
-    pub(crate) request_id_installed: bool,
+    pub(super) request_id_installed: bool,
+    /// 最后一次设置的 service future 预算与超时状态码；None 表示未安装。
     #[cfg(feature = "axum-tower-http")]
-    pub(crate) timeout_layer: Option<(std::time::Duration, AxumTimeoutStatus)>,
+    pub(super) timeout_layer: Option<(std::time::Duration, AxumTimeoutStatus)>,
+    /// 是否在业务层外捕获 unwind 并返回脱敏 500。
     #[cfg(feature = "axum-tower-http")]
-    pub(crate) catch_panic_installed: bool,
+    pub(super) catch_panic_installed: bool,
+    /// 是否在完成响应时记录脱敏 HTTP 事件。
     #[cfg(all(feature = "axum-tower-http", feature = "tracing"))]
-    pub(crate) http_trace_installed: bool,
+    pub(super) http_trace_installed: bool,
+    /// 已安装限流器的 stale-key 清理操作，只有 serve 期间会启动对应任务。
     #[cfg(feature = "axum-governor")]
-    pub(crate) governor_cleanup: Vec<Arc<dyn Fn() + Send + Sync>>,
+    pub(super) governor_cleanup: Vec<Arc<dyn Fn() + Send + Sync>>,
 }
 impl AxumServerBuilder {
-    pub(crate) fn new_with_error(
+    /// 从收敛后的 Router 与可选错误创建 builder，暂不执行最终 layer 排序。
+    pub(super) fn new_with_error(
         router: Router,
         config: AxumConfig,
         build_error: Option<AxumError>,
@@ -82,10 +87,12 @@ impl AxumServerBuilder {
     /// # }
     /// ```
     pub fn build(self) -> Result<AxumServer, AxumError> {
+        // 在统一出口安装有顺序要求的 layer，确保 timeout/panic 响应也携带 request ID。
         #[cfg(feature = "axum-tower-http")]
         let self_ = self.finalize_tower_http();
         #[cfg(not(feature = "axum-tower-http"))]
         let self_ = self;
+        // 路由构造错误不能发布为可运行实例；此时尚未 bind 或启动后台任务。
         if let Some(error) = self_.build_error {
             return Err(error);
         }
@@ -109,9 +116,13 @@ impl AxumServerBuilder {
 /// ```
 #[derive(Clone)]
 pub struct AxumServer {
+    /// 构建完成且不能再追加路由的服务模板；每次连接由 Axum 克隆所需状态。
     router: Router,
+    /// 构建时的声明配置，不代表对应 middleware 一定已安装。
     config: AxumConfig,
+    /// clone 共用的单次运行状态与关闭通知。
     shared: Arc<Shared>,
+    /// 当前 server 安装的 Governor 清理操作，随运行守卫启动和停止。
     #[cfg(feature = "axum-governor")]
     governor_cleanup: Vec<Arc<dyn Fn() + Send + Sync>>,
 }
@@ -152,12 +163,17 @@ impl AxumServer {
     /// }
     /// ```
     pub async fn serve_addr(&self, addr: SocketAddr) -> Result<AxumServeOutcome, AxumError> {
+        // 先取得唯一启动权；bind/local_addr 失败或取消时，由 StartGuard 恢复 Ready。
         let mut start = StartGuard::reserve(self.shared.clone())?;
         let listener = TcpListener::bind(addr).await.map_err(AxumError::Io)?;
         let local = listener.local_addr().map_err(AxumError::Io)?;
         start.commit();
-        self.run(listener, local, default_shutdown(self.shared.clone()))
-            .await
+        self.run(
+            listener,
+            local,
+            shutdown::default_shutdown(self.shared.clone()),
+        )
+        .await
     }
     /// 使用已 bind listener 运行，默认等待程序化 handle 或 OS signal。
     /// # Examples
@@ -170,13 +186,21 @@ impl AxumServer {
     /// }
     /// ```
     pub async fn serve(&self, listener: TcpListener) -> Result<AxumServeOutcome, AxumError> {
+        // listener 所有权随调用转入运行；查询失败仍释放本次预留的启动权。
         let mut start = StartGuard::reserve(self.shared.clone())?;
         let local = listener.local_addr().map_err(AxumError::Io)?;
         start.commit();
-        self.run(listener, local, default_shutdown(self.shared.clone()))
-            .await
+        self.run(
+            listener,
+            local,
+            shutdown::default_shutdown(self.shared.clone()),
+        )
+        .await
     }
     /// 使用自定义原因 future 运行，适合宿主协调和测试；future 必须 Send + 'static。
+    ///
+    /// 关闭 future panic 时，在已有连接完成 drain 后返回 [`AxumError::BackgroundTask`]，
+    /// 服务进入不可复用的 abandoned 状态；错误不包含 panic payload。
     /// # Examples
     /// ```rust,no_run
     /// # use axutils::axum::*;
@@ -198,16 +222,18 @@ impl AxumServer {
     where
         F: Future<Output = AxumShutdownReason> + Send + 'static,
     {
+        // 启动检查与默认入口一致，关闭 future 由协调器与程序化 handle 共同驱动。
         let mut start = StartGuard::reserve(self.shared.clone())?;
         let local = listener.local_addr().map_err(AxumError::Io)?;
         start.commit();
         self.run(
             listener,
             local,
-            coordinated_custom_shutdown(self.shared.clone(), shutdown),
+            shutdown::coordinated_custom_shutdown(self.shared.clone(), shutdown),
         )
         .await
     }
+    /// 执行唯一一次监听与 drain，成功时等待 provider 清理任务停止并返回首个关闭原因。
     async fn run<F>(
         &self,
         listener: TcpListener,
@@ -217,6 +243,7 @@ impl AxumServer {
     where
         F: Future<Output = Result<AxumShutdownReason, AxumError>> + Send + 'static,
     {
+        // listener 已可用，进入 Running 后立即安装守卫；后续取消或错误都会进入 Abandoned。
         {
             let mut p = self.shared.phase.lock().expect("Axum phase mutex poisoned");
             *p = Phase::Running;
@@ -228,9 +255,11 @@ impl AxumServer {
         let shared = self.shared.clone();
         let reason = Arc::new(std::sync::Mutex::new(None));
         let captured = reason.clone();
+        // Axum 会在独立任务中等待该 future，因此结果通过共享槽传回完成路径。
         let graceful = async move {
             let result = shutdown.await;
             let mut phase = shared.phase.lock().expect("Axum phase mutex poisoned");
+            // 程序化关闭可能先登记原因；宿主 future 或信号不能覆盖已有 Draining 原因。
             let result = match (result, &*phase) {
                 (Ok(reason), Phase::Running) => {
                     *phase = Phase::Draining(reason.clone());
@@ -245,8 +274,10 @@ impl AxumServer {
             drop(phase);
             *captured.lock().expect("shutdown result mutex poisoned") = Some(result);
         };
+        // Provider 后台清理只存在于运行期间；异常退出时守卫也会发出停止通知。
         #[cfg(feature = "axum-governor")]
         let cleanup = GovernorCleanupGuard::start(&self.governor_cleanup);
+        // 给每个连接注入真实 peer 地址，供按 IP 限流等 layer 使用。
         axum::serve(
             listener,
             self.router
@@ -256,13 +287,15 @@ impl AxumServer {
         .with_graceful_shutdown(graceful)
         .await
         .map_err(AxumError::Io)?;
+        // Drain 完成后先等待 provider 任务退出，再发布终态与调用结果。
         #[cfg(feature = "axum-governor")]
         cleanup.stop().await?;
+        // 协调任务 panic 也会触发 Axum drain，但不会写入结果；不能将它误报为正常关闭。
         let result = reason
             .lock()
             .expect("shutdown result mutex poisoned")
             .take()
-            .unwrap_or_else(|| Ok(AxumShutdownReason::Custom("serve-completed".into())));
+            .ok_or(AxumError::BackgroundTask)?;
         let reason = result?;
         {
             let mut p = self.shared.phase.lock().expect("Axum phase mutex poisoned");
@@ -270,183 +303,5 @@ impl AxumServer {
         }
         active.complete = true;
         Ok(AxumServeOutcome::new(local, reason))
-    }
-}
-struct StartGuard {
-    shared: Arc<Shared>,
-    committed: bool,
-}
-impl StartGuard {
-    fn reserve(shared: Arc<Shared>) -> Result<Self, AxumError> {
-        let mut p = shared.phase.lock().expect("Axum phase mutex poisoned");
-        match *p {
-            Phase::Ready => {
-                *p = Phase::Starting;
-                drop(p);
-                Ok(Self {
-                    shared,
-                    committed: false,
-                })
-            }
-            Phase::Starting | Phase::Running | Phase::Draining(_) => Err(AxumError::AlreadyRunning),
-            Phase::Stopped => Err(AxumError::AlreadyStopped),
-            Phase::Abandoned => Err(AxumError::Abandoned),
-        }
-    }
-    fn commit(&mut self) {
-        self.committed = true
-    }
-}
-impl Drop for StartGuard {
-    fn drop(&mut self) {
-        if !self.committed {
-            let mut p = self.shared.phase.lock().expect("Axum phase mutex poisoned");
-            if matches!(*p, Phase::Starting) {
-                *p = Phase::Ready;
-            }
-        }
-    }
-}
-struct ActiveGuard {
-    shared: Arc<Shared>,
-    complete: bool,
-}
-impl Drop for ActiveGuard {
-    fn drop(&mut self) {
-        if !self.complete {
-            let mut p = self.shared.phase.lock().expect("Axum phase mutex poisoned");
-            *p = Phase::Abandoned;
-            self.shared.notify.notify_waiters();
-        }
-    }
-}
-async fn coordinated_custom_shutdown<F>(
-    shared: Arc<Shared>,
-    shutdown: F,
-) -> Result<AxumShutdownReason, AxumError>
-where
-    F: Future<Output = AxumShutdownReason>,
-{
-    tokio::select! {
-        _ = shared.notify.notified() => {
-            let phase = shared.phase.lock().expect("Axum phase mutex poisoned");
-            Ok(match &*phase { Phase::Draining(reason) => reason.clone(), _ => AxumShutdownReason::Programmatic })
-        },
-        reason = shutdown => {
-            let phase = shared.phase.lock().expect("Axum phase mutex poisoned");
-            Ok(match &*phase { Phase::Draining(first) => first.clone(), _ => reason })
-        },
-    }
-}
-
-async fn default_shutdown(shared: Arc<Shared>) -> Result<AxumShutdownReason, AxumError> {
-    tokio::select! {
-        _ = shared.notify.notified() => {
-            let phase = shared.phase.lock().expect("Axum phase mutex poisoned");
-            Ok(match &*phase { Phase::Draining(reason) => reason.clone(), _ => AxumShutdownReason::Programmatic })
-        },
-        result = wait_os_signal() => result,
-    }
-}
-#[cfg(unix)]
-async fn wait_os_signal() -> Result<AxumShutdownReason, AxumError> {
-    use tokio::signal::unix::{signal, SignalKind};
-    let mut term = signal(SignalKind::terminate()).map_err(AxumError::Signal)?;
-    tokio::select! {
-        result = signal::ctrl_c() => { result.map_err(AxumError::Signal)?; Ok(AxumShutdownReason::CtrlC) },
-        _ = term.recv() => Ok(AxumShutdownReason::Sigterm),
-    }
-}
-#[cfg(not(unix))]
-async fn wait_os_signal() -> Result<AxumShutdownReason, AxumError> {
-    signal::ctrl_c().await.map_err(AxumError::Signal)?;
-    Ok(AxumShutdownReason::CtrlC)
-}
-
-#[cfg(feature = "axum-governor")]
-struct GovernorCleanupGuard {
-    stop: WatchSender<bool>,
-    handles: Vec<JoinHandle<()>>,
-}
-#[cfg(feature = "axum-governor")]
-impl GovernorCleanupGuard {
-    fn start(jobs: &[Arc<dyn Fn() + Send + Sync>]) -> Self {
-        let (stop, receiver) = watch_channel(false);
-        let handles = jobs
-            .iter()
-            .cloned()
-            .map(|job| {
-                let mut receiver = receiver.clone();
-                tokio::spawn(async move {
-                    loop {
-                        tokio::select! {
-                            changed = receiver.changed() => {
-                                if changed.is_err() || *receiver.borrow() { break; }
-                            }
-                            _ = Delay::new(std::time::Duration::from_secs(60)) => job(),
-                        }
-                    }
-                })
-            })
-            .collect();
-        Self { stop, handles }
-    }
-    async fn stop(mut self) -> Result<(), AxumError> {
-        let _ = self.stop.send(true);
-        let mut failed = false;
-        for handle in std::mem::take(&mut self.handles) {
-            failed |= handle.await.is_err();
-        }
-        if failed {
-            Err(AxumError::BackgroundTask)
-        } else {
-            Ok(())
-        }
-    }
-}
-#[cfg(feature = "axum-governor")]
-impl Drop for GovernorCleanupGuard {
-    fn drop(&mut self) {
-        let _ = self.stop.send(true);
-    }
-}
-
-#[cfg(feature = "axum-tower")]
-impl AxumServerBuilder {
-    /// 安装 Tower fail-fast 全局并发限制；范围 1..=65,536，满载立即返回脱敏 503。
-    /// # Examples
-    /// ```rust
-    /// # use axutils::axum::*;
-    /// # #[cfg(feature = "axum-tower")] {
-    /// let _ = AxumApp::new()
-    ///     .into_server_builder()
-    ///     .with_concurrency_limit(1)
-    ///     .unwrap();
-    /// # }
-    /// ```
-    pub fn with_concurrency_limit(mut self, max: usize) -> Result<Self, AxumError> {
-        use axum::{error_handling::HandleErrorLayer, http::StatusCode, BoxError};
-        use tower::{
-            limit::ConcurrencyLimitLayer,
-            load_shed::{error::Overloaded, LoadShedLayer},
-            ServiceBuilder,
-        };
-        if !(1..=65_536).contains(&max) {
-            return Err(AxumError::InvalidConfig {
-                field: "max_concurrency",
-            });
-        }
-        let stack = ServiceBuilder::new()
-            .layer(HandleErrorLayer::new(|error: BoxError| async move {
-                if error.is::<Overloaded>() {
-                    (StatusCode::SERVICE_UNAVAILABLE, "service overloaded")
-                } else {
-                    (StatusCode::INTERNAL_SERVER_ERROR, "service error")
-                }
-            }))
-            .layer(LoadShedLayer::new())
-            .layer(ConcurrencyLimitLayer::new(max));
-        self.router = self.router.layer(stack);
-        Ok(self)
     }
 }

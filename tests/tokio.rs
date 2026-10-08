@@ -3,6 +3,10 @@
 #[path = "tokio/task_guard.rs"]
 mod task_guard;
 
+#[cfg(feature = "task-group")]
+#[path = "tokio/task_group.rs"]
+mod task_group;
+
 use axutils::{
     tokio::{TokioConfig, TokioError, TokioRuntimeFlavor},
     utils::TokioUtils,

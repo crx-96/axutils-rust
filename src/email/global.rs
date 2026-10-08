@@ -1,9 +1,12 @@
+//! SMTP 默认客户端的一次初始化入口。
+
 use std::sync::OnceLock;
 
 use super::{EmailClient, EmailConfig, EmailError};
 #[cfg(feature = "tracing")]
 use crate::telemetry::email as email_trace;
 
+/// 仅接受首个成功构造的默认客户端；失败和竞争落败不会替换既有实例。
 static EMAIL_CLIENT: OnceLock<EmailClient> = OnceLock::new();
 
 /// 单默认账号的进程级 SMTP 邮件便捷入口。
@@ -21,6 +24,7 @@ impl EmailUtils {
     /// [`EmailError::AlreadyInitialized`]，不会覆盖第一个账号。该方法不提供读取密码或替换
     /// 配置的能力。
     pub fn init(config: EmailConfig) -> Result<(), EmailError> {
+        // 快速拒绝重复初始化；并发首次初始化仍由 OnceLock::set 选定唯一实例。
         #[cfg(feature = "tracing")]
         let started = std::time::Instant::now();
         let result = if EMAIL_CLIENT.get().is_some() {

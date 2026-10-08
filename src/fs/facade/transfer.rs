@@ -20,7 +20,8 @@ impl FsUtils {
     /// 仅在 `fs-async` feature 下提供；目录、链接和其他非普通最终路径项在无竞态预检时被拒绝，
     /// 返回 [`FsError::UnsupportedEntry`]；其他源/目标错误返回 [`FsError::PairIo`]，预检不提供
     /// 抗 TOCTOU 保证；源/目标错误的 operation token 为 `copy_file`；无 runtime 时首次 poll
-    /// 返回 [`FsError::RuntimeRequired`]。
+    /// 返回 [`FsError::RuntimeRequired`]。词法路径相同在 runtime 检查和 I/O 前返回
+    /// [`FsError::PairIo`]（kind 为 `InvalidInput`），不检测硬链接或规范化路径别名。
     ///
     /// # Examples
     ///

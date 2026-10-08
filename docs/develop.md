@@ -26,6 +26,11 @@ cargo --version
 普通验证复用现有构建缓存。测量冷缓存或隔离并发任务时可设置独立 `CARGO_TARGET_DIR`；清理范围
 限于本任务创建且已无用途的目录，保留用户进程和其他任务的有效缓存。
 
+Windows 受限执行环境可能分别限制系统临时目录的重命名及 loopback socket。遇到
+`PermissionDenied` 时先用原失败用例区分环境与实现：必要时仅为测试子进程设置 `TEMP`/`TMP`
+到仓库 `target/` 下独立的任务临时目录，或按工具权限流程运行本机网络 fixture。不要修改全局
+环境、关闭断言或增加超时来掩盖权限限制；验证完成后只清理本任务创建且不再使用的临时材料。
+
 ## 快速检查
 
 适用于默认能力、可执行文档示例变化或提交前快速反馈。纯规则、措辞和格式维护通常检查文档结构、
@@ -144,6 +149,10 @@ cargo test --no-default-features --features tokio,task-group --test tokio
 
 ## 完整非 live 验证
 
+跨领域重构先在尚未修改的实现和测试上取得基线，再增加针对遗漏的回归。下面的单元、集成及
+Rustdoc 测试也可合并为 `cargo test --all-features --no-fail-fast -- --test-threads=4`；它仍不执行
+ignored 的 feature matrix、Markdown harness 或 live 场景，不能替代下面对应检查。
+
 共享实现、跨模块依赖、公共路径迁移、feature 组合或发布级变化可能扩大回归面，按影响考虑本节
 检查。影响广、边界难以收敛、准备发布或用户要求全量验收时，采用快速检查及本节完整集合，
 覆盖 feature matrix 和 Markdown 示例。能明确限定影响的公共 API 或 feature 小改动，可先验证
@@ -230,6 +239,9 @@ Markdown harness 用“文档默认 feature/直接依赖 + 邻接 fence override
 检查；组失败后才逐 bin 回退。`compile_fail` 用例保持独立并匹配稳定诊断。新增 fence 纳入双向
 枚举；未闭合 fence、未声明的活动 `cfg` 和敏感值作为 harness 失败处理。
 
+此 harness 提供编译证据，`compiled` 不表示执行了示例。需要验证示例行为时使用 Rustdoc 或等价
+调用测试，区分真实运行、`no_run` 仅编译和明确排除的配置代码块；可运行示例应实际调用核心流程。
+
 ## 发布前检查
 
 准备发布时，在完整非 live 验证的基础上检查本地包；仅调整发布清单等元数据时，可先运行相关
@@ -261,6 +273,7 @@ git diff --check
 - `docs/architecture.md`
 - `docs/develop.md`
 - `docs/module-map.md`
+- `docs/rules/**`
 - `docs/skills/**`
 - `docs/plans/**`
 - `docs/status/**`

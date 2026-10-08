@@ -12,14 +12,14 @@
 
 ```toml
 [dependencies]
-axutils = "1.2"
+axutils = "2.0"
 ```
 
 异步一般文件操作、同步临时资源和异步临时资源分别是独立能力：
 
 ```toml
 [dependencies]
-axutils = { version = "1.2", default-features = false, features = [
+axutils = { version = "2.0", default-features = false, features = [
     "fs-async",      # 完整的带 _async 后缀的 FS 操作
     "fs-temp",       # 同步临时文件和目录
     "fs-temp-async", # 仅异步临时文件和目录
@@ -73,7 +73,9 @@ let _children = FsUtils::list_dir(".", 100)?;
 
 ## 流式复制与转换
 
-`copy_file` 要求源是普通文件；目标缺失时会创建，已存在时也必须是普通文件。需要按块转换时使用
+`copy_file` 要求源是普通文件；目标缺失时会创建，已存在时也必须是普通文件。同步/异步复制都在
+I/O 前拒绝相同词法路径，返回 `FsError::PairIo { kind: InvalidInput, .. }`，避免自复制损坏源内容；
+该检查不检测硬链接或规范化路径别名，也不提供抗 TOCTOU 保证。需要按块转换时使用
 `copy_file_with` 和 `FsTransferOptions`；处理器串行运行，已存在目标会被截断，错误或取消后可能
 留下部分输出。
 选项限制块大小及可选累计输出大小，避免把不受信文件无界读入内存。

@@ -5,7 +5,7 @@
 
 ```toml
 [dependencies]
-axutils = { version = "1.2", features = ["logging"] }
+axutils = { version = "2.0", features = ["logging"] }
 tracing = "0.1"
 ```
 

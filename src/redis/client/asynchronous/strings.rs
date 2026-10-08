@@ -11,7 +11,6 @@ use super::super::backend::RedisClient;
 
 impl RedisClient {
     /// 异步读取 MessagePack 值；key 不存在时返回 `None`。
-    #[cfg(feature = "redis-async")]
     ///
     /// # Examples
     ///
@@ -24,16 +23,18 @@ impl RedisClient {
         &self,
         key_value: K,
     ) -> Result<Option<T>, RedisError> {
+        // 在取得连接前校验并拥有 key；后续参数校验失败也不会发送命令。
         let key_value = commands::key(key_value, &self.inner.config)?;
+        // 按 Redis 参数顺序装配已校验输入，二进制内容不经字符串拼接。
         let command = commands::command("GET", [key_value]);
         let value: Option<Vec<u8>> = self.execute_async(&command).await?;
+        // 缺失值保留 None；存在值经单值预算检查后才返回或反序列化。
         value
             .map(|bytes| codec::decode(&bytes, self.inner.config.max_value_bytes))
             .transpose()
     }
 
     /// 异步读取 raw 字节；key 不存在时返回 `None`。
-    #[cfg(feature = "redis-async")]
     ///
     /// # Examples
     ///
@@ -46,16 +47,18 @@ impl RedisClient {
         &self,
         key_value: K,
     ) -> Result<Option<Vec<u8>>, RedisError> {
+        // 在取得连接前校验并拥有 key；后续参数校验失败也不会发送命令。
         let key_value = commands::key(key_value, &self.inner.config)?;
+        // 按 Redis 参数顺序装配已校验输入，二进制内容不经字符串拼接。
         let command = commands::command("GET", [key_value]);
         let value: Option<Vec<u8>> = self.execute_async(&command).await?;
+        // 缺失值保留 None；存在值经单值预算检查后才返回或反序列化。
         value
             .map(|bytes| commands::check_value_response(&bytes, &self.inner.config).map(|()| bytes))
             .transpose()
     }
 
     /// 异步写入 MessagePack 值。
-    #[cfg(feature = "redis-async")]
     ///
     /// # Examples
     ///
@@ -69,14 +72,15 @@ impl RedisClient {
         key_value: K,
         value: T,
     ) -> Result<(), RedisError> {
+        // 在取得连接前校验并拥有 key；后续参数校验失败也不会发送命令。
         let key_value = commands::key(key_value, &self.inner.config)?;
         let value = commands::encoded(&value, &self.inner.config)?;
+        // 按 Redis 参数顺序装配已校验输入，二进制内容不经字符串拼接。
         let command = commands::command("SET", [key_value, value]);
         self.execute_async::<()>(&command).await
     }
 
     /// 异步写入 raw 字节。
-    #[cfg(feature = "redis-async")]
     ///
     /// # Examples
     ///
@@ -90,14 +94,15 @@ impl RedisClient {
         key_value: K,
         value: V,
     ) -> Result<(), RedisError> {
+        // 在取得连接前校验并拥有 key；后续参数校验失败也不会发送命令。
         let key_value = commands::key(key_value, &self.inner.config)?;
         let value = commands::raw(value, &self.inner.config)?;
+        // 按 Redis 参数顺序装配已校验输入，二进制内容不经字符串拼接。
         let command = commands::command("SET", [key_value, value]);
         self.execute_async::<()>(&command).await
     }
 
     /// 异步使用原子 `SET ... PX` 写入带 TTL 的 MessagePack 值。
-    #[cfg(feature = "redis-async")]
     ///
     /// # Examples
     ///
@@ -112,16 +117,17 @@ impl RedisClient {
         value: T,
         ttl: Duration,
     ) -> Result<(), RedisError> {
+        // 在取得连接前校验并拥有 key；后续参数校验失败也不会发送命令。
         let key_value = commands::key(key_value, &self.inner.config)?;
         let value = commands::encoded(&value, &self.inner.config)?;
         let millis = commands::duration_millis(ttl)?;
+        // TTL/NX 等选项作为独立参数发送，保留 Redis 的原子命令语义。
         let mut command = ::redis::cmd("SET");
         command.arg(key_value).arg(value).arg("PX").arg(millis);
         self.execute_async::<()>(&command).await
     }
 
     /// 异步使用原子 `SET ... PX` 写入带 TTL 的 raw 字节。
-    #[cfg(feature = "redis-async")]
     ///
     /// # Examples
     ///
@@ -136,16 +142,17 @@ impl RedisClient {
         value: V,
         ttl: Duration,
     ) -> Result<(), RedisError> {
+        // 在取得连接前校验并拥有 key；后续参数校验失败也不会发送命令。
         let key_value = commands::key(key_value, &self.inner.config)?;
         let value = commands::raw(value, &self.inner.config)?;
         let millis = commands::duration_millis(ttl)?;
+        // TTL/NX 等选项作为独立参数发送，保留 Redis 的原子命令语义。
         let mut command = ::redis::cmd("SET");
         command.arg(key_value).arg(value).arg("PX").arg(millis);
         self.execute_async::<()>(&command).await
     }
 
     /// 异步仅在 key 不存在时写入 MessagePack 值。
-    #[cfg(feature = "redis-async")]
     ///
     /// # Examples
     ///
@@ -159,10 +166,13 @@ impl RedisClient {
         key_value: K,
         value: T,
     ) -> Result<bool, RedisError> {
+        // 在取得连接前校验并拥有 key；后续参数校验失败也不会发送命令。
         let key_value = commands::key(key_value, &self.inner.config)?;
         let value = commands::encoded(&value, &self.inner.config)?;
+        // TTL/NX 等选项作为独立参数发送，保留 Redis 的原子命令语义。
         let mut command = ::redis::cmd("SET");
         command.arg(key_value).arg(value).arg("NX");
+        // NX 返回 None 表示已有 key；只有收到非空成功响应才报告写入或租约获取成功。
         let result: Option<String> = self.execute_async(&command).await?;
         Ok(result.is_some())
     }
@@ -171,7 +181,6 @@ impl RedisClient {
     ///
     /// 这是通用 NX 写入原语，不记录所有者，也不会自动删除；锁场景应使用
     /// [`RedisClient::try_lock_async`]。
-    #[cfg(feature = "redis-async")]
     ///
     /// # Examples
     ///
@@ -186,9 +195,11 @@ impl RedisClient {
         value: T,
         ttl: Duration,
     ) -> Result<bool, RedisError> {
+        // 在取得连接前校验并拥有 key；后续参数校验失败也不会发送命令。
         let key_value = commands::key(key_value, &self.inner.config)?;
         let value = commands::encoded(&value, &self.inner.config)?;
         let millis = commands::duration_millis(ttl)?;
+        // TTL/NX 等选项作为独立参数发送，保留 Redis 的原子命令语义。
         let mut command = ::redis::cmd("SET");
         command
             .arg(key_value)
@@ -196,11 +207,11 @@ impl RedisClient {
             .arg("PX")
             .arg(millis)
             .arg("NX");
+        // NX 返回 None 表示已有 key；只有收到非空成功响应才报告写入或租约获取成功。
         let result: Option<String> = self.execute_async(&command).await?;
         Ok(result.is_some())
     }
 
-    #[cfg(feature = "redis-async")]
     /// 异步尝试获取一个带不可预测 token 和 TTL 的单键租约锁。
     ///
     /// 该方法使用原子 `SET key token PX ttl NX`，抢锁失败返回 `Ok(None)`。TTL 必须大于 0
@@ -239,20 +250,84 @@ impl RedisClient {
         key_value: K,
         ttl: Duration,
     ) -> Result<Option<RedisAsyncLockGuard>, RedisError> {
+        // 在取得连接前校验并拥有 key；后续参数校验失败也不会发送命令。
         let key_value = commands::key(key_value, &self.inner.config)?;
         let ttl_millis = lock::lock_ttl_millis(ttl)?;
+        let effective_ttl = lock::lock_ttl_duration(ttl)?;
         let token = lock::token()?;
+        // 不可预测 token 与 NX/TTL 在同一命令中写入，避免获取与设过期之间的竞态。
         let command = lock::acquire_command(&key_value, &token, ttl_millis);
+        // NX 返回 None 表示已有 key；只有收到非空成功响应才报告写入或租约获取成功。
         let result: Option<String> = self.execute_async(&command).await?;
+        // 成功时 guard 接管 token、key 和有效 TTL；未取得锁时不创建活动所有者。
         if result.is_some() {
             Ok(Some(RedisAsyncLockGuard::new(
                 self.clone(),
                 key_value,
                 token,
-                ttl,
+                effective_ttl,
             )))
         } else {
             Ok(None)
         }
+    }
+    /// 异步仅在 key 不存在时写入 raw 字节。
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use axutils::redis::RedisClient;
+    ///
+    /// let _ = RedisClient::set_bytes_nx_async::<&str, Vec<u8>>;
+    /// ```
+    pub async fn set_bytes_nx_async<K: AsRef<[u8]>, V: AsRef<[u8]>>(
+        &self,
+        key_value: K,
+        value: V,
+    ) -> Result<bool, RedisError> {
+        // 在取得连接前校验并拥有 key；后续参数校验失败也不会发送命令。
+        let key_value = commands::key(key_value, &self.inner.config)?;
+        let value = commands::raw(value, &self.inner.config)?;
+        // TTL/NX 等选项作为独立参数发送，保留 Redis 的原子命令语义。
+        let mut command = ::redis::cmd("SET");
+        command.arg(key_value).arg(value).arg("NX");
+        // NX 返回 None 表示已有 key；只有收到非空成功响应才报告写入或租约获取成功。
+        let result: Option<String> = self.execute_async(&command).await?;
+        Ok(result.is_some())
+    }
+
+    /// 异步仅在 key 不存在时以 `SET ... PX NX` 写入带 TTL 的 raw 字节。
+    ///
+    /// 这是通用 NX 写入原语，不记录所有者，也不会自动删除；锁场景应使用
+    /// [`RedisClient::try_lock_async`]。
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use axutils::redis::RedisClient;
+    ///
+    /// let _ = RedisClient::set_bytes_nx_with_expiry_async::<&str, Vec<u8>>;
+    /// ```
+    pub async fn set_bytes_nx_with_expiry_async<K: AsRef<[u8]>, V: AsRef<[u8]>>(
+        &self,
+        key_value: K,
+        value: V,
+        ttl: Duration,
+    ) -> Result<bool, RedisError> {
+        // 在取得连接前校验并拥有 key；后续参数校验失败也不会发送命令。
+        let key_value = commands::key(key_value, &self.inner.config)?;
+        let value = commands::raw(value, &self.inner.config)?;
+        let millis = commands::duration_millis(ttl)?;
+        // TTL/NX 等选项作为独立参数发送，保留 Redis 的原子命令语义。
+        let mut command = ::redis::cmd("SET");
+        command
+            .arg(key_value)
+            .arg(value)
+            .arg("PX")
+            .arg(millis)
+            .arg("NX");
+        // NX 返回 None 表示已有 key；只有收到非空成功响应才报告写入或租约获取成功。
+        let result: Option<String> = self.execute_async(&command).await?;
+        Ok(result.is_some())
     }
 }

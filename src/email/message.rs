@@ -1,12 +1,18 @@
+//! 邮件内容的有界输入校验与 Lettre 消息转换。
+
 use std::{fmt, str::FromStr};
 
 use lettre::{message::header::ContentType, message::Mailbox, Message as LettreMessage};
 
 use super::error::EmailError;
 
+/// 单封邮件允许的最大收件人数。
 const MAX_RECIPIENTS: usize = 100;
+/// 单个 mailbox 输入允许的最大 UTF-8 字节数，包含显示名。
 const MAX_RECIPIENT_BYTES: usize = 4 * 1024;
+/// 主题允许的最大 UTF-8 字节数。
 const MAX_SUBJECT_BYTES: usize = 16 * 1024;
+/// 编码为 MIME 之前，正文允许的最大 UTF-8 字节数。
 const MAX_BODY_BYTES: usize = 10 * 1024 * 1024;
 
 /// 邮件正文的 MIME 类型。
@@ -26,8 +32,11 @@ pub enum EmailBody {
 /// 最多 16 KiB，正文最多 10 MiB。空主题和空正文是允许的。类型不实现 `Clone` 或 `Debug`，
 /// 避免调用方无意中复制或展示大正文；发送时会消费消息值。
 pub struct EmailMessage {
+    /// 已解析的收件 mailbox；至少 1 项、最多 100 项。
     recipients: Vec<Mailbox>,
+    /// 不含控制字符且不超过 16 KiB 的主题；允许为空。
     subject: String,
+    /// 不超过 10 MiB 的正文及 MIME 类型；允许正文为空。
     body: EmailBody,
 }
 
@@ -98,7 +107,9 @@ impl EmailMessage {
         Self::new(to, subject.into(), EmailBody::Html(body.into()))
     }
 
+    /// 在一次构造中校验所有内容，失败时不保留半解析的收件人集合。
     fn new(to: Vec<String>, subject: String, body: EmailBody) -> Result<Self, EmailError> {
+        // 先限制收件人数量和头部输入，再检查正文，避免解析超出预算的消息。
         if to.is_empty() || to.len() > MAX_RECIPIENTS {
             return Err(EmailError::invalid_message("recipients"));
         }
@@ -113,6 +124,7 @@ impl EmailMessage {
             return Err(EmailError::invalid_message("body"));
         }
 
+        // 按输入顺序解析 mailbox；错误只携带索引，不能泄漏收件地址。
         let mut recipients = Vec::with_capacity(to.len());
         for (index, value) in to.into_iter().enumerate() {
             if value.is_empty()
@@ -135,7 +147,9 @@ impl EmailMessage {
         })
     }
 
-    pub(crate) fn into_lettre_from(self, from: &Mailbox) -> Result<LettreMessage, EmailError> {
+    /// 消费消息并加入已验证的发件人，构建可发送的 MIME 消息；底层错误统一脱敏。
+    pub(super) fn into_lettre_from(self, from: &Mailbox) -> Result<LettreMessage, EmailError> {
+        // 发件人来自 client 配置，主题与收件人来自已通过构造校验的消息。
         let mut builder = LettreMessage::builder()
             .from(from.clone())
             .subject(self.subject);
@@ -144,6 +158,7 @@ impl EmailMessage {
             builder = builder.to(recipient);
         }
 
+        // 只按调用方选择设置单一 MIME 正文，不执行 HTML 或自动生成文本 fallback。
         match self.body {
             EmailBody::Text(body) => builder
                 .header(ContentType::TEXT_PLAIN)
@@ -158,6 +173,7 @@ impl EmailMessage {
 }
 
 impl fmt::Debug for EmailBody {
+    /// 仅展示 MIME 类别，避免正文随调试输出泄漏。
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         let kind = match self {
             Self::Text(_) => "text",
@@ -170,6 +186,7 @@ impl fmt::Debug for EmailBody {
     }
 }
 
+/// 检查邮件头输入中的 Unicode 控制字符；正文不应用此限制。
 fn contains_control(value: &str) -> bool {
     value.chars().any(char::is_control)
 }

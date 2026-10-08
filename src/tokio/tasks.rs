@@ -1,10 +1,15 @@
 use super::TokioError;
 use ::tokio::{runtime::Handle, task::JoinHandle};
-use ::tokio_util::{sync::CancellationToken, task::TaskTracker};
+use ::tokio_util::{
+    sync::CancellationToken,
+    task::{task_tracker::TaskTrackerToken, TaskTracker},
+};
 use futures_timer::Delay;
 use std::{
-    future::Future,
+    future::{poll_fn, Future},
+    pin::pin,
     sync::{Arc, Mutex},
+    task::Poll,
     time::Duration,
 };
 
@@ -13,15 +18,43 @@ use std::{
 /// clone 共享同一组；Drop 不 abort 任务，blocking closure 开始后不能强制停止。
 #[derive(Clone, Debug)]
 pub struct TokioTaskGroup {
+    /// 所有克隆共享任务计数、取消通知与登记门闩。
     inner: Arc<Inner>,
 }
+/// 任务组唯一的共享状态；同步门闩只保护是否接纳新任务。
 #[derive(Debug)]
 struct Inner {
+    /// 统计已接纳且尚未完全析构的任务，供关闭流程等待。
     tracker: TaskTracker,
+    /// 调用方任务主动观察的协作式取消通知。
     cancel: CancellationToken,
+    /// `true` 表示永久拒绝新任务；登记计数必须在同一临界区完成。
     gate: Mutex<bool>,
 }
+
+/// 在取消路径中保证任务仍拥有的捕获值先析构、跟踪凭证后析构的阻塞任务所有者。
+/// 闭包返回的结果已转移给 JoinHandle，不受该计数约束。
+struct BlockingTask<F> {
+    /// 用户闭包；声明在凭证之前，使未开始执行的取消路径也先释放用户资源。
+    callback: F,
+    /// 直到闭包返回或完成析构才释放的任务计数。
+    token: TaskTrackerToken,
+}
+
+impl<F> BlockingTask<F> {
+    /// 消费闭包并在执行结束后归还计数；panic unwind 同样保留正确的析构顺序。
+    fn run<T>(self) -> T
+    where
+        F: FnOnce() -> T,
+    {
+        let result = (self.callback)();
+        drop(self.token);
+        result
+    }
+}
+
 impl Default for TokioTaskGroup {
+    /// 默认任务组为空且开放，不隐式获取 runtime。
     fn default() -> Self {
         Self::new()
     }
@@ -97,14 +130,17 @@ impl TokioTaskGroup {
         F: Future + Send + 'static,
         F::Output: Send + 'static,
     {
+        // 登记与 close 共用门闩；先确认 runtime，再在锁内增加跟踪计数。
         let g = self.inner.gate.lock().unwrap_or_else(|e| e.into_inner());
         if *g {
             return Err(TokioError::TaskGroupClosed);
         }
-        Handle::try_current().map_err(|_| TokioError::RuntimeRequired)?;
-        let h = self.inner.tracker.spawn(f);
+        let handle = Handle::try_current().map_err(|_| TokioError::RuntimeRequired)?;
+        let tracked = self.inner.tracker.track_future(f);
         drop(g);
-        Ok(h)
+        // 已关闭的 runtime 可以在 spawn 中同步析构 future；用户 Drop 可能重入任务组。
+        // TrackedFuture 先释放用户 future 再归还 token，使等待也涵盖该析构阶段。
+        Ok(handle.spawn(tracked))
     }
 
     /// 在线性化门闩下登记 blocking closure；开始后不能强停。
@@ -121,14 +157,19 @@ impl TokioTaskGroup {
         F: FnOnce() -> T + Send + 'static,
         T: Send + 'static,
     {
+        // 门闩内只校验与预留计数，不执行可能同步析构用户捕获值的提交操作。
         let g = self.inner.gate.lock().unwrap_or_else(|e| e.into_inner());
         if *g {
             return Err(TokioError::TaskGroupClosed);
         }
-        Handle::try_current().map_err(|_| TokioError::RuntimeRequired)?;
-        let h = self.inner.tracker.spawn_blocking(f);
+        let handle = Handle::try_current().map_err(|_| TokioError::RuntimeRequired)?;
+        let task = BlockingTask {
+            callback: f,
+            token: self.inner.tracker.token(),
+        };
         drop(g);
-        Ok(h)
+        // 通过方法捕获完整所有者，避免闭包按字段捕获后改变 callback/token 析构顺序。
+        Ok(handle.spawn_blocking(move || task.run()))
     }
 
     /// 关闭登记门闩；返回后开始的 spawn 稳定失败，已有任务不被取消。
@@ -142,6 +183,7 @@ impl TokioTaskGroup {
     /// # }
     /// ```
     pub fn close(&self) {
+        // 同一门闩将拒绝登记与关闭 tracker 线性化；此前接纳的任务已持有计数。
         let mut g = self.inner.gate.lock().unwrap_or_else(|e| e.into_inner());
         if !*g {
             *g = true;
@@ -174,6 +216,7 @@ impl TokioTaskGroup {
     /// # }
     /// ```
     pub async fn shutdown(&self, grace: Duration) -> Result<(), TokioError> {
+        // 先验证预算，避免无效调用改变任务组的开放或取消状态。
         if grace > Duration::from_secs(300) {
             return Err(TokioError::InvalidConfig {
                 field: "task_group_grace",
@@ -181,18 +224,20 @@ impl TokioTaskGroup {
         }
         self.close();
         self.cancel();
-        let mut wait = std::pin::pin!(self.inner.tracker.wait());
-        let mut delay = std::pin::pin!(Delay::new(grace));
-        let completed = std::future::poll_fn(|cx| {
+        // 使用独立计时 future，允许调用方的 Tokio runtime 未启用 time driver。
+        let mut wait = pin!(self.inner.tracker.wait());
+        let mut delay = pin!(Delay::new(grace));
+        let completed = poll_fn(|cx| {
             if wait.as_mut().poll(cx).is_ready() {
-                return std::task::Poll::Ready(true);
+                return Poll::Ready(true);
             }
             if delay.as_mut().poll(cx).is_ready() {
-                return std::task::Poll::Ready(false);
+                return Poll::Ready(false);
             }
-            std::task::Poll::Pending
+            Poll::Pending
         })
         .await;
+        // 超时只报告观测数量；协作式取消不能强制停止任务或已开始的阻塞闭包。
         if completed {
             Ok(())
         } else {
