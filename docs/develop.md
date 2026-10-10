@@ -31,6 +31,34 @@ Windows 受限执行环境可能分别限制系统临时目录的重命名及 lo
 到仓库 `target/` 下独立的任务临时目录，或按工具权限流程运行本机网络 fixture。不要修改全局
 环境、关闭断言或增加超时来掩盖权限限制；验证完成后只清理本任务创建且不再使用的临时材料。
 
+## GitHub Actions CI
+
+[CI 工作流](../.github/workflows/ci.yml) 在 push、pull request 和手动触发时运行；同一 PR 或分支有
+新提交时取消旧验证。各任务独立报告结果，测试矩阵中的一个平台失败不会取消其他平台。
+
+| 任务 | 环境与范围 |
+| --- | --- |
+| Format and Clippy | Linux / stable；格式检查，无默认及全部 feature 的所有目标 Clippy，警告视为失败 |
+| Tests | Linux、Windows / stable，以及 Linux / MSRV；无默认及全部 feature 的单元、集成和 Rustdoc 测试 |
+| Feature and API matrix | Linux / stable；矩阵结构、完整 ignored feature/API/依赖隔离及 HTTP 下游压缩契约 |
+| Documentation and package | Linux / stable；两种 feature 集的 API 文档、Markdown 元数据及全部示例编译、全部 feature 的本地打包验证 |
+
+MSRV 自动读取 manifest 的 `package.rust-version`，不在工作流另存版本号。工作流复用 Cargo
+依赖和构建缓存；根 `Cargo.lock` 继续保持不提交，CI 在干净检出中按 manifest 解析依赖，不使用
+要求预先存在锁文件的 `--locked`。更新依赖或 Rust stable 后出现失败，应按实际诊断处理。
+
+Feature matrix 和 Markdown runner 会在临时 crate 中执行 `cargo --offline`，因此 CI 先执行
+`cargo fetch`；HTTP 压缩契约还会单独 fetch 对应 fixture 的 manifest。全量 ignored 仅针对
+`feature_matrix` 和 `docs_examples` 两个测试目标，不开启 SMTP、Redis 单机或 Cluster 的 live
+用例，也不需要 `config/` 或服务凭据。Markdown 编译通过的含义仍见下方 harness 说明。
+
+工作流只授予仓库读取权限，Action 固定到完整 commit SHA；更新 Action 时核对上游版本、对应
+SHA 和输入参数。`cargo package` 只检查本地产物，工作流不包含发布步骤。
+
+本地复现使用下文相应命令；工作区有未提交修改时，本地打包可加 `--allow-dirty`。GitHub 的
+首次实际运行仍需将工作流提交并推送；若要强制合并前通过检查，需要另行在仓库规则中将所需
+检查设为必需项。
+
 ## 快速检查
 
 适用于默认能力、可执行文档示例变化或提交前快速反馈。纯规则、措辞和格式维护通常检查文档结构、

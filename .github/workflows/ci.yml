@@ -1,0 +1,142 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+# 验证只需读取仓库；PR 使用普通 pull_request 上下文，不注入服务凭据。
+permissions:
+  contents: read
+
+# 同一 PR 或分支更新后取消旧验证，不影响其他分支。
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  CARGO_BUILD_JOBS: "2"
+  RUST_BACKTRACE: "1"
+
+jobs:
+  quality:
+    name: Format and Clippy
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - name: 检查格式
+        run: cargo fmt --all -- --check
+      - name: 检查无默认 feature 的所有目标
+        run: cargo clippy --no-default-features --all-targets -- -D warnings
+      - name: 检查全部 feature 的所有目标
+        run: cargo clippy --all-features --all-targets -- -D warnings
+
+  tests:
+    name: Tests (${{ matrix.os }}, ${{ matrix.toolchain }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            toolchain: stable
+          - os: windows-latest
+            toolchain: stable
+          - os: ubuntu-latest
+            toolchain: msrv
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      # 最低版本只维护在 manifest；补齐 patch 位，明确安装该版本工具链。
+      - name: 读取 MSRV
+        if: matrix.toolchain == 'msrv'
+        id: msrv
+        shell: bash
+        run: |
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import tomllib
+          from pathlib import Path
+
+          version = tomllib.loads(Path("Cargo.toml").read_text())["package"]["rust-version"]
+          if len(version.split(".")) == 2:
+              version += ".0"
+          print(f"version={version}")
+          PY
+      - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master
+        with:
+          toolchain: ${{ steps.msrv.outputs.version || matrix.toolchain }}
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          key: ${{ matrix.toolchain }}
+      - name: 下载依赖
+        run: cargo fetch
+      - name: 检查无默认 feature 的 library
+        run: cargo check --lib --no-default-features
+      - name: 测试无默认 feature
+        run: cargo test --no-default-features --no-fail-fast -- --test-threads=4
+      # 普通 cargo test 包含单元、集成和 Rustdoc 测试，保持 live 用例 ignored。
+      - name: 测试全部 feature
+        run: cargo test --all-features --no-fail-fast -- --test-threads=4
+
+  feature-matrix:
+    name: Feature and API matrix
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      # runner 强制离线；压缩 fixture 另有 provider feature 引入的依赖。
+      - name: 准备离线矩阵依赖
+        run: |
+          cargo fetch
+          cargo fetch --manifest-path tests/fixtures/http_compression/Cargo.toml
+      - name: 检查矩阵结构
+        run: cargo test --no-default-features --test feature_matrix
+      # 只开启指定测试目标的 ignored 用例，不开启 SMTP / Redis live 测试。
+      - name: 检查完整 feature、公共 API 和依赖隔离
+        run: cargo test --no-default-features --test feature_matrix -- --ignored --test-threads=1 --nocapture
+
+  docs:
+    name: Documentation and package
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      RUSTDOCFLAGS: -D warnings
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - name: 准备离线示例依赖
+        run: cargo fetch
+      - name: 构建无默认 feature 的 API 文档
+        run: cargo doc --no-deps --no-default-features
+      - name: 构建全部 feature 的 API 文档
+        run: cargo doc --no-deps --all-features
+      - name: 检查 Markdown 示例元数据
+        run: cargo test --no-default-features --test docs_examples
+      - name: 编译全部 Markdown 示例
+        run: cargo test --no-default-features --test docs_examples -- --ignored --test-threads=1 --nocapture
+      # 仅验证本地发布包和其中的全部 feature，不上传 crates.io。
+      - name: 验证 library 发布包
+        run: cargo package --all-features
