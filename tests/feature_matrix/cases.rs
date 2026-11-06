@@ -372,7 +372,7 @@ fn semantic_http_matrix() {
             FixtureCase {
                 feature: "negative-http-json",
                 expected_success: false,
-                diagnostic_tokens: &["function or associated item named `get`"],
+                diagnostic_tokens: &[r#""code":"E0599""#, "HttpClient::get"],
             },
         ],
     );
