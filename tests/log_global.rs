@@ -36,7 +36,7 @@ const INVALID_FILTER_SENTINEL: &str = "axutils::http=not-a-level";
 
 #[test]
 fn global_tracing_behaviors_are_isolated_in_child_processes() {
-    let mut cases = vec![
+    let cases = [
         "silent",
         "stdout",
         "methods",
@@ -59,9 +59,9 @@ fn global_tracing_behaviors_are_isolated_in_child_processes() {
         "directives-blank",
         "rust-log-ignored",
         "invalid-filter",
+        #[cfg(windows)]
+        "non-utf8",
     ];
-    #[cfg(windows)]
-    cases.push("non-utf8");
     for case in cases {
         let root = unique_temp_dir(case);
         let output = run_child(case, &root);

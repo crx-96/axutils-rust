@@ -324,7 +324,10 @@ fn build_async_transport(
 #[cfg(test)]
 mod tests {
     #[cfg(feature = "email-async")]
-    use std::{future::Future, sync::Arc, task::Wake};
+    use std::{
+        future::Future,
+        task::{Context, Poll, Waker},
+    };
 
     use super::EmailClient;
     #[cfg(feature = "email-async")]
@@ -372,24 +375,18 @@ mod tests {
     #[cfg(feature = "email-async")]
     #[test]
     fn async_send_without_runtime_returns_client_error() {
-        struct NoopWaker;
-        impl Wake for NoopWaker {
-            fn wake(self: Arc<Self>) {}
-        }
-
         let client = EmailClient::new(config("smtp.example.com", 465, EmailSecurity::ImplicitTls))
             .unwrap_or_else(|_| unreachable!());
         let message =
             EmailMessage::text(vec!["receiver@example.com".to_owned()], "subject", "body")
                 .unwrap_or_else(|_| unreachable!());
         let mut future = Box::pin(client.send_async(message));
-        let waker = std::task::Waker::from(Arc::new(NoopWaker));
-        let mut context = std::task::Context::from_waker(&waker);
+        let mut context = Context::from_waker(Waker::noop());
         let result = future.as_mut().poll(&mut context);
 
         assert!(matches!(
             result,
-            std::task::Poll::Ready(Err(EmailError::Transport(EmailTransportErrorKind::Client)))
+            Poll::Ready(Err(EmailError::Transport(EmailTransportErrorKind::Client)))
         ));
     }
 }

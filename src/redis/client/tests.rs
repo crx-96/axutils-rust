@@ -240,23 +240,15 @@ fn multiplexed_transaction_keeps_complete_server_errors_but_discards_transport_e
 fn async_commands_require_a_runtime_before_network_access() {
     use std::{
         future::Future,
-        sync::Arc,
-        task::{Context, Poll, Wake, Waker},
+        task::{Context, Poll, Waker},
     };
-
-    struct NoopWaker;
-
-    impl Wake for NoopWaker {
-        fn wake(self: Arc<Self>) {}
-    }
 
     let client = RedisClient::new(
         RedisConfig::single("redis://127.0.0.1:6379/0").expect("local URL should parse"),
     )
     .expect("client construction should not connect");
     let mut future = Box::pin(client.get_async::<_, u8>("runtime:key"));
-    let waker = Waker::from(Arc::new(NoopWaker));
-    let mut context = Context::from_waker(&waker);
+    let mut context = Context::from_waker(Waker::noop());
 
     assert!(matches!(
         future.as_mut().poll(&mut context),
@@ -269,15 +261,8 @@ fn async_commands_require_a_runtime_before_network_access() {
 fn async_cluster_transaction_is_rejected_before_runtime_check() {
     use std::{
         future::Future,
-        sync::Arc,
-        task::{Context, Poll, Wake, Waker},
+        task::{Context, Poll, Waker},
     };
-
-    struct NoopWaker;
-
-    impl Wake for NoopWaker {
-        fn wake(self: Arc<Self>) {}
-    }
 
     let client = RedisClient::new(
         RedisConfig::cluster(["redis://127.0.0.1:7000/0"]).expect("cluster URL should parse"),
@@ -285,8 +270,7 @@ fn async_cluster_transaction_is_rejected_before_runtime_check() {
     .expect("client construction should not connect");
     let mut future =
         Box::pin(client.transaction_async(|_| panic!("cluster transaction callback must not run")));
-    let waker = Waker::from(Arc::new(NoopWaker));
-    let mut context = Context::from_waker(&waker);
+    let mut context = Context::from_waker(Waker::noop());
 
     assert!(matches!(
         future.as_mut().poll(&mut context),
