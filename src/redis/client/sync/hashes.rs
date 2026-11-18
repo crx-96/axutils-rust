@@ -146,8 +146,9 @@ impl RedisClient {
         let key_value = commands::key(key_value, &self.inner.config)?;
         // 按 Redis 参数顺序装配已校验输入，二进制内容不经字符串拼接。
         let command = commands::command("HGETALL", [key_value]);
-        let flat: Vec<Vec<u8>> = self.execute_sync(&command)?;
-        decode::decode_hash_entries(flat, &self.inner.config)
+        // 在执行层严格解码协议回复，再对整批二进制数据应用本地预算。
+        let decode::HashReply(entries) = self.execute_sync(&command)?;
+        decode::check_hash_entries(entries, &self.inner.config)
     }
 
     /// 删除一个 Hash field，并返回实际删除数量。

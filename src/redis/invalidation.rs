@@ -221,10 +221,10 @@ impl RedisInvalidationQueue {
         // future 被实际 poll 后才登记退出观察；无 runtime 的启动失败不伪报 worker 退出。
         let _exit = WorkerExit;
         loop {
-            let (batch, next_due) = pending.take_batch(&config, Instant::now());
+            let (batch, wake_at) = pending.take_batch(&config, Instant::now());
             if batch.is_empty() {
-                // 到期之前的新投递可提前唤醒；完全空闲时只等待通知，无周期性轮询。
-                if let Some(due) = next_due {
+                // 仅空批次使用等待期限。新的投递可提前唤醒，映射为空时只等待通知。
+                if let Some(due) = wake_at {
                     let _ = TokioUtils::timeout(
                         due.saturating_duration_since(Instant::now()),
                         pending.ready.notified(),

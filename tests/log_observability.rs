@@ -776,7 +776,12 @@ fn accept_request(listener: &TcpListener, label: &str) -> TcpStream {
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
         match listener.accept() {
-            Ok((stream, _)) => return stream,
+            Ok((stream, _)) => {
+                stream
+                    .set_nonblocking(false)
+                    .expect("set blocking HTTP I/O");
+                return stream;
+            }
             Err(error) if error.kind() == ErrorKind::WouldBlock => {
                 assert!(Instant::now() < deadline, "timed out waiting for {label}");
                 thread::sleep(Duration::from_millis(5));

@@ -44,15 +44,17 @@ pub(super) fn run_fixture_cases(name: &str, cases: &[FixtureCase]) {
     target.cleanup();
 }
 
-pub(super) fn run_http_compression_contract() {
-    let manifest =
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/http_compression/Cargo.toml");
-    let target = TemporaryTarget::new("axutils-http-compression");
+pub(super) fn run_downstream_contract(fixture_name: &str, subcommand: &str, feature_sets: &[&str]) {
+    let manifest = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures")
+        .join(fixture_name)
+        .join("Cargo.toml");
+    let target = TemporaryTarget::new("axutils-downstream-contract");
     let (fixture, manifest) = copy_fixture_to_temporary_directory(&manifest);
-    for features in ["", "compression"] {
+    for &features in feature_sets {
         let mut command = Command::new("cargo");
         command
-            .args(["test", "--offline", "--no-default-features", "-j", "2"])
+            .args([subcommand, "--offline", "--no-default-features", "-j", "2"])
             .arg("--manifest-path")
             .arg(&manifest)
             .arg("--target-dir")
@@ -62,13 +64,13 @@ pub(super) fn run_http_compression_contract() {
             command.arg("--features").arg(features);
         }
         FIXTURE_CARGO_CALLS.fetch_add(1, Ordering::Relaxed);
-        let output = command
-            .args(["--", "--test-threads=1"])
-            .output()
-            .expect("failed to run downstream HTTP compression fixture");
+        if subcommand == "test" {
+            command.args(["--", "--test-threads=1"]);
+        }
+        let output = command.output().expect("failed to run downstream fixture");
         assert!(
             output.status.success(),
-            "HTTP compression fixture failed for features {features:?}\nstdout: {}\nstderr: {}",
+            "fixture {fixture_name} failed for features {features:?}\nstdout: {}\nstderr: {}",
             String::from_utf8_lossy(&output.stdout),
             String::from_utf8_lossy(&output.stderr)
         );
@@ -199,6 +201,12 @@ fn copy_fixture_to_temporary_directory(manifest: &Path) -> (TemporaryTarget, Pat
     let repository = Path::new(env!("CARGO_MANIFEST_DIR"))
         .to_string_lossy()
         .replace('\\', "/");
+    let depth = source
+        .strip_prefix(env!("CARGO_MANIFEST_DIR"))
+        .unwrap()
+        .components()
+        .count();
+    let relative_root = vec![".."; depth].join("/");
     let manifest_text = fs::read_to_string(&copied_manifest)
         .unwrap_or_else(|_| {
             panic!(
@@ -206,7 +214,10 @@ fn copy_fixture_to_temporary_directory(manifest: &Path) -> (TemporaryTarget, Pat
                 copied_manifest.display()
             )
         })
-        .replace("path = \"../../..\"", &format!("path = \"{}\"", repository));
+        .replace(
+            &format!("path = \"{relative_root}\""),
+            &format!("path = \"{repository}\""),
+        );
     fs::write(&copied_manifest, manifest_text).unwrap_or_else(|_| {
         panic!(
             "failed to write copied fixture: {}",

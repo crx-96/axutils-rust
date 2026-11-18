@@ -161,6 +161,24 @@ async fn retry_delays_are_ordered_finite_and_expire_at_the_boundary() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn only_idle_batches_report_the_earliest_retry_deadline() {
+    let pending = Pending::default();
+    let config = config();
+    let start = Instant::now();
+    for key in ["z", "a"] {
+        assert_eq!(pending.enqueue([key.into()], config.capacity).0.accepted, 1);
+        let (batch, wake_at) = pending.take_batch(&config, Instant::now());
+        assert_eq!(keys(&batch), [key]);
+        assert_eq!(wake_at, None);
+        pending.retry(batch, &config, Instant::now());
+        time::advance(Duration::from_millis(500)).await;
+    }
+    let (idle, wake_at) = pending.take_batch(&config, Instant::now());
+    assert!(idle.is_empty());
+    assert_eq!(wake_at, Some(start + Duration::from_secs(2)));
+}
+
+#[tokio::test(start_paused = true)]
 async fn resubmitting_during_backoff_resets_deadline_and_retry_budget() {
     let pending = Pending::default();
     let config = config();

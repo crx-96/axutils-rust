@@ -1,8 +1,7 @@
 //! Tokio timer 驱动的一次、固定间隔和 IANA 时区 cron 调度器。
 //!
-//! 该模块仅在启用 `scheduler` feature 时导出。调度器不会
-//! 创建 runtime、调用 `block_on` 或接管 signal；注册任务时必须处于启用了 time driver 的 Tokio
-//! runtime。
+//! 该模块仅在启用 `scheduler` feature 时导出。注册使用宿主当前的计时 runtime。
+//! `panic = "abort"` 时宿主通过 [`Scheduler::with_time_runtime`] 显式构建并驱动该 runtime。
 
 mod config;
 mod cron;
@@ -11,7 +10,8 @@ pub(crate) mod global;
 mod schedule;
 mod task;
 
-use std::{future::Future, sync::Arc};
+use std::{future::Future, io, sync::Arc};
+use tokio::runtime::{Builder, Runtime};
 
 pub use config::{SchedulerConfig, TaskSchedule};
 pub use error::SchedulerError;
@@ -53,7 +53,28 @@ impl Scheduler {
         })
     }
 
+    /// 使用宿主提供的 builder 启用时间并构建 runtime，在 `run` 返回前允许本实例在其中注册任务。
+    ///
+    /// 适用于同步宿主入口，包括 `panic = "abort"`。调用方在 `run` 中驱动 runtime，
+    /// 其他驱动与线程设置由 builder 决定。作用域退出时释放 runtime，构建失败返回 I/O 错误。
+    ///
+    /// # Panics
+    ///
+    /// 应在同步宿主入口调用。在异步任务中嵌套 `block_on` 或销毁 runtime 可能触发 Tokio panic。
+    pub fn with_time_runtime<T>(
+        &self,
+        builder: &mut Builder,
+        run: impl FnOnce(&Runtime) -> T,
+    ) -> io::Result<T> {
+        // 由这一入口启用实际使用的 time driver，避免把外部 runtime 的配置猜测当作能力证明。
+        let runtime = builder.enable_time().build()?;
+        Ok(self.shared.with_enabled_time(&runtime, run))
+    }
+
     /// 在当前启用了 time driver 的 Tokio runtime 中注册任务。
+    ///
+    /// `panic = "abort"` 宿主需通过本实例的 [`Self::with_time_runtime`] 构建 runtime。
+    /// Tokio 缺少稳定的 driver 查询接口，无法确认时返回 [`SchedulerError::RuntimeRequired`]。
     ///
     /// callback 不会在注册阶段调用；同一任务不会重叠执行。活动任务达到配置上限、调度参数无效、
     /// runtime 不可用或调度器已关闭时均显式返回错误。

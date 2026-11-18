@@ -168,6 +168,23 @@ mod tests {
     }
 
     #[test]
+    fn header_merge_applies_limits_after_all_overrides() {
+        let mut defaults = HttpHeaders::new();
+        for _ in 0..128 {
+            defaults.append("x-replaced", "a").unwrap();
+        }
+        let mut request = HttpHeaders::new();
+        request.append("x-new", "b").unwrap();
+        assert_eq!(
+            HttpHeaders::merge(&defaults, &request),
+            Err(super::HttpError::HeaderLimitExceeded)
+        );
+        request.append("x-replaced", "c").unwrap();
+        request.append("x-replaced", "d").unwrap();
+        assert_eq!(HttpHeaders::merge(&defaults, &request).unwrap(), request);
+    }
+
+    #[test]
     fn completed_cache_rejects_request_cache_directives() {
         let policy =
             DeduplicationPolicy::with_completed_ttl(std::time::Duration::from_secs(1), 8, 4, 1024)

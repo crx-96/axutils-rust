@@ -148,16 +148,15 @@ fn runtime_and_time_driver_are_required_without_consuming_capacity() {
         .block_on(async { scheduler.register(TaskSchedule::once(Duration::ZERO), || async {}) });
     assert_eq!(result, Err(SchedulerError::RuntimeRequired));
 
-    let runtime = RuntimeBuilder::new_current_thread()
-        .enable_time()
-        .build()
+    scheduler
+        .with_time_runtime(&mut RuntimeBuilder::new_current_thread(), |runtime| {
+            let _entered = runtime.enter();
+            let task = scheduler
+                .register(TaskSchedule::once(Duration::from_secs(60)), || async {})
+                .unwrap();
+            assert!(scheduler.cancel(task).unwrap());
+        })
         .unwrap();
-    runtime.block_on(async {
-        let task = scheduler
-            .register(TaskSchedule::once(Duration::from_secs(60)), || async {})
-            .unwrap();
-        assert!(scheduler.cancel(task).unwrap());
-    });
 }
 
 #[tokio::test(start_paused = true)]

@@ -32,7 +32,7 @@ pub enum SchedulerError {
     InvalidCron,
     /// IANA 时区无效。
     InvalidTimezone,
-    /// 当前线程没有启用 time driver 的 Tokio runtime。
+    /// 当前没有 Tokio runtime，或无法确认其 time driver 已启用。
     RuntimeRequired,
     /// 全局调度器已经初始化。
     AlreadyInitialized,

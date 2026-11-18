@@ -34,9 +34,9 @@ impl SqlxClient {
     /// 池，因此可能产生网络、认证和 SQLite 文件 I/O。连接失败不会改变 `SqlxUtils` 的全局初始化
     /// 状态。若调用方已在本进程通过 SQLx 自定义注册器安装 Any drivers，默认安装函数可能 panic；
     /// 本 crate 必须是进程中唯一的 Any driver 注册方；不捕获该 panic，也不提供 reset。
-    /// 内存 SQLite 保持唯一连接，不自动按空闲时间或寿命回收，也不在 checkout 前执行 ping；
-    /// 这避免上述自动回收或 checkout 前 ping 的取消丢失唯一连接；其他连接故障、连接丢失
-    /// 或显式关闭仍可能释放内存数据，不提供持久化保证。
+    /// SQLite 内存库和空文件名临时库（如 `sqlite:`）保持唯一连接，禁用按空闲时间或寿命回收
+    /// 以及 checkout 前的 ping，避免正常复用或 ping 被取消时丢失状态。连接丢失或显式关闭
+    /// 仍可能释放数据库。
     ///
     /// # Examples
     ///
@@ -57,7 +57,7 @@ impl SqlxClient {
         #[cfg(feature = "tracing")]
         let metadata = sqlx_trace::ConnectMetadata {
             driver: config.driver_name(),
-            sqlite_memory: config.sqlite_memory,
+            sqlite_memory: config.sqlite_memory(),
             max_connections: config.max_connections,
             min_connections: config.min_connections,
             acquire_timeout: config.acquire_timeout,
@@ -76,22 +76,8 @@ impl SqlxClient {
         config.validate()?;
         driver::install_default_drivers();
 
-        // 普通数据库沿用 SQLx 的空闲回收、连接寿命及健康检查策略。
-        let options = AnyPoolOptions::new()
-            .max_connections(config.max_connections)
-            .min_connections(config.min_connections)
-            .acquire_timeout(config.acquire_timeout);
-        // 内存 SQLite 的唯一连接拥有整个数据库，不能被定期淘汰；取消 checkout
-        // 期间的异步 ping 也可能丢弃该连接，因此取消这一额外 await 边界。
-        let options = if config.sqlite_memory {
-            options
-                .idle_timeout(None)
-                .max_lifetime(None)
-                .test_before_acquire(false)
-        } else {
-            options
-        };
-        let pool = options
+        // 先应用连接生命周期策略，再将配置交给驱动建立连接。
+        let pool = pool_options(&config)
             .connect_with(config.connect_options.clone())
             .await
             .map_err(|error| SqlxError::from_upstream(&error))?;
@@ -202,6 +188,23 @@ impl fmt::Debug for SqlxClient {
     }
 }
 
+/// 从已校验的本地配置装配连接池选项，供连接阶段使用。
+fn pool_options(config: &SqlxConfig) -> AnyPoolOptions {
+    let options = AnyPoolOptions::new()
+        .max_connections(config.max_connections)
+        .min_connections(config.min_connections)
+        .acquire_timeout(config.acquire_timeout);
+    // 连接拥有数据库状态时，自动淘汰或 checkout 期间取消 ping 都可能丢失唯一连接。
+    if config.requires_single_connection() {
+        options
+            .idle_timeout(None)
+            .max_lifetime(None)
+            .test_before_acquire(false)
+    } else {
+        options
+    }
+}
+
 /// 只检查现有 Tokio 上下文，不创建 runtime，也不承诺其 I/O/time driver 已启用。
 fn ensure_runtime() -> Result<(), SqlxError> {
     Handle::try_current()
@@ -231,14 +234,85 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn non_memory_pool_keeps_standard_recycling_policy() {
-        let client = SqlxClient::connect(SqlxConfig::new("sqlite:").unwrap())
-            .await
-            .unwrap();
-        let options = client.pool.options();
-        assert!(options.get_idle_timeout().is_some());
-        assert!(options.get_max_lifetime().is_some());
-        assert!(options.get_test_before_acquire());
-        client.close_async().await.unwrap();
+    async fn connection_local_sqlite_database_lives_for_one_pool() {
+        for url in [
+            "sqlite:",
+            "sqlite://",
+            "sqlite:?cache=private",
+            "sqlite://?cache=private",
+            "sqlite:file:",
+            "sqlite:file:?cache=private",
+            "sqlite:%3Amemory%3A",
+            "sqlite:file::memory:",
+            "sqlite:file:axutils-db%3Fmode=memory",
+            "sqlite:file:axutils-db#fragment?mode=memory",
+            "sqlite:file://localhost",
+        ] {
+            let config = SqlxConfig::new(url).unwrap();
+            assert!(
+                matches!(
+                    config.clone().with_max_connections(2),
+                    Err(super::SqlxError::InvalidConfig {
+                        field: "max_connections"
+                    })
+                ),
+                "{url}"
+            );
+            let client = SqlxClient::connect(config.clone()).await.unwrap();
+            let options = client.pool.options();
+            assert_eq!(options.get_max_connections(), 1);
+            assert_eq!(options.get_idle_timeout(), None);
+            assert_eq!(options.get_max_lifetime(), None);
+            assert!(!options.get_test_before_acquire());
+
+            client
+                .execute_async(client.query("CREATE TABLE marker (n INTEGER)"))
+                .await
+                .unwrap();
+            let count = "SELECT COUNT(*) FROM sqlite_master WHERE name = 'marker'";
+            assert_eq!(
+                client
+                    .fetch_scalar_async(client.query_scalar::<i64>(count))
+                    .await
+                    .unwrap(),
+                1
+            );
+            client.close_async().await.unwrap();
+
+            let reopened = SqlxClient::connect(config).await.unwrap();
+            assert_eq!(
+                reopened
+                    .fetch_scalar_async(reopened.query_scalar::<i64>(count))
+                    .await
+                    .unwrap(),
+                0
+            );
+            reopened.close_async().await.unwrap();
+        }
+    }
+
+    #[test]
+    fn named_sqlite_files_keep_standard_pool_options_without_connecting() {
+        for url in [
+            "sqlite://host",
+            "sqlite://file.db",
+            "sqlite://file.db?mode=rwc",
+            "sqlite:file:named.db",
+            "sqlite:file:?immutable=true",
+            "sqlite:file:db%253Fmode=memory",
+            "sqlite:///dir/:memory:",
+            "sqlite://file.db/:memory:",
+            "sqlite::MEMORY:",
+            "sqlite:file.db",
+            "sqlite:///path/db",
+        ] {
+            let config = SqlxConfig::new(url).unwrap();
+            let options = super::pool_options(&config);
+            assert_eq!(options.get_max_connections(), 10);
+            assert!(options.get_idle_timeout().is_some());
+            assert!(options.get_max_lifetime().is_some());
+            assert!(options.get_test_before_acquire());
+            assert!(config.with_max_connections(2).is_ok());
+        }
     }
 }

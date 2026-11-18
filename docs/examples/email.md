@@ -5,7 +5,7 @@
 
 ```toml
 [dependencies]
-axutils = { version = "2.0", features = ["email"] }
+axutils = { version = "2.1", features = ["email"] }
 ```
 
 ## 实例 API
@@ -45,18 +45,28 @@ fn send() -> Result<(), EmailError> {
 和服务端错误均映射为 `axutils::email::EmailError`；不要将原始凭据或完整邮件正文拼接到错误输出。
 
 每个同步或异步连接池最多保留 10 条空闲连接，空闲达到 60 秒后由池清理。这不限制正在发送的
-连接数；应用应自行限制发送并发。SMTP 认证拒绝归为 `Authentication`，其他已解析的 4xx/5xx
-拒绝归为 `SmtpResponse`，错误中不保留服务端原始文本。
+连接数，应用应自行限制发送并发。同步和异步发送都以 DATA 正文结束后的最终 2xx 回复作为
+SMTP 服务端已接受邮件的依据。最终 3xx 仅表示需要继续交互，返回 `SmtpResponse`。
+SMTP 认证拒绝归为 `Authentication`，其他已解析的 4xx/5xx 拒绝归为 `SmtpResponse`，错误中不保留服务端原始文本。
 
 ## 异步发送
 
 异步发送要求启用 `email-async`，并由调用方提供仍然存活的 Tokio runtime。client 可以在 runtime
-外构造；首次 `send_async` 会在当前 runtime 中建立异步 transport，后续异步发送应在同一个仍存活的
-runtime 中持续复用，不能假设可以跨已结束的 runtime 迁移。
+外构造和析构。首次 `send_async` 按配置建立隐式 TLS 连接或强制升级 STARTTLS，随后认证。
+后续异步发送应在同一个仍存活的 runtime 中复用连接。该 runtime 需要启用 I/O 和 time driver。
+
+`EmailConfig::with_timeout` 默认 30 秒，允许 1 秒至 5 分钟。同步 `send` 为底层连接和命令 I/O
+分别设置时限，一封邮件的多个操作可能累计超过该值。`send_async` 在本地消息构造后给整次传输
+一个共同的预算，包括获取连接、TLS、认证、提交正文和等待最终响应。预算耗尽返回
+`EmailError::Transport(EmailTransportErrorKind::Timeout)`。每次发送独占一条连接。收到最终 2xx 后，
+连接可进入空闲池，下次发送先用 NOOP 探活。最终回复异常的连接会丢弃。对于 4xx/5xx，Lettre
+可能先尝试 QUIT，这次交互也受同一预算限制。超时或取消会直接释放在途连接，即使在 runtime 外
+丢弃正在等待回复的 future，也无需等待 QUIT。空闲连接到期由定时器直接释放。若在提交正文后失去
+回复，服务端可能已经接受邮件，客户端不会自动重发。
 
 ```toml
 [dependencies]
-axutils = { version = "2.0", features = ["email-async"] }
+axutils = { version = "2.1", features = ["email-async"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 ```
 

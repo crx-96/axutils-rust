@@ -4,9 +4,7 @@ use std::collections::BTreeMap;
 
 mod de;
 
-pub(super) use de::{
-    classify_marker, duplicate_key_error_for_deserializer, ConfigValueSeed, ErrorMarker,
-};
+pub(super) use de::{classify_marker, duplicate_key_error_for_deserializer, ErrorMarker};
 
 /// 配置文件解析后的无类型值树。
 ///
@@ -20,11 +18,8 @@ pub enum ConfigValue {
     /// 布尔值。
     Bool(bool),
     /// 64 位有符号整数；解析阶段发现的、超出该范围的整数会返回
-    /// [`crate::config::ConfigError::ValueOutOfRange`]，不会静默转换为浮点数。**已知限制**：JSON 后端
-    /// （不启用 `serde_json` 的 `arbitrary_precision` feature）对超过 `u64::MAX`
-    /// （约 1.8×10¹⁹）且不含小数点/指数的纯整数字面量，会在其自身词法阶段就退化为浮点数，
-    /// 本 crate 在这种情况下无法检测到精度丢失；`i64::MAX` 到 `u64::MAX` 之间的整数字面量
-    /// 不受影响，仍会被正确拒绝。
+    /// [`crate::config::ConfigError::ValueOutOfRange`]。无类型 JSON 按原始数字检查整数范围，
+    /// 下游启用 `serde_json/arbitrary_precision` 时也使用相同的范围。
     Integer(i64),
     /// 64 位浮点数。YAML 后端的无类型读取默认拒绝 `.inf`/`.nan` 等非有限值（返回
     /// [`crate::config::ConfigError::Parse`]），不会产生非有限的 `Float`。JSON 不支持这类字面量；

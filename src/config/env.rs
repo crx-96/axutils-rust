@@ -69,9 +69,13 @@ pub(crate) fn parse_value(
     ))
 }
 
+/// 在原始文本上移动的游标，引号内的物理换行保留原样。
 struct Scanner<'a> {
+    /// 完整的 UTF-8 dotenv 输入。
     text: &'a str,
+    /// 下一个字符的字节偏移。
     pos: usize,
+    /// 从 1 开始的物理行号，CRLF 算一行。
     line: usize,
 }
 
@@ -98,10 +102,12 @@ impl<'a> Scanner<'a> {
         chars.next()
     }
 
+    /// 消费一个原始字符，将 LF 或单 CR 计作换行，CRLF 在 LF 处统一计数。
     fn bump(&mut self) -> Option<char> {
         let ch = self.peek()?;
         self.pos += ch.len_utf8();
-        if ch == '\n' {
+        // 不合并字符，以便引号内的多行值保留输入中的换行形式。
+        if ch == '\n' || (ch == '\r' && self.peek() != Some('\n')) {
             self.line += 1;
         }
         Some(ch)
@@ -122,21 +128,17 @@ fn skip_horizontal_ws(scanner: &mut Scanner) {
     }
 }
 
+/// 跳过空白行和整行注释，停在下一条赋值的第一个字符。
 fn skip_blank_and_comment_lines(scanner: &mut Scanner) {
     loop {
         skip_horizontal_ws(scanner);
         match scanner.peek() {
-            Some('\n') => {
+            Some('\n' | '\r') => {
                 scanner.bump();
-            }
-            Some('\r') => {
-                scanner.bump();
-                if scanner.peek() == Some('\n') {
-                    scanner.bump();
-                }
             }
             Some('#') => {
-                while !matches!(scanner.peek(), None | Some('\n')) {
+                // 注释在物理行尾结束，留下换行由游标计数。
+                while !matches!(scanner.peek(), None | Some('\n' | '\r')) {
                     scanner.bump();
                 }
             }
@@ -480,6 +482,29 @@ mod tests {
             table_of(&value).get("KEY").and_then(|v| v.as_str()),
             Some("value")
         );
+    }
+
+    #[test]
+    fn comments_and_diagnostics_follow_physical_line_endings() {
+        for eol in ["\r", "\n", "\r\n"] {
+            let text = ["  # full line", "", "A=one#two # inline", "B='#'", "# eof"].join(eol);
+            let value = parse_value(&text, false).unwrap();
+            assert_eq!(value.get("A").unwrap().as_str(), Some("one#two"));
+            assert_eq!(value.get("B").unwrap().as_str(), Some("#"));
+            assert_eq!(
+                parse_value(&format!("{text}{eol}!"), false),
+                Err(env_config::parse_error(6))
+            );
+
+            let quoted = ["# first", "A=\"one", "${MISSING}\""].join(eol);
+            assert_eq!(
+                parse_value(&quoted, false),
+                Err(ConfigError::UndefinedVariable {
+                    key: "MISSING".into(),
+                    line: 3
+                })
+            );
+        }
     }
 
     #[test]

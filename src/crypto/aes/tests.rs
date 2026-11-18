@@ -170,6 +170,33 @@ fn random_containers_differ_but_both_decrypt() {
 }
 
 #[test]
+fn random_container_prefix_and_body_match_explicit_iv_at_block_boundaries() {
+    let key = key128();
+    for mode in [AesMode::Gcm, AesMode::CbcPkcs7] {
+        for len in [0, 15, 16, 17, 4097] {
+            let plaintext = vec![0xab; len];
+            let iv = vec![0x34; mode.iv_length()];
+            let expected = encrypt_explicit_iv(&plaintext, &key, &iv, mode).unwrap();
+            let ciphertext = container::encrypt_with_random(&plaintext, &key, mode, |length| {
+                assert_eq!(length, iv.len());
+                Ok(iv.clone())
+            })
+            .unwrap();
+            let (stored_iv, body) = ciphertext.split_at(iv.len());
+            assert_eq!(stored_iv, iv);
+            assert_eq!(body, expected);
+        }
+        assert_eq!(
+            container::encrypt_with_random(b"data", &key, mode, |_| Ok(Vec::new())),
+            Err(CryptoError::InvalidIvLength {
+                expected: mode.iv_length(),
+                length: 0,
+            })
+        );
+    }
+}
+
+#[test]
 fn random_bytes_lengths() {
     assert_eq!(random::random_bytes(12).unwrap().len(), 12);
     assert_eq!(random::random_bytes(16).unwrap().len(), 16);

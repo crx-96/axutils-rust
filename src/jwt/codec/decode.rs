@@ -1,6 +1,5 @@
 use jsonwebtoken::Validation as BackendValidation;
-use serde::de::DeserializeOwned;
-use serde_json::Value;
+use serde::de::{DeserializeOwned, IgnoredAny};
 
 use super::super::{claims, clock, header};
 use super::error_map;
@@ -18,6 +17,7 @@ impl JwtCodec {
         self.decode_inner(token, None)
     }
 
+    /// 用确定的 Unix 时间测试时间边界，验签与解析和公开路径共用。
     #[cfg(test)]
     pub(crate) fn decode_at<T: DeserializeOwned>(
         &self,
@@ -27,6 +27,7 @@ impl JwtCodec {
         self.decode_inner(token, Some(now))
     }
 
+    /// 先约束未验证输入，随后验证签名和标准项，最后才执行调用方的反序列化。
     fn decode_inner<T: DeserializeOwned>(
         &self,
         token: &str,
@@ -38,6 +39,7 @@ impl JwtCodec {
                 limit: MAX_TOKEN_BYTES,
             });
         }
+        // 三个段必须完整；先拒绝结构、编码或资源预算不合法的输入。
         let mut parts = token.split('.');
         let header = parts
             .next()
@@ -62,6 +64,7 @@ impl JwtCodec {
         let decoded_payload = claims::decode_payload(payload)?;
         claims::preflight_claims(&decoded_payload)?;
 
+        // 后端只负责固定算法验签，标准项保留本库的严格类型与时间规则。
         let verification_key = self
             .verification_key
             .as_ref()
@@ -82,10 +85,9 @@ impl JwtCodec {
         backend_validation.iss = None;
         backend_validation.sub = None;
 
-        let decoded =
-            jsonwebtoken::decode::<Value>(token, verification_key.backend(), &backend_validation)
-                .map_err(|error| error_map::map_decode_error(&error, verification_key.family()))?;
-        let value = decoded.claims;
+        // 忽略后端的 claims 返回值。验签成功后，两个读取方都使用预检过的 payload 字节。
+        jsonwebtoken::decode::<IgnoredAny>(token, verification_key.backend(), &backend_validation)
+            .map_err(|error| error_map::map_decode_error(&error, verification_key.family()))?;
         let now = if self.validation.validate_exp || self.validation.validate_nbf {
             Some(match fixed_now {
                 Some(now) => now,
@@ -94,8 +96,9 @@ impl JwtCodec {
         } else {
             None
         };
-        claims::validate_standard_claims(&value, &self.validation, now)?;
-        claims::check_value_resources(&value)?;
-        serde_json::from_value(value).map_err(|_| JwtError::InvalidToken { segment: "claims" })
+        claims::validate_standard_claims(&decoded_payload, &self.validation, now)?;
+        // 验签和标准项检查均已成功，按目标类型读取同一 payload 的原始数字。
+        serde_json::from_slice(&decoded_payload)
+            .map_err(|_| JwtError::InvalidToken { segment: "claims" })
     }
 }

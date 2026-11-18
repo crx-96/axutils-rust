@@ -94,29 +94,15 @@ fn out_of_range_error<E: de::Error>(key: &str) -> E {
     ))
 }
 
-/// 携带剩余深度预算与当前键标签的 [`serde::de::DeserializeSeed`]。
-///
-/// 用于从 JSON 等提供底层 `Deserializer` 的后端构建 [`ConfigValue`]，深度计数在
-/// 每次进入数组/表时递减，为零时返回携带 [`DEPTH_MARKER`] 的错误，由调用方在捕获后映射为
-/// [`crate::config::ConfigError::DepthLimitExceeded`]。
-pub(in crate::config) struct ConfigValueSeed {
+/// 通用 serde 值树访问器，也是携带下一层预算与诊断字段名的反序列化种子。
+struct ConfigValueVisitor<'key> {
     /// 当前节点还能进入的容器层数；标量不消耗预算。
     remaining_depth: usize,
-    /// 最近的表字段名；根节点为空，数组元素沿用所属字段。
-    key: String,
+    /// 借用最近的表字段名，根节点为空，数组的所有元素共享同一个诊断标签。
+    key: &'key str,
 }
 
-impl ConfigValueSeed {
-    /// 创建根节点访问器的输入状态，使用调用方提供的容器预算。
-    pub(in crate::config) fn root(remaining_depth: usize) -> Self {
-        Self {
-            remaining_depth,
-            key: String::new(),
-        }
-    }
-}
-
-impl<'de> DeserializeSeed<'de> for ConfigValueSeed {
+impl<'de> DeserializeSeed<'de> for ConfigValueVisitor<'_> {
     type Value = ConfigValue;
 
     /// 将预算与字段上下文移交给访问器，由后端分派真实值类型。
@@ -124,35 +110,26 @@ impl<'de> DeserializeSeed<'de> for ConfigValueSeed {
     where
         D: Deserializer<'de>,
     {
-        deserializer.deserialize_any(ConfigValueVisitor {
-            remaining_depth: self.remaining_depth,
-            key: self.key,
-        })
+        deserializer.deserialize_any(self)
     }
 }
 
-/// 供无法暴露底层 `Deserializer`（因此无法使用 `ConfigValueSeed`）的后端使用；
-/// 深度上限固定为 `MAX_DEPTH_CEILING`，仅作为防止栈溢出的安全网。当前仅 YAML 后端
-/// 使用该实现，真正的可配置深度上限由 `serde-saphyr` 自身的 `Budget::max_depth` 强制。
+/// 标准 serde 入口的深度安全网；YAML 后端另外通过自身预算执行加载器的深度限制。
 impl<'de> Deserialize<'de> for ConfigValue {
     /// 在无法注入预算的标准 serde 入口应用固定深度安全网。
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,
     {
-        ConfigValueSeed::root(MAX_DEPTH_CEILING).deserialize(deserializer)
+        ConfigValueVisitor {
+            remaining_depth: MAX_DEPTH_CEILING,
+            key: "",
+        }
+        .deserialize(deserializer)
     }
 }
 
-/// 把后端标量和容器构建为值树，并在每层递归维护预算及字段上下文。
-struct ConfigValueVisitor {
-    /// 当前节点剩余的容器预算，进入表或数组时递减。
-    remaining_depth: usize,
-    /// 整数范围错误对应的最近字段名；不含配置值。
-    key: String,
-}
-
-impl<'de> Visitor<'de> for ConfigValueVisitor {
+impl<'de> Visitor<'de> for ConfigValueVisitor<'_> {
     type Value = ConfigValue;
 
     /// 提供不含输入内容的 serde 期望类型说明。
@@ -192,21 +169,21 @@ impl<'de> Visitor<'de> for ConfigValueVisitor {
     fn visit_u64<E: de::Error>(self, value: u64) -> Result<Self::Value, E> {
         i64::try_from(value)
             .map(ConfigValue::Integer)
-            .map_err(|_| out_of_range_error(&self.key))
+            .map_err(|_| out_of_range_error(self.key))
     }
 
     /// 检查宽有符号整数是否可无损保存为 i64。
     fn visit_i128<E: de::Error>(self, value: i128) -> Result<Self::Value, E> {
         i64::try_from(value)
             .map(ConfigValue::Integer)
-            .map_err(|_| out_of_range_error(&self.key))
+            .map_err(|_| out_of_range_error(self.key))
     }
 
     /// 检查宽无符号整数是否可无损保存为 i64。
     fn visit_u128<E: de::Error>(self, value: u128) -> Result<Self::Value, E> {
         i64::try_from(value)
             .map(ConfigValue::Integer)
-            .map_err(|_| out_of_range_error(&self.key))
+            .map_err(|_| out_of_range_error(self.key))
     }
 
     /// 保存后端允许的浮点值；格式是否允许非有限值由后端负责。
@@ -237,9 +214,9 @@ impl<'de> Visitor<'de> for ConfigValueVisitor {
 
         // 数组元素沿用最近表字段名，错误不包含元素的实际内容。
         let mut items = Vec::new();
-        while let Some(item) = seq.next_element_seed(ConfigValueSeed {
+        while let Some(item) = seq.next_element_seed(ConfigValueVisitor {
             remaining_depth,
-            key: self.key.clone(),
+            key: self.key,
         })? {
             items.push(item);
         }
@@ -263,13 +240,30 @@ impl<'de> Visitor<'de> for ConfigValueVisitor {
             if table.contains_key(&key) {
                 return Err(duplicate_key_error_for_deserializer(&key));
             }
-            let value = map.next_value_seed(ConfigValueSeed {
+            let value = map.next_value_seed(ConfigValueVisitor {
                 remaining_depth,
-                key: key.clone(),
+                key: &key,
             })?;
             table.insert(key, value);
         }
 
         Ok(ConfigValue::Table(table))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{classify_marker, ConfigValue, ErrorMarker};
+
+    #[test]
+    fn serde_array_elements_borrow_the_nearest_field_for_range_errors() {
+        let key = "field".repeat(1024);
+        let text = format!(r#"{{"outer":[{{"{key}":[[0,9223372036854775808]]}}]}}"#);
+        let error = serde_json::from_str::<ConfigValue>(&text)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            matches!(classify_marker(&error), ErrorMarker::ValueOutOfRange(field) if field == key)
+        );
     }
 }

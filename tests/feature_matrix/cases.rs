@@ -72,7 +72,19 @@ fn common_capability_matrix() {
 #[test]
 #[ignore = "下游 HTTP 压缩 feature 合并与 loopback 响应契约"]
 fn http_downstream_compression_contract() {
-    support::run_http_compression_contract();
+    support::run_downstream_contract("http_compression", "test", &["", "compression"]);
+}
+
+#[test]
+#[ignore = "下游 serde_json 任意精度 feature 的配置值和 JWT 契约"]
+fn config_and_jwt_downstream_arbitrary_precision_contract() {
+    support::run_downstream_contract("config/arbitrary_precision", "test", &["", "jwt"]);
+}
+
+#[test]
+#[ignore = "独立 panic=abort 进程中的调度器计时契约"]
+fn scheduler_abort_runtime_contract() {
+    support::run_downstream_contract("scheduler_abort", "run", &[""]);
 }
 
 #[test]

@@ -4,7 +4,7 @@
 第三方正常依赖；网络、异步、数据库、配置后端、模板和加密后端均按需启用。
 
 - MSRV：Rust 1.95
-- 当前 crate 版本：`2.0.0`
+- 当前 crate 版本：`2.1.0`
 - Edition：2021
 - 默认 feature：`[]`
 
@@ -43,7 +43,7 @@ use axutils::{
 
 ```toml
 [dependencies]
-axutils = { version = "2.0", default-features = false }
+axutils = { version = "2.1", default-features = false }
 ```
 
 按能力组合：
@@ -51,7 +51,7 @@ axutils = { version = "2.0", default-features = false }
 ```toml
 [dependencies]
 axutils = {
-    version = "2.0",
+    version = "2.1",
     default-features = false,
     features = ["config-yaml", "http-async", "http-json", "redis-async"]
 }
@@ -244,7 +244,7 @@ cargo clippy --no-default-features --all-targets -- -D warnings
 ```
 
 完整非 live 门禁、feature matrix、文档示例 harness 与发布包检查见
-[开发与验收](docs/develop.md)。真实 SMTP、Redis 和 Redis Cluster 测试默认 ignored，不能在没有
+[开发与验收](https://github.com/crx-96/axutils-rust/blob/main/docs/develop.md)。真实 SMTP、Redis 和 Redis Cluster 测试默认 ignored，不能在没有
 显式授权和受控服务的情况下运行。
 
 ## 从旧公共路径迁移

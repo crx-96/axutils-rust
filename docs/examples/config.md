@@ -13,7 +13,7 @@
 
 ```toml
 [dependencies]
-axutils = { version = "2.0", default-features = false, features = [
+axutils = { version = "2.1", default-features = false, features = [
     "config",       # JSON 与 .env
     "config-yaml",  # 同时包含 config
     "config-toml",  # 同时包含 config
@@ -107,6 +107,7 @@ fn read_settings() -> Result<(), ConfigError> {
 `.env` 识别 `.env` 与 `.env.*`。双引号中的 `${VAR}` 优先引用此前已经解析的文件键；默认可回退到
 进程环境变量。用 `with_env_substitution(false)` 禁止这一回退，未定义变量返回
 `ConfigError::UndefinedVariable`。库从不向进程环境变量写入内容。
+`.env` 的整行注释和无引号值后的 ` #` 注释都在当前物理行结束。CR、LF、CRLF 各计一行。
 
 ```rust
 use axutils::config::{ConfigError, ConfigFormat, ConfigLoader};
@@ -136,6 +137,10 @@ assert_eq!(value.get("server.port").and_then(|value| value.as_i64()), Some(8080)
 上例要求 `config-toml`。YAML 与 INI 分别使用 `ConfigFormat::Yaml` 和 `ConfigFormat::Ini`，要求
 `config-yaml` 与 `config-ini`。INI 无类型值通常保留为字符串；不要假设所有格式都会自动把字符串
 转换为数值或布尔值。
+
+无类型 JSON 将小数和指数解析为 `Float`，超出 `i64` 范围的整数字面量返回
+`ConfigError::ValueOutOfRange`。下游启用 `serde_json/arbitrary_precision` 时仍遵循这些规则。
+对象键即使与 `serde_json` 的私有标记同名，也按普通字段保留并检查重复。
 
 TOML 日期时间保留为字符串，按标量处理，不额外占用表/数组的深度预算。普通用户键即使与
 后端日期标记 `$__toml_private_datetime` 同名，或在 TOML 中使用转义拼写，也按普通字段保留。

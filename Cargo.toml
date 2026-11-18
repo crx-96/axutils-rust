@@ -1,6 +1,6 @@
 [package]
 name = "axutils"
-version = "2.0.0"
+version = "2.1.0"
 edition = "2021"
 rust-version = "1.95"
 resolver = "3"
@@ -89,7 +89,7 @@ itoa = ["dep:itoa"]
 ryu = ["dep:ryu"]
 zmij = ["dep:zmij"]
 uuid = ["dep:uuid"]
-jwt = ["dep:jsonwebtoken", "dep:serde", "dep:serde_json"]
+jwt = ["dep:jsonwebtoken", "dep:serde", "dep:serde_json", "serde_json?/raw_value"]
 tracing = ["dep:tracing"]
 logging = ["tracing", "dep:tracing-subscriber", "dep:tracing-appender"]
 rand = ["dep:rand"]
@@ -102,7 +102,7 @@ chrono = ["dep:chrono"]
 time = ["dep:time"]
 jiff = ["dep:jiff"]
 email = ["dep:lettre"]
-email-async = ["email", "dep:tokio", "lettre/tokio1-rustls", "tokio?/rt"]
+email-async = ["email", "dep:tokio", "lettre/tokio1-rustls", "tokio?/rt", "tokio?/time"]
 http = ["dep:ureq", "dep:url"]
 http-async = [
     "http",
@@ -205,6 +205,7 @@ axum-tower = ["axum", "tower/util", "tower/limit", "tower/load-shed"]
 axum-tower-http = [
     "axum",
     "dep:tower-http",
+    "dep:tracing",
     "axum?/matched-path",
     "tower-http/catch-panic",
     "tower-http/cors",

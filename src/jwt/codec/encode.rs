@@ -2,7 +2,7 @@ use std::io;
 
 use jsonwebtoken::Header as BackendHeader;
 use serde::Serialize;
-use serde_json::{Serializer as JsonSerializer, Value};
+use serde_json::{value::RawValue, Serializer as JsonSerializer};
 
 use super::super::claims::{self, MAX_CLAIMS_BYTES};
 use super::error_map;
@@ -17,6 +17,7 @@ impl JwtCodec {
     /// [`JwtError::MissingSigningKey`]。返回的 token 不是加密内容，调用方不得在日志或错误中记录
     /// 其中的敏感 claims。
     pub fn encode<T: Serialize>(&self, claims: &T) -> Result<String, JwtError> {
+        // 没有签名密钥时直接返回，避免执行调用方的序列化逻辑。
         let signing_key = self
             .signing_key
             .as_ref()
@@ -35,18 +36,17 @@ impl JwtCodec {
             }
             return Err(JwtError::InvalidToken { segment: "claims" });
         }
+        // 结构和资源预算直接检查待签发的 JSON。后端按原文嵌入，只序列化一次业务类型。
         let serialized = writer.bytes;
         claims::preflight_claims(&serialized)?;
-        let value: Value = serde_json::from_slice(&serialized)
+        let raw: &RawValue = serde_json::from_slice(&serialized)
             .map_err(|_| JwtError::InvalidToken { segment: "claims" })?;
-        claims::check_value_resources(&value)?;
-
         let algorithm = self
             .algorithm
             .backend()
             .ok_or(JwtError::InvalidConfig { field: "algorithm" })?;
         let header = BackendHeader::new(algorithm);
-        let token = jsonwebtoken::encode(&header, &value, signing_key.backend())
+        let token = jsonwebtoken::encode(&header, &raw, signing_key.backend())
             .map_err(|error| error_map::map_encode_error(&error))?;
         if token.len() > MAX_TOKEN_BYTES {
             return Err(JwtError::TokenTooLarge {
@@ -58,13 +58,18 @@ impl JwtCodec {
     }
 }
 
+/// 捕获调用方一次序列化的原文，并为超限错误保留至多一个额外字节。
 struct BoundedJsonWriter {
+    /// 实际捕获的 JSON 字节，长度至多为 limit + 1。
     bytes: Vec<u8>,
+    /// 可签发的最大字节数。
     limit: usize,
+    /// 区分容量超限与调用方序列化错误，不向外传递原始错误。
     overflowed: bool,
 }
 
 impl BoundedJsonWriter {
+    /// 按需扩容，小 claims 无需预留整个预算。
     fn new(limit: usize) -> Self {
         Self {
             bytes: Vec::with_capacity(limit.min(1024)),
@@ -75,6 +80,7 @@ impl BoundedJsonWriter {
 }
 
 impl io::Write for BoundedJsonWriter {
+    /// 写入预算内的片段，超限时留下长度证据并终止序列化。
     fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
         let capture_limit = self.limit.saturating_add(1);
         let remaining = capture_limit.saturating_sub(self.bytes.len());
@@ -91,6 +97,7 @@ impl io::Write for BoundedJsonWriter {
         Ok(bytes.len())
     }
 
+    /// 字节已直接写入内存，无待刷新的数据。
     fn flush(&mut self) -> io::Result<()> {
         Ok(())
     }

@@ -30,7 +30,7 @@ pub enum EmailSecurity {
 
 /// 已校验的 SMTP 账号和发件人配置。
 ///
-/// 使用 [`EmailConfig::new`] 创建后，可选地通过 builder 方法设置显示名和命令超时。字段
+/// 使用 [`EmailConfig::new`] 创建后，可选地通过 builder 方法设置显示名和传输时限。字段
 /// 私有且不会实现 `Clone`；配置被 [`crate::email::EmailClient::new`] 消费后，调用方不能再读取密码。
 /// `host` 仅接受 ASCII DNS 主机名，不接受 SMTP URL、端口、路径或 IP 字面量。
 pub struct EmailConfig {
@@ -48,7 +48,7 @@ pub struct EmailConfig {
     pub(super) from: Address,
     /// 可选显示名；`None` 表示邮件头只使用发件地址。
     pub(super) from_name: Option<String>,
-    /// SMTP 命令等待预算，默认 30 秒，允许 1 秒至 5 分钟。
+    /// 同步命令 I/O 或整次异步传输的等待预算，默认 30 秒，允许 1 秒至 5 分钟。
     pub(super) timeout: Duration,
 }
 
@@ -57,7 +57,7 @@ impl EmailConfig {
     ///
     /// `host` 必须是 ASCII DNS 主机名；`port` 不能为 `0`；用户名、密码和发件地址不能为空，
     /// 且账号相关字段最多 4 KiB。密码不会被 trim、转换或写入本 crate 的错误文本。默认
-    /// 命令超时为 30 秒。该方法只做本地校验，不建立网络连接。
+    /// 传输时限为 30 秒。该方法只做本地校验，不建立网络连接。
     ///
     /// # Errors
     ///
@@ -174,10 +174,10 @@ impl EmailConfig {
         Ok(self)
     }
 
-    /// 设置 SMTP 命令超时并返回更新后的配置。
+    /// 设置 SMTP 等待时限并返回更新后的配置。
     ///
-    /// 自定义值必须在 1 秒到 5 分钟（含边界）之间。超时只限制 SMTP 命令等待时间，不会
-    /// 自动重试、创建后台任务或改变连接池的 60 秒空闲回收时间。
+    /// 允许 1 秒到 5 分钟（含边界），默认 30 秒。同步发送按底层连接和命令 I/O 设置超时，
+    /// 异步发送用同一预算限制从获取连接到收到最终 SMTP 响应的整个传输。两者均不自动重发邮件。
     ///
     /// # Errors
     ///

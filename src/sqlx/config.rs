@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::fmt;
 use std::str::FromStr;
 use std::time::Duration;
@@ -8,8 +9,6 @@ use super::SqlxError;
 
 /// 普通数据库默认允许同时持有的连接数。
 const DEFAULT_MAX_CONNECTIONS: u32 = 10;
-/// 内存 SQLite 必须由唯一连接持有数据库状态。
-const DEFAULT_MEMORY_MAX_CONNECTIONS: u32 = 1;
 /// 单个客户端允许配置的最大连接数，防止无界占用数据库资源。
 const MAX_CONNECTIONS_LIMIT: u32 = 100;
 /// 获取连接的默认等待预算，也用于首次连接池建立。
@@ -34,6 +33,17 @@ enum SqlxDriver {
     Sqlite,
 }
 
+/// 区分普通连接池和两种需要保留唯一 SQLite 连接的数据库。
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum DatabaseLifetime {
+    /// 普通文件或其他驱动使用常规连接池。
+    Persistent,
+    /// 空文件名创建的临时库只属于打开它的连接。
+    Temporary,
+    /// 内存库在最后一个连接关闭时释放。
+    Memory,
+}
+
 /// SQLx Any 连接池的本地配置。
 ///
 /// `new` 和所有 `with_*` 方法只做本地 URL/参数校验，不访问网络、不安装 Any driver，也不创建
@@ -42,8 +52,8 @@ enum SqlxDriver {
 /// 创建的连接选项关闭 SQLx 普通和慢查询语句日志，避免 SQL 字面量随日志输出；这不控制应用
 /// 自行使用 SQLx 的日志，也不保证屏蔽 SQLx 的其他底层诊断。
 ///
-/// 普通数据库 URL 的最大连接数默认为 `10`，SQLite 内存 URL 默认为 `1`；最大连接数只能是
-/// `1..=100`。`min_connections` 默认为 `0`，且不能超过最大连接数。连接获取超时默认为 30 秒，
+/// 普通数据库 URL 的最大连接数默认为 `10`，SQLite 内存库和空文件名临时库固定为 `1`。
+/// 最大连接数只能是 `1..=100`。`min_connections` 默认为 `0`，且不能超过最大连接数。连接获取超时默认为 30 秒，
 /// 允许范围是 `1ms..=5min`。`fetch_all`/`fetch_all_as` 的结果行数上限默认为 `1_024`，允许
 /// 范围是 `1..=100_000`。
 #[derive(Clone)]
@@ -52,9 +62,9 @@ pub struct SqlxConfig {
     pub(crate) connect_options: AnyConnectOptions,
     /// 脱敏 Debug 与 telemetry 使用的驱动分类。
     driver: SqlxDriver,
-    /// 内存 SQLite 标记，决定单连接与禁止自动回收策略。
-    pub(crate) sqlite_memory: bool,
-    /// 同时连接数上限，允许 1..=100，内存 SQLite 固定为 1。
+    /// 在构造时按连接选项分类，供建池、预算校验和脱敏诊断共用。
+    lifetime: DatabaseLifetime,
+    /// 同时连接数上限，允许 1..=100，SQLite 内存库和临时库固定为 1。
     pub(crate) max_connections: u32,
     /// 保持的最小连接数，默认为 0，不能大于 max_connections。
     pub(crate) min_connections: u32,
@@ -106,27 +116,37 @@ impl SqlxConfig {
             return Err(SqlxError::InvalidConfig { field: "tls" });
         }
 
-        // 内存数据库不能依赖普通连接池的连接替换行为，记录此标记供建池阶段使用。
-        let sqlite_memory = driver == SqlxDriver::Sqlite && is_sqlite_memory(&connect_options);
-        Ok(Self {
+        let lifetime = database_lifetime(&connect_options);
+        let mut config = Self {
             connect_options,
             driver,
-            sqlite_memory,
-            max_connections: if sqlite_memory {
-                DEFAULT_MEMORY_MAX_CONNECTIONS
-            } else {
-                DEFAULT_MAX_CONNECTIONS
-            },
+            lifetime,
+            max_connections: DEFAULT_MAX_CONNECTIONS,
             min_connections: 0,
             acquire_timeout: DEFAULT_ACQUIRE_TIMEOUT,
             max_rows: DEFAULT_MAX_ROWS,
-        })
+        };
+        // 内存库和空文件名临时库的状态依赖连接存续，默认值与建池时使用同一判断。
+        if config.requires_single_connection() {
+            config.max_connections = 1;
+        }
+        Ok(config)
+    }
+
+    /// SQLite 内存库和空文件名临时库需要固定连接，以免换连接后丢失状态。
+    pub(super) fn requires_single_connection(&self) -> bool {
+        self.lifetime != DatabaseLifetime::Persistent
+    }
+
+    /// Debug 和连接事件仅把真正的内存库标记为 memory。
+    pub(super) fn sqlite_memory(&self) -> bool {
+        self.lifetime == DatabaseLifetime::Memory
     }
 
     /// 设置连接池最大连接数。
     ///
-    /// 允许范围是 `1..=100`。SQLite 内存 URL 只能使用 `1`，否则每条连接可能拥有不同的内存
-    /// 数据库。该方法仍然不会连接数据库。
+    /// 允许范围是 `1..=100`。SQLite 内存库和空文件名临时库只能使用 `1`，以保持各次查询
+    /// 访问同一数据库。该方法只校验本地配置。
     ///
     /// # Examples
     ///
@@ -146,7 +166,7 @@ impl SqlxConfig {
                 field: "max_connections",
             });
         }
-        if self.sqlite_memory && max_connections != 1 {
+        if self.requires_single_connection() && max_connections != 1 {
             return Err(SqlxError::InvalidConfig {
                 field: "max_connections",
             });
@@ -245,7 +265,7 @@ impl SqlxConfig {
         // 跨字段约束先于时间、结果预算检查，保持现有错误优先级。
         if !(1..=MAX_CONNECTIONS_LIMIT).contains(&self.max_connections)
             || self.min_connections > self.max_connections
-            || (self.sqlite_memory && self.max_connections != 1)
+            || (self.requires_single_connection() && self.max_connections != 1)
         {
             return Err(SqlxError::InvalidConfig {
                 field: "max_connections",
@@ -279,7 +299,7 @@ impl fmt::Debug for SqlxConfig {
         formatter
             .debug_struct("SqlxConfig")
             .field("driver", &self.driver)
-            .field("sqlite_memory", &self.sqlite_memory)
+            .field("sqlite_memory", &self.sqlite_memory())
             .field("max_connections", &self.max_connections)
             .field("min_connections", &self.min_connections)
             .field("acquire_timeout", &self.acquire_timeout)
@@ -288,18 +308,98 @@ impl fmt::Debug for SqlxConfig {
     }
 }
 
-/// 识别 SQLite 内存 URL 的特殊路径和 mode 参数，不进行文件或数据库访问。
-fn is_sqlite_memory(options: &AnyConnectOptions) -> bool {
-    if options.database_url.scheme() != "sqlite" {
-        return false;
+/// 按 SQLx 传给 SQLite 的文件名和打开模式分类；驱动专属参数仍由驱动在连接时校验。
+fn database_lifetime(options: &AnyConnectOptions) -> DatabaseLifetime {
+    let url = &options.database_url;
+    if url.scheme() != "sqlite" {
+        return DatabaseLifetime::Persistent;
     }
 
-    // 标准 :memory: 路径与显式 mode=memory 都需要同一连接生命周期保护。
-    let path = options.database_url.path().trim_start_matches('/');
-    path.eq_ignore_ascii_case(":memory:")
-        || options.database_url.query_pairs().any(|(key, value)| {
-            key.eq_ignore_ascii_case("mode") && value.eq_ignore_ascii_case("memory")
-        })
+    // SQLx 从序列化 URL 去掉 scheme（含可选的 //），所以 authority 也属于文件名。
+    let database = url
+        .as_str()
+        .trim_start_matches("sqlite://")
+        .trim_start_matches("sqlite:");
+    let (name, params) = database.split_once('?').unwrap_or((database, ""));
+    let filename = decode_filename_part(name);
+    let mut memory = false;
+    let mut immutable = false;
+    let mut vfs = false;
+    for (key, value) in sqlite_params(params) {
+        match key.as_ref() {
+            "mode" if value == "memory" => memory = true,
+            "immutable" => immutable = matches!(value.as_ref(), "1" | "true"),
+            "vfs" => vfs = true,
+            _ => {}
+        }
+    }
+
+    // immutable/vfs 会使 SQLx 重新转义整个文件名，原有的 file: 此时只是文件名的一部分。
+    let mut path = filename.as_ref();
+    let uri_path;
+    if let Some(uri) = path.strip_prefix("file:").filter(|_| !immutable && !vfs) {
+        // SQLite 的 file: URI 再解码一次；先分隔 fragment 和参数，避免把转义分隔符当语法。
+        let uri = uri.split('#').next().unwrap_or_default();
+        let (name, params) = uri.split_once('?').unwrap_or((uri, ""));
+        let name = match name.strip_prefix("//") {
+            Some(authority_path) => {
+                let end = authority_path.find('/').unwrap_or(authority_path.len());
+                if !matches!(&authority_path[..end], "" | "localhost") {
+                    return DatabaseLifetime::Persistent;
+                }
+                &authority_path[end..]
+            }
+            None => name,
+        };
+        uri_path = decode_filename_part(name);
+        path = uri_path.split('\0').next().unwrap_or_default();
+        // 内嵌 URI 的 mode 由 SQLite 最后应用，按出现顺序覆盖 SQLx 的打开标志。
+        for (key, value) in sqlite_params(params) {
+            if key.split('\0').next() == Some("mode") {
+                memory = value.split('\0').next() == Some("memory");
+            }
+        }
+    }
+    match path {
+        ":memory:" => DatabaseLifetime::Memory,
+        _ if memory => DatabaseLifetime::Memory,
+        "" => DatabaseLifetime::Temporary,
+        _ => DatabaseLifetime::Persistent,
+    }
+}
+
+/// 拆分两层参数中的键值，对决定生命周期的 ASCII 标记做百分号解码。
+fn sqlite_params(params: &str) -> impl Iterator<Item = (Cow<'_, str>, Cow<'_, str>)> {
+    params.split('&').map(|param| {
+        let (key, value) = param.split_once('=').unwrap_or((param, ""));
+        (decode_filename_part(key), decode_filename_part(value))
+    })
+}
+
+/// 解码一层文件名或 URI 组件的 %HH，保留字面加号；无转义时借用原文本。
+fn decode_filename_part(text: &str) -> Cow<'_, str> {
+    let Some((prefix, rest)) = text.split_once('%') else {
+        return Cow::Borrowed(text);
+    };
+    let mut bytes = Vec::with_capacity(text.len());
+    bytes.extend_from_slice(prefix.as_bytes());
+    for part in rest.split('%') {
+        // 只有完整的两个十六进制数字构成转义，其余百分号按原样传递。
+        if let Some(hex) = part
+            .get(..2)
+            .filter(|s| s.bytes().all(|b| b.is_ascii_hexdigit()))
+        {
+            if let Ok(byte) = u8::from_str_radix(hex, 16) {
+                bytes.push(byte);
+                bytes.extend_from_slice(&part.as_bytes()[2..]);
+                continue;
+            }
+        }
+        bytes.push(b'%');
+        bytes.extend_from_slice(part.as_bytes());
+    }
+    // 无效 UTF-8 不是特殊库名；连接失败仍由 SQLx 分类。
+    String::from_utf8(bytes).map_or(Cow::Borrowed(text), Cow::Owned)
 }
 
 /// 检查可以本地识别的显式 TLS 要求；不把未知 URL 参数解释成安全保证。
@@ -335,9 +435,30 @@ mod tests {
 
     #[test]
     fn memory_sqlite_defaults_to_one_and_rejects_more_connections() {
-        let config = SqlxConfig::new("sqlite::memory:").unwrap();
-        assert!(config.clone().with_max_connections(2).is_err());
-        assert!(config.with_max_connections(1).is_ok());
+        for (url, memory) in [
+            ("sqlite::memory:", true),
+            ("sqlite:%3Amemory%3A", true),
+            ("sqlite:%66ile:%253Amemory%253A", true),
+            ("sqlite:file:", false),
+        ] {
+            let mut config = SqlxConfig::new(url).unwrap();
+            assert_eq!(config.sqlite_memory(), memory, "{url}");
+            assert_eq!(config.max_connections, 1, "{url}");
+            assert!(config.clone().with_max_connections(1).is_ok());
+            assert!(matches!(
+                config.clone().with_min_connections(2),
+                Err(SqlxError::InvalidConfig {
+                    field: "min_connections"
+                })
+            ));
+            config.max_connections = 2;
+            assert!(matches!(
+                config.validate(),
+                Err(SqlxError::InvalidConfig {
+                    field: "max_connections"
+                })
+            ));
+        }
     }
 
     #[test]

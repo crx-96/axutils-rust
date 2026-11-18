@@ -2,13 +2,18 @@
 
 use super::{schedule, SchedulerConfig, SchedulerError, TaskSchedule};
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     future::Future,
-    panic::{catch_unwind, AssertUnwindSafe},
     sync::{Arc, Mutex, MutexGuard, Weak},
-    time::Duration,
 };
-use tokio::{runtime::Handle, task::AbortHandle, time};
+#[cfg(panic = "unwind")]
+use std::{panic::catch_unwind, time::Duration};
+#[cfg(panic = "unwind")]
+use tokio::time;
+use tokio::{
+    runtime::{Handle, Id, Runtime},
+    task::AbortHandle,
+};
 
 /// 单个 [`Scheduler`](super::Scheduler) 内不复用的任务标识。
 ///
@@ -43,6 +48,8 @@ struct State {
     next_task_id: u64,
     /// None 为锁外提交期间的占位，Some 为已发布的取消句柄。
     tasks: HashMap<TaskId, Option<AbortHandle>>,
+    /// 当前实例已通过 enable_time 构建且仍在借用作用域内的 runtime。
+    timed_runtimes: HashSet<Id>,
 }
 
 impl Shared {
@@ -54,6 +61,7 @@ impl Shared {
                 max_tasks: config.max_tasks,
                 next_task_id: 1,
                 tasks: HashMap::new(),
+                timed_runtimes: HashSet::new(),
             }),
         }
     }
@@ -73,7 +81,7 @@ impl Shared {
             return Err(SchedulerError::Shutdown);
         }
         let schedule = schedule::validate(schedule)?;
-        let handle = runtime_with_time_driver()?;
+        let handle = self.runtime_with_time_driver()?;
         let task_id = self.reserve()?;
         let cleanup = TaskCleanup {
             shared: Arc::downgrade(self),
@@ -171,17 +179,46 @@ impl Drop for TaskCleanup {
     }
 }
 
-/// 检查当前 context 和 timer driver；不创建 runtime 或修改全局 panic hook。
-fn runtime_with_time_driver() -> Result<Handle, SchedulerError> {
-    let handle = Handle::try_current().map_err(|_| SchedulerError::RuntimeRequired)?;
-    let timer_available = {
-        let _entered = handle.enter();
-        catch_unwind(AssertUnwindSafe(|| time::sleep(Duration::ZERO))).is_ok()
-    };
-    if timer_available {
-        Ok(handle)
-    } else {
+impl Shared {
+    /// 在当前 runtime 上校验计时能力。abort 构建只接受宿主已显式启用的 driver。
+    fn runtime_with_time_driver(&self) -> Result<Handle, SchedulerError> {
+        let handle = Handle::try_current().map_err(|_| SchedulerError::RuntimeRequired)?;
+        if self.lock().timed_runtimes.contains(&handle.id()) {
+            return Ok(handle);
+        }
+        // Tokio 没有稳定的 driver 查询 API。仅在 panic 可展开时兼容外部构建的 runtime。
+        #[cfg(panic = "unwind")]
+        if catch_unwind(|| time::sleep(Duration::ZERO)).is_ok() {
+            return Ok(handle);
+        }
         Err(SchedulerError::RuntimeRequired)
+    }
+
+    /// 记录仍由调用作用域借用的 runtime。在 runtime 析构前撤销，避免 ID 复用导致误判。
+    pub(super) fn with_enabled_time<T>(
+        &self,
+        runtime: &Runtime,
+        run: impl FnOnce(&Runtime) -> T,
+    ) -> T {
+        let id = runtime.handle().id();
+        self.lock().timed_runtimes.insert(id);
+        let _registration = TimeRegistration { shared: self, id };
+        run(runtime)
+    }
+}
+
+/// 仅在显式启用 time 的宿主 runtime 存活期间保留其能力登记。
+struct TimeRegistration<'a> {
+    /// 接受本次能力登记的调度器状态。
+    shared: &'a Shared,
+    /// 由宿主作用域持有且仍存活的 runtime 标识。
+    id: Id,
+}
+
+impl Drop for TimeRegistration<'_> {
+    /// 正常退出或展开时都先移除能力登记，再由外层释放 runtime。
+    fn drop(&mut self) {
+        self.shared.lock().timed_runtimes.remove(&self.id);
     }
 }
 

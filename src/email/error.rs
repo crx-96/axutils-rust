@@ -17,7 +17,7 @@ pub enum EmailTransportErrorKind {
     Tls,
     /// SMTP relay 拒绝了认证信息。
     Authentication,
-    /// 网络操作超过了配置的命令超时时间。
+    /// SMTP 操作超时，或整次异步传输耗尽配置的时间预算。
     Timeout,
     /// SMTP relay 返回了失败响应。
     SmtpResponse,

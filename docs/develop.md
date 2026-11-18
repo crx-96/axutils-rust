@@ -91,7 +91,7 @@ cargo tree --no-default-features --edges normal,build
 ```bash
 cargo check --no-default-features --features fs-async
 cargo check --no-default-features --features fs-temp
-cargo check --no-default-features --features fs-temp-async
+cargo test --no-default-features --features fs-temp-async --test fs
 cargo test --no-default-features --features fs-async,fs-temp,fs-temp-async --test fs
 
 cargo check --no-default-features --features config
@@ -99,6 +99,7 @@ cargo check --no-default-features --features config-yaml
 cargo check --no-default-features --features config-toml
 cargo check --no-default-features --features config-ini
 cargo test --no-default-features --features config-async,config-yaml,config-toml,config-ini --test config
+cargo test --no-default-features --test feature_matrix config_and_jwt_downstream_arbitrary_precision_contract -- --ignored
 ```
 
 ### HTTP
@@ -154,6 +155,7 @@ cargo test --no-default-features --features sqlx-mysql --test sqlx
 cargo test --no-default-features --features sqlx-sqlite --test sqlx
 
 cargo test --no-default-features --features scheduler --test scheduler --test scheduler_global
+cargo test --no-default-features --test feature_matrix scheduler_abort_runtime_contract -- --ignored
 cargo test --no-default-features --features axum --test axum
 cargo test --no-default-features --features axum-governor --test axum
 ```
@@ -276,13 +278,13 @@ Markdown harness 用“文档默认 feature/直接依赖 + 邻接 fence override
 清单或打包检查，再依据影响判断其余范围：
 
 ```bash
-cargo package --list
-cargo package --allow-dirty
+cargo package --list --allow-dirty
+cargo package --all-features --allow-dirty
+cargo publish --dry-run --allow-dirty
 git diff --check
 ```
 
-`cargo package --allow-dirty` 构建本地包；`cargo publish` 的真实发布操作按 AGENTS 的已有授权
-边界处理。本地检查通过提供质量证据，不增加发布授权。
+`cargo package` 构建本地包，`cargo publish --dry-run` 使用发布流程验证包并在上传前停止。工作树已提交时可省略 `--allow-dirty`。实际发布按 AGENTS 的授权边界处理。
 
 发布包应包含：
 

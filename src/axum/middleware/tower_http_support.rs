@@ -1,13 +1,15 @@
 //! Tower HTTP 配置校验及有序安装；request ID 始终覆盖本模块生成的错误响应。
 
 use super::super::{AxumError, AxumServerBuilder};
+#[cfg(feature = "tracing")]
+use axum::extract::MatchedPath;
 use axum::{
-    extract::{MatchedPath, Request},
+    extract::Request,
     http::{HeaderName, HeaderValue, Method, StatusCode},
     middleware::{from_fn, Next},
-    response::Response,
+    response::{IntoResponse, Response},
 };
-use std::time::Duration;
+use std::{any::Any as PanicPayload, time::Duration};
 #[cfg(feature = "tracing")]
 use tower_http::request_id::RequestId;
 use tower_http::{
@@ -295,7 +297,7 @@ impl AxumServerBuilder {
     pub(in crate::axum) fn finalize_tower_http(mut self) -> Self {
         // 请求经过 request-id → trace → timeout → catch-panic → 原 Router，响应反向。
         if self.catch_panic_installed {
-            self.router = self.router.layer(CatchPanicLayer::new());
+            self.router = self.router.layer(CatchPanicLayer::custom(panic_response));
         }
         if let Some((duration, status)) = self.timeout_layer {
             let code = match status {
@@ -316,6 +318,12 @@ impl AxumServerBuilder {
         self
     }
 }
+/// 丢弃 unwind payload，仅记录固定分类并保留 tower-http 默认 500 响应的媒体类型和正文。
+fn panic_response(_: Box<dyn PanicPayload + Send>) -> Response {
+    tracing::error!(target: "axutils::axum", error_kind = "service_panic", "service panicked");
+    (StatusCode::INTERNAL_SERVER_ERROR, "Service panicked").into_response()
+}
+
 /// 为本次请求生成内部 ID，并强制让 handler 与最终响应使用同一个值。
 async fn force_request_id(mut request: Request, next: Next) -> Response {
     // HeaderMap::remove 移除该名字的全部值，避免客户端伪造或注入多个关联 ID。

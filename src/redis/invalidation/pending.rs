@@ -59,7 +59,7 @@ impl Pending {
         (report, !entries.is_empty())
     }
 
-    /// 取出到期键并计算剩余最早 deadline；首个超大键可单独成批以保持可推进性。
+    /// 按键序取出到期批次，首个超大键可单独成批。仅空批次返回下一次唤醒时间。
     pub(super) fn take_batch(
         &self,
         config: &RedisInvalidationConfig,
@@ -69,21 +69,30 @@ impl Pending {
         let mut keys = Vec::new();
         let mut bytes = 0;
         // 键顺序与原实现一致；遇到预算边界结束当前批，不从后面挑选更小的键填空。
-        for (key, _) in entries.iter().filter(|(_, attempt)| attempt.due <= now) {
-            if keys.len() >= config.batch_items
-                || (!keys.is_empty() && key.len() > config.batch_bytes.saturating_sub(bytes))
-            {
+        for (key, _) in entries
+            .iter()
+            .filter(|(_, attempt)| attempt.due <= now)
+            .take(config.batch_items)
+        {
+            if !keys.is_empty() && key.len() > config.batch_bytes.saturating_sub(bytes) {
                 break;
             }
             keys.push(key.clone());
             bytes = bytes.saturating_add(key.len());
+        }
+        // 只有 worker 即将等待时才查最早到期时间，空映射返回 None 以等待新投递。
+        if keys.is_empty() {
+            return (
+                Vec::new(),
+                entries.values().map(|attempt| attempt.due).min(),
+            );
         }
         // 移出映射后释放容量；在途同键再次投递会创建独立的最新条目。
         let batch = keys
             .into_iter()
             .filter_map(|key| entries.remove(&key).map(|attempt| (key, attempt)))
             .collect();
-        (batch, entries.values().map(|attempt| attempt.due).min())
+        (batch, None)
     }
 
     /// 为旧失败批次安排下一次退避；已有同键总是代表更新的请求，不覆盖或延迟它。

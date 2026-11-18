@@ -1,0 +1,16 @@
+[package]
+name = "axutils-scheduler-abort-fixture"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[[bin]]
+name = "scheduler-abort"
+path = "main.rs"
+
+[profile.dev]
+panic = "abort"
+
+[dependencies]
+axutils = { path = "../../..", default-features = false, features = ["scheduler"] }
+tokio = { version = "1.53.1", default-features = false, features = ["rt", "time", "sync"] }

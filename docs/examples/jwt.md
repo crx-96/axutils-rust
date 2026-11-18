@@ -5,7 +5,7 @@
 
 ```toml
 [dependencies]
-axutils = { version = "2.0", features = ["jwt"] }
+axutils = { version = "2.1", features = ["jwt"] }
 serde = { version = "1", features = ["derive"] }
 ```
 
@@ -35,7 +35,8 @@ let _codec = codec()?;
 # Ok::<(), JwtError>(())
 ```
 
-`encode` 接受可序列化的 claims，`decode` 仅在固定算法签名和标准 claims 校验成功后才反序列化。
+`encode` 对调用方的 claims 序列化一次，签发这份 JSON 原文。`decode` 在固定算法签名和标准
+claims 校验成功后从原文读取目标类型，因此业务字段可以用 `u128` 精确保留超过 `u64::MAX` 的整数。
 token 与 claims 都有大小、结构和资源预算；token 不是加密内容，不应写入日志、错误或指标标签。
 
 ```rust

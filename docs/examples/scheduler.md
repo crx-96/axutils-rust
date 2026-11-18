@@ -5,7 +5,7 @@
 
 ```toml
 [dependencies]
-axutils = { version = "2.0", features = ["scheduler"] }
+axutils = { version = "2.1", features = ["scheduler"] }
 tokio = { version = "1", features = ["rt-multi-thread", "time"] }
 ```
 
@@ -25,6 +25,28 @@ async fn schedule_once() -> Result<(), SchedulerError> {
         // 执行短小、可取消的业务任务。
     })?;
     scheduler.shutdown()
+}
+```
+
+Tokio 1.53.1 没有稳定的 time driver 查询接口。`panic = "unwind"` 宿主可以直接在已有的
+计时 runtime 中注册。`panic = "abort"` 宿主使用 `with_time_runtime` 显式构建计时 runtime，
+然后照常调用该实例的 `register`。对于其他 runtime，即使调用方已启用时间，abort 构建也会在
+占用任务名额前返回 `RuntimeRequired`。多个调度器各自维护其作用域。
+
+```rust,no_run
+use axutils::scheduler::{Scheduler, SchedulerConfig, TaskSchedule};
+use std::time::Duration;
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let scheduler = Scheduler::new(SchedulerConfig::default())?;
+    let mut builder = tokio::runtime::Builder::new_current_thread();
+    scheduler.with_time_runtime(&mut builder, |runtime| {
+        runtime.block_on(async {
+            let id = scheduler.register(TaskSchedule::once(Duration::from_secs(30)), || async {})?;
+            scheduler.cancel(id)
+        })
+    })??;
+    Ok(())
 }
 ```
 

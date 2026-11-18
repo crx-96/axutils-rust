@@ -3,7 +3,7 @@ use super::backend::should_discard_multiplexed_transaction_connection;
 use super::RedisClient;
 use super::{
     backend::{should_discard_connection, should_discard_transaction_connection},
-    decode::{check_optional_values, decode_collection, decode_hash_entries},
+    decode::{check_hash_entries, check_optional_values, decode_collection},
     input::{collect_keys, collect_raw_pairs},
 };
 use crate::redis::{RedisConfig, RedisError, RedisTransportErrorKind};
@@ -145,38 +145,107 @@ fn hash_pair_collectors_keep_empty_and_exact_budget_contracts() {
     );
 }
 
+fn hash_reply_client(wire: &[u8]) -> RedisClient {
+    let config = RedisConfig::single("redis://127.0.0.1:6379/0").unwrap();
+    let value = ::redis::parse_redis_value(wire).unwrap();
+    RedisClient::test_response(config, Ok(value)).0
+}
+
+const HGETALL_RESP2: &[u8] = b"*4\r\n$1\r\n\xff\r\n$1\r\n\x01\r\n$1\r\na\r\n$1\r\n\x02\r\n";
+const HGETALL_RESP3: &[u8] = b"%2\r\n$1\r\n\xff\r\n$1\r\n\x01\r\n$1\r\na\r\n$1\r\n\x02\r\n";
+
+const HGETALL_ATTRIBUTED: &[u8] = b"|1\r\n+source\r\n+test\r\n%2\r\n|0\r\n$1\r\n\xff\r\n$1\r\n\x01\r\n$1\r\na\r\n|0\r\n$1\r\n\x02\r\n";
+const INVALID_HGETALL: &[&[u8]] = &[
+    b"*1\r\n*2\r\n$1\r\nf\r\n$1\r\nv\r\n",
+    b"*2\r\n$1\r\nf\r\n*1\r\n:65\r\n",
+    b"%1\r\n$1\r\nf\r\n_\r\n",
+    b"%1\r\n+f\r\n$1\r\nv\r\n",
+    b"*2\r\n$1\r\nf\r\n:1\r\n",
+    b"~0\r\n",
+    b"_\r\n",
+];
+
 #[test]
-fn hash_response_shape_and_limits_are_checked_locally() {
+fn hgetall_rejects_non_hash_replies() {
+    for wire in INVALID_HGETALL {
+        assert_eq!(
+            hash_reply_client(wire).hgetall_bytes("k"),
+            Err(RedisError::Transport(RedisTransportErrorKind::Protocol)),
+            "{wire:?}"
+        );
+    }
+}
+
+#[test]
+fn hgetall_maps_resp2_and_resp3_in_wire_order() {
+    for wire in [HGETALL_RESP2, HGETALL_RESP3, HGETALL_ATTRIBUTED] {
+        let client = hash_reply_client(wire);
+        assert_eq!(
+            client.hgetall_bytes("k").unwrap(),
+            [(vec![0xff], vec![1]), (vec![b'a'], vec![2])]
+        );
+    }
+    for empty in [b"*0\r\n", b"%0\r\n"] {
+        assert!(hash_reply_client(empty)
+            .hgetall_bytes("k")
+            .unwrap()
+            .is_empty());
+    }
+    assert_eq!(
+        hash_reply_client(b"*1\r\n$1\r\nf\r\n").hgetall_bytes("k"),
+        Err(RedisError::Transport(RedisTransportErrorKind::Protocol))
+    );
+}
+
+#[cfg(feature = "redis-async")]
+#[tokio::test]
+async fn async_hgetall_decodes_resp2_and_resp3_in_wire_order() {
+    for wire in [HGETALL_RESP2, HGETALL_RESP3, HGETALL_ATTRIBUTED] {
+        assert_eq!(
+            hash_reply_client(wire)
+                .hgetall_async::<_, u8>("k")
+                .await
+                .unwrap(),
+            [(vec![0xff], 1), (vec![b'a'], 2)]
+        );
+    }
+    for wire in INVALID_HGETALL {
+        assert_eq!(
+            hash_reply_client(wire).hgetall_bytes_async("k").await,
+            Err(RedisError::Transport(RedisTransportErrorKind::Protocol)),
+            "{wire:?}"
+        );
+    }
+}
+
+#[test]
+fn hash_response_limits_preserve_error_priority() {
     let config = RedisConfig::single("redis://127.0.0.1:6379/0")
         .unwrap()
-        .with_max_key_bytes(8)
+        .with_max_key_bytes(4)
+        .unwrap()
+        .with_max_value_bytes(2)
         .unwrap()
         .with_max_response_bytes(5)
         .unwrap()
         .with_max_collection_items(1)
         .unwrap();
-
+    let check = |field: &[u8], value: &[u8]| {
+        check_hash_entries(vec![(field.to_vec(), value.to_vec())], &config)
+    };
+    assert!(check(b"key", b"12").is_ok());
     assert_eq!(
-        decode_hash_entries(vec![b"f".to_vec(), b"v".to_vec()], &config),
-        Ok(vec![(b"f".to_vec(), b"v".to_vec())])
-    );
-    assert_eq!(
-        decode_hash_entries(vec![b"f".to_vec()], &config),
-        Err(RedisError::Transport(RedisTransportErrorKind::Protocol))
-    );
-    assert_eq!(
-        decode_hash_entries(vec![Vec::new(), b"v".to_vec()], &config),
-        Err(RedisError::InvalidField)
-    );
-    assert_eq!(
-        decode_hash_entries(
-            vec![b"f".to_vec(), b"v".to_vec(), b"g".to_vec(), b"w".to_vec()],
-            &config,
-        ),
+        check_hash_entries(vec![(vec![], vec![]); 2], &config),
         Err(RedisError::CollectionTooLarge { limit: 1 })
     );
+    assert_eq!(check(b"", b"123"), Err(RedisError::InvalidField));
+    assert_eq!(check(b"field", b"1"), Err(RedisError::InvalidField));
     assert_eq!(
-        decode_hash_entries(vec![b"field".to_vec(), b"v".to_vec()], &config),
+        check(b"abcd", b"123"),
+        Err(RedisError::ValueTooLarge { limit: 2 })
+    );
+    assert_eq!(
+        check(b"abcd", b"12"),
         Err(RedisError::ResponseTooLarge { limit: 5 })
     );
 }

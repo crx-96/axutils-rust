@@ -25,8 +25,8 @@ pub(super) struct HeaderEntry {
 /// 保留重复项顺序的 HTTP Header 集合。
 ///
 /// Header 名称按 ASCII 不区分大小写处理；值以字节保存，因此不会因强制 UTF-8 转换而
-/// 损坏合法的扩展 Header。`Authorization` 和 `Cookie` 不允许通过 `append` 形成重复项，
-/// 也不允许在客户端默认 Header 与请求 Header 之间静默合并。
+/// 损坏合法的扩展 Header。`Authorization`、`Cookie` 和 `Set-Cookie` 在追加及合并请求时
+/// 必须各自唯一。响应可以保留多个 `Set-Cookie`。
 #[derive(Clone, Default, Eq, Hash, PartialEq)]
 pub struct HttpHeaders {
     /// 按插入顺序保存的 header 项，同名普通 header 可重复。
@@ -81,13 +81,10 @@ impl HttpHeaders {
         name: impl AsRef<[u8]>,
         value: impl AsRef<[u8]>,
     ) -> Result<(), HttpError> {
-        // 普通 header 可以重复；敏感项必须唯一，不能靠拼接改变认证或 cookie 语义。
+        // 先规范化名称并校验原始值，再按请求规则追加。
         let normalized = validate_name(name.as_ref())?;
         let value = validate_value(value.as_ref())?;
-        if is_sensitive_name(&normalized) && self.contains_normalized(&normalized) {
-            return Err(HttpError::DuplicateSensitiveHeader);
-        }
-        self.push_entry(normalized, value)
+        self.push_request_entry(normalized, value)
     }
 
     /// 删除所有同名 Header，返回是否删除了条目。
@@ -143,23 +140,20 @@ impl HttpHeaders {
 
     /// 用请求普通 header 整组覆盖默认同名项，敏感项冲突则失败。
     pub(super) fn merge(defaults: &Self, request: &Self) -> Result<Self, HttpError> {
-        // 在独立集合中应用覆盖，既保留请求重复项顺序，也不修改两侧原始输入。
-        let mut merged = defaults.clone();
-        let mut replaced = Vec::<String>::new();
-        for entry in &request.entries {
-            if is_sensitive_name(&entry.name) {
-                // 对认证、cookie 等项拒绝默认/请求之间的含混合并。
-                if defaults.contains_normalized(&entry.name) {
+        // 先排除所有待覆盖项，避免把随后会被移除的默认值计入最终预算。
+        let mut merged = Self::with_capacity(defaults.len() + request.len());
+        for entry in &defaults.entries {
+            if request.contains_normalized(&entry.name) {
+                if is_sensitive_name(&entry.name) {
                     return Err(HttpError::DuplicateSensitiveHeader);
                 }
-                if merged.contains_normalized(&entry.name) {
-                    return Err(HttpError::DuplicateSensitiveHeader);
-                }
-            } else if !replaced.iter().any(|name| name == &entry.name) {
-                merged.remove_normalized(&entry.name);
-                replaced.push(entry.name.clone());
+                continue;
             }
-            merged.push_entry(entry.name.clone(), entry.value.clone())?;
+            merged.push_request_entry(entry.name.clone(), entry.value.clone())?;
+        }
+        // 显式项也可能来自响应，按同一规则追加，保留普通重复项的顺序。
+        for entry in &request.entries {
+            merged.push_request_entry(entry.name.clone(), entry.value.clone())?;
         }
         Ok(merged)
     }
@@ -185,6 +179,15 @@ impl HttpHeaders {
     /// 返回名称和值的累计字节数，不包含传输层分隔符开销。
     pub(super) fn total_bytes(&self) -> usize {
         self.total_bytes
+    }
+
+    /// 追加名称和值已校验的请求项，拒绝同一敏感名称出现多次。
+    fn push_request_entry(&mut self, name: String, value: Vec<u8>) -> Result<(), HttpError> {
+        // 普通项可重复；敏感项先按规范化名称判重，再计入最终请求的预算。
+        if is_sensitive_name(&name) && self.contains_normalized(&name) {
+            return Err(HttpError::DuplicateSensitiveHeader);
+        }
+        self.push_entry(name, value)
     }
 
     /// 在条目数及总字节预算允许时提交一个已校验项，否则保持集合不变。
@@ -292,4 +295,39 @@ fn is_token_byte(byte: u8) -> bool {
             | b'|'
             | b'~'
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{HttpError, HttpHeaders};
+
+    #[test]
+    fn header_merge_rejects_reused_multivalue_response_on_either_side() {
+        let mut response = HttpHeaders::new();
+        response.append_internal("Set-Cookie", "a=1").unwrap();
+        let empty = HttpHeaders::new();
+        assert_eq!(HttpHeaders::merge(&response, &empty).unwrap(), response);
+        assert_eq!(HttpHeaders::merge(&empty, &response).unwrap(), response);
+        assert_eq!(
+            HttpHeaders::merge(&response, &response),
+            Err(HttpError::DuplicateSensitiveHeader)
+        );
+
+        response.append_internal("set-cookie", "b=2").unwrap();
+        assert_eq!(
+            response.iter().collect::<Vec<_>>(),
+            [("set-cookie", b"a=1".as_slice()), ("set-cookie", b"b=2")]
+        );
+
+        assert_eq!(
+            [
+                HttpHeaders::merge(&response, &empty),
+                HttpHeaders::merge(&empty, &response),
+            ],
+            [
+                Err(HttpError::DuplicateSensitiveHeader),
+                Err(HttpError::DuplicateSensitiveHeader),
+            ]
+        );
+    }
 }

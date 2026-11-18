@@ -45,6 +45,58 @@ fn hmac_round_trip_uses_fixed_algorithm_and_generic_claims() {
 }
 
 #[test]
+fn wide_integer_claims_keep_the_exact_signed_json_and_typed_values() {
+    #[derive(Debug, Deserialize, PartialEq, Serialize)]
+    struct WideClaims {
+        unsigned: [u128; 2],
+        signed: i128,
+        exp: u64,
+    }
+
+    let claims = WideClaims {
+        unsigned: [u128::from(u64::MAX) + 1, u128::MAX],
+        signed: i128::MIN,
+        exp: 2_000_000_000,
+    };
+    let codec = codec(JwtValidation::new());
+    let expected = jsonwebtoken::encode(
+        &BackendHeader::new(BackendAlgorithm::HS256),
+        &claims,
+        &BackendEncodingKey::from_secret(&[0x11; 32]),
+    )
+    .unwrap();
+    assert!(codec.encode(&claims).unwrap() == expected);
+    assert_eq!(codec.decode_at::<WideClaims>(&expected, 1).unwrap(), claims);
+}
+
+#[test]
+fn wide_numeric_date_is_rejected_after_signature_before_typed_claims() {
+    #[derive(Serialize)]
+    struct WideDate {
+        exp: u128,
+    }
+
+    let codec = codec(JwtValidation::new());
+    let claims = WideDate { exp: u128::MAX };
+    let token = codec.encode(&claims).unwrap();
+    // 目标类型无法读取 JSON object；错误优先级仍为验签、标准项、业务类型。
+    assert!(matches!(
+        codec.decode_at::<String>(&token, 1),
+        Err(JwtError::InvalidClaim { claim: "exp" })
+    ));
+    let wrong_key_token = jsonwebtoken::encode(
+        &BackendHeader::new(BackendAlgorithm::HS256),
+        &claims,
+        &BackendEncodingKey::from_secret(&[0x22; 32]),
+    )
+    .unwrap();
+    assert!(matches!(
+        codec.decode_at::<String>(&wrong_key_token, 1),
+        Err(JwtError::InvalidToken { segment: "token" })
+    ));
+}
+
+#[test]
 fn invalid_rsa_der_is_a_key_error_at_decode_operation() {
     let verification = JwtVerificationKey::from_rsa_der([0x01, 0x02, 0x03]).unwrap();
     let codec = JwtCodec::new(

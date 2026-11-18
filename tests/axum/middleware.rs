@@ -310,6 +310,11 @@ async fn catch_panic_returns_sanitized_500() {
     });
     let response = http_request(addr, "/panic", "").await;
     assert!(response.starts_with("HTTP/1.1 500"));
+    let (headers, body) = response.split_once("\r\n\r\n").unwrap();
+    assert!(headers
+        .lines()
+        .any(|line| line.eq_ignore_ascii_case("content-type: text/plain; charset=utf-8")));
+    assert_eq!(body, "Service panicked");
     assert!(!response.contains("sensitive-panic-payload"));
     tx.send(()).unwrap();
     running.await.unwrap().unwrap();
@@ -523,9 +528,9 @@ async fn unchecked_forwarded_governor_uses_forwarded_client_key() {
     task.await.unwrap().unwrap();
 }
 
-#[cfg(all(feature = "axum-tower-http", feature = "tracing"))]
+#[cfg(feature = "axum-tower-http")]
 #[tokio::test(flavor = "current_thread")]
-async fn trace_uses_matched_route_and_redacts_raw_request_data() {
+async fn panic_and_enabled_request_traces_redact_sensitive_data() {
     use std::{
         io::Write,
         sync::{Arc, Mutex},
@@ -556,12 +561,18 @@ async fn trace_uses_matched_route_and_redacts_raw_request_data() {
         .with_ansi(false)
         .with_writer(Buffer(bytes.clone()))
         .finish();
-    let _guard = subscriber::set_default(subscriber);
-    let server = AxumApp::from_router(Router::new().route("/items/{id}", get(|| async { "ok" })))
-        .into_server_builder()
-        .with_http_trace()
-        .build()
-        .unwrap();
+    // 该集成测试进程只有此处安装订阅器，覆盖服务任务及其他线程已注册的 callsite。
+    subscriber::set_global_default(subscriber).unwrap();
+    let server = AxumApp::from_router(
+        Router::new()
+            .route("/items/{id}", get(|| async { "ok" }))
+            .route("/panic", get(sensitive_panic_handler)),
+    )
+    .into_server_builder()
+    .with_catch_panic();
+    #[cfg(feature = "tracing")]
+    let server = server.with_http_trace();
+    let server = server.build().unwrap();
     let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
     let addr = listener.local_addr().unwrap();
     let (tx, rx) = oneshot::channel();
@@ -580,14 +591,22 @@ async fn trace_uses_matched_route_and_redacts_raw_request_data() {
     )
     .await
     .starts_with("HTTP/1.1 200"));
+    assert!(http_request(addr, "/panic", "")
+        .await
+        .starts_with("HTTP/1.1 500"));
     assert!(http_request(addr, "/missing?query-secret=hidden", "")
         .await
         .starts_with("HTTP/1.1 404"));
     tx.send(()).unwrap();
     task.await.unwrap().unwrap();
     let output = String::from_utf8(bytes.lock().unwrap().clone()).unwrap();
-    assert!(output.contains("/items/{id}"));
-    assert!(output.contains("<unmatched>"));
+    assert!(output.contains("service_panic"), "{output}");
+    assert!(!output.contains("sensitive-panic-payload"));
+    #[cfg(feature = "tracing")]
+    {
+        assert!(output.contains("/items/{id}"));
+        assert!(output.contains("<unmatched>"));
+    }
     assert!(!output.contains("request_id=<missing>"));
     assert!(!output.contains("query-secret"));
     assert!(!output.contains("header-secret"));

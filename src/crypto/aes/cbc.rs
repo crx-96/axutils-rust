@@ -8,51 +8,31 @@ use crate::crypto::CryptoError;
 
 use super::{AesKey, AesKeyBits};
 
-pub(super) fn encrypt(plaintext: &[u8], key: &AesKey, iv: &[u8]) -> Result<Vec<u8>, CryptoError> {
-    let key_bytes = key.key_bytes();
-    let block = 16usize;
-    let blocks = plaintext.len() / block;
-    let padded_len = blocks
-        .checked_add(1)
-        .and_then(|blocks| blocks.checked_mul(block))
-        .ok_or(CryptoError::OutputTooLarge {
-            operation: "aes_cbc_encrypt",
-        })?;
-    let mut out = Vec::new();
-    out.try_reserve_exact(padded_len)
-        .map_err(|_| CryptoError::OutputTooLarge {
-            operation: "aes_cbc_encrypt",
-        })?;
-    out.resize(padded_len, 0);
-
+/// 在主体前 `plaintext_len` 字节上应用 PKCS#7，并将密文写回同一主体。
+pub(super) fn encrypt_in_place(
+    body: &mut [u8],
+    plaintext_len: usize,
+    key: &AesKey,
+    iv: &[u8],
+) -> Result<(), CryptoError> {
+    // 同一套填充和错误映射用于所有密钥长度，出错时由持有主体的容器层擦除。
     macro_rules! encrypt_with {
         ($cipher_ty:ty) => {{
-            let enc = match <$cipher_ty>::new_from_slices(key_bytes, iv) {
-                Ok(enc) => enc,
-                Err(_) => {
-                    out.as_mut_slice().zeroize();
-                    return Err(CryptoError::Encrypt);
-                }
-            };
-            match enc.encrypt_padded_b2b::<Pkcs7>(plaintext, &mut out) {
-                Ok(written) => written.len(),
-                Err(_) => {
-                    out.as_mut_slice().zeroize();
-                    return Err(CryptoError::Encrypt);
-                }
-            }
+            let enc = <$cipher_ty>::new_from_slices(key.key_bytes(), iv)
+                .map_err(|_| CryptoError::Encrypt)?;
+            enc.encrypt_padded::<Pkcs7>(body, plaintext_len)
+                .map(|_| ())
+                .map_err(|_| CryptoError::Encrypt)
         }};
     }
-
-    let written = match key.bits() {
+    match key.bits() {
         AesKeyBits::Aes128 => encrypt_with!(::cbc::Encryptor<Aes128>),
         AesKeyBits::Aes192 => encrypt_with!(::cbc::Encryptor<Aes192>),
         AesKeyBits::Aes256 => encrypt_with!(::cbc::Encryptor<Aes256>),
-    };
-    out.truncate(written);
-    Ok(out)
+    }
 }
 
+/// 检查块边界，解密并移除 PKCS#7 填充，失败时擦除部分明文。
 pub(super) fn decrypt(ciphertext: &[u8], key: &AesKey, iv: &[u8]) -> Result<Vec<u8>, CryptoError> {
     if !ciphertext.len().is_multiple_of(16) {
         return Err(CryptoError::Decrypt);

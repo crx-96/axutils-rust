@@ -99,7 +99,9 @@ impl CompletedCache {
             let Some(oldest) = self.order.pop_front() else {
                 break;
             };
-            self.remove(&oldest);
+            // 队首已经弹出，只撤销索引和字节计数。
+            let entry = self.entries.remove(&oldest).expect("缓存队列与索引同步");
+            self.body_bytes -= entry.response.body().len();
         }
         // 预算检查完成后统一提交顺序、索引和字节计数。
         self.body_bytes += response_body_len;

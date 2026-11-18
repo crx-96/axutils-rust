@@ -9,7 +9,7 @@
 
 ```toml
 [dependencies]
-axutils = { version = "2.0", features = ["base64", "md5", "aes", "encoding_rs"] }
+axutils = { version = "2.1", features = ["base64", "md5", "aes", "encoding_rs"] }
 ```
 
 | feature | 能力 |
@@ -66,7 +66,9 @@ assert_eq!(CryptoUtils::md5("abc").len(), 16);
 
 新代码应持有 `AesCipher` 实例以限定密钥生命周期。`Gcm` 提供认证加密；`CbcPkcs7` 不认证密文，
 仅用于兼容协议，且上层必须另行提供完整性保护。`encrypt` 的容器路径生成并携带随机 IV/nonce；
-`*_with_iv` 用于协议互操作，调用方必须按模式提供正确长度且保证 GCM nonce 不重复。
+GCM 容器依次存放 12 字节 nonce、密文和 16 字节标签，CBC 容器依次存放 16 字节 IV 和带
+PKCS#7 填充的密文。两种模式均在最终容器的主体区域完成加密。`*_with_iv` 仅处理容器前缀之后的
+主体，调用方必须按模式提供正确长度的 IV/nonce，并保证同一 GCM 密钥下的 nonce 不重复。
 
 ```rust
 use axutils::crypto::{AesCipher, AesMode};

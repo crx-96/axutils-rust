@@ -1605,39 +1605,60 @@ async fn async_temp_context_supports_drop_async_and_close() {
 }
 
 #[cfg(feature = "fs-temp-async")]
-#[tokio::test]
-async fn async_temp_drop_cancellation_uses_backend_drop_fallback() {
-    use std::{future::Future, pin::Pin, task::Context};
+#[test]
+fn async_temp_drop_cancellation_uses_backend_drop_fallback() {
+    use std::{
+        future::Future,
+        sync::mpsc,
+        task::{Context, Waker},
+    };
+    use tokio::runtime::Builder;
+
+    fn assert_cancelled_cleanup(cleanup: impl Future<Output = ()>, path: &Path) {
+        let mut future = Box::pin(cleanup);
+        let mut cx = Context::from_waker(Waker::noop());
+        assert!(future.as_mut().poll(&mut cx).is_pending());
+        assert!(path.try_exists().expect("check path before cancellation"));
+        drop(future);
+        assert!(
+            !path.try_exists().expect("check path after cancellation"),
+            "Drop should synchronously remove {}",
+            path.display()
+        );
+    }
 
     let temp = TempDir::new();
-    let file = FsUtils::create_temp_file_async()
-        .await
+    let runtime = Builder::new_current_thread()
+        .max_blocking_threads(1)
+        .build()
+        .expect("build test runtime");
+    let context = FsUtils::with_temp_config(FsTempConfig::default().with_directory(temp.path()));
+    let file = runtime
+        .block_on(context.create_temp_file_async())
         .expect("create cancellable async temp file");
     let file_path = file.path().to_path_buf();
-    let mut future = Pin::from(Box::new(file.drop_async()));
-    let mut context = Context::from_waker(std::task::Waker::noop());
-    let _ = future.as_mut().poll(&mut context);
-    drop(future);
-    assert!(
-        !file_path.exists(),
-        "cancelled file cleanup should use Drop fallback"
-    );
-
-    let directory = FsUtils::create_temp_dir_async()
-        .await
+    let directory = runtime
+        .block_on(context.create_temp_dir_async())
         .expect("create cancellable async temp dir");
     let directory_path = directory.path().to_path_buf();
-    FsUtils::write_async(directory.path().join("payload.bin"), b"payload")
-        .await
+    fs::write(directory.path().join("payload.bin"), b"payload")
         .expect("write cancellable directory payload");
-    let mut future = Pin::from(Box::new(directory.drop_async()));
-    let mut context = Context::from_waker(std::task::Waker::noop());
-    let _ = future.as_mut().poll(&mut context);
-    drop(future);
-    assert!(
-        !directory_path.exists(),
-        "cancelled directory cleanup should use Drop fallback"
-    );
+
+    // 资源就绪后才占用唯一的阻塞线程；断言失败时 release 析构也会唤醒它。
+    let (started, ready) = mpsc::channel();
+    let (release, wait_for_release) = mpsc::channel::<()>();
+    let blocker = runtime.spawn_blocking(move || {
+        started.send(()).expect("signal blocker ready");
+        let _ = wait_for_release.recv();
+    });
+    ready.recv().expect("wait for blocking thread");
+    {
+        let _entered = runtime.enter();
+        assert_cancelled_cleanup(file.drop_async(), &file_path);
+        assert_cancelled_cleanup(directory.drop_async(), &directory_path);
+    }
+    drop(release);
+    runtime.block_on(blocker).expect("join blocking task");
     temp.cleanup();
 }
 

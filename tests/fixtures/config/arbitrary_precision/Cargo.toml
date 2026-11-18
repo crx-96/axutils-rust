@@ -1,0 +1,19 @@
+[package]
+name = "config-arbitrary-precision-regression"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[workspace]
+
+[features]
+jwt = ["axutils/jwt", "dep:serde"]
+
+[dependencies]
+axutils = { path = "../../../..", default-features = false, features = ["config"] }
+serde = { version = "1", features = ["derive"], optional = true }
+serde_json = { version = "1", features = ["arbitrary_precision"] }
+
+[[test]]
+name = "untyped_json"
+path = "untyped_json.rs"

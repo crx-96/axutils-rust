@@ -1,10 +1,7 @@
+use ::redis::{FromRedisValue, ParsingError, Value};
 use serde::de::DeserializeOwned;
 
-use super::super::{
-    codec, commands,
-    config::RedisConfig,
-    error::{RedisError, RedisTransportErrorKind},
-};
+use super::super::{codec, commands, config::RedisConfig, error::RedisError};
 
 /// 检查所有存在值的单值与累计响应预算，保留缺失位置及原始二进制内容。
 pub(super) fn check_optional_values(
@@ -43,39 +40,69 @@ pub(super) fn decode_optional_values<T: DeserializeOwned>(
         .collect()
 }
 
-#[allow(clippy::type_complexity)]
-/// 将扁平 HGETALL 响应转为 field/value 对，并检查形状、field、项数与字节预算。
-pub(super) fn decode_hash_entries(
-    flat: Vec<Vec<u8>>,
-    config: &RedisConfig,
-) -> Result<Vec<(Vec<u8>, Vec<u8>)>, RedisError> {
-    // HGETALL 必须交替给出 field 和 value；先拒绝不完整的协议结构。
-    if !flat.len().is_multiple_of(2) {
-        return Err(RedisError::Transport(RedisTransportErrorKind::Protocol));
+/// 按线序排列的二进制 field/value，不排序也不合并同名 field。
+type HashEntries = Vec<(Vec<u8>, Vec<u8>)>;
+
+/// HGETALL 的协议回复，在命令执行层解码，使协议错误沿用驱动的连接处置和诊断路径。
+pub(super) struct HashReply(
+    /// 已校验形状和元素类型，尚待应用客户端预算的键值对。
+    pub(super) HashEntries,
+);
+
+impl FromRedisValue for HashReply {
+    /// 只接受 RESP2 的偶数扁平数组和 RESP3 map，直接转移两端字节的所有权。
+    fn from_redis_value(reply: Value) -> Result<Self, ParsingError> {
+        // 两种容器共用元素解码；按 wire 顺序收集，结构错误先于客户端预算错误。
+        let entries = match without_attributes(reply) {
+            Value::Map(pairs) => pairs.into_iter().map(hash_pair).collect::<Result<_, _>>()?,
+            Value::Array(items) if items.len().is_multiple_of(2) => {
+                let mut items = items.into_iter();
+                let mut entries = Vec::with_capacity(items.len() / 2);
+                while let (Some(field), Some(value)) = (items.next(), items.next()) {
+                    entries.push(hash_pair((field, value))?);
+                }
+                entries
+            }
+            _ => return Err(ParsingError::from("invalid HGETALL reply shape")),
+        };
+        Ok(Self(entries))
     }
-    let count = flat.len() / 2;
-    if count > config.max_collection_items {
+}
+
+/// RESP3 属性属于元数据，可装饰整条回复，也可单独装饰 field 或 value。
+fn without_attributes(mut reply: Value) -> Value {
+    while let Value::Attribute { data, .. } = reply {
+        reply = *data;
+    }
+    reply
+}
+
+/// 保留原始二进制内容，拒绝将整数、集合或 null 隐式转换成字节。
+fn hash_pair((field, value): (Value, Value)) -> Result<(Vec<u8>, Vec<u8>), ParsingError> {
+    match (without_attributes(field), without_attributes(value)) {
+        (Value::BulkString(field), Value::BulkString(value)) => Ok((field, value)),
+        _ => Err(ParsingError::from("expected HGETALL bulk strings")),
+    }
+}
+
+/// 检查整个 HGETALL 响应的项数、field 和字节预算，成功后按原序返回。
+pub(super) fn check_hash_entries(
+    entries: HashEntries,
+    config: &RedisConfig,
+) -> Result<HashEntries, RedisError> {
+    // 驱动已检查配对形状，先判项数，再检查每对的 field、单值和累计字节。
+    if entries.len() > config.max_collection_items {
         return Err(RedisError::CollectionTooLarge {
             limit: config.max_collection_items,
         });
     }
     let mut response_bytes = 0;
-    let mut entries = Vec::with_capacity(count);
-    let mut values = flat.into_iter();
-    // 逐对校验并转移拥有权，不复制值内容；任何异常都放弃整批返回值。
-    for _ in 0..count {
-        let Some(field_value) = values.next() else {
-            return Err(RedisError::Transport(RedisTransportErrorKind::Protocol));
-        };
-        if field_value.is_empty() || field_value.len() > config.max_key_bytes {
+    for (field, value) in &entries {
+        if field.is_empty() || field.len() > config.max_key_bytes {
             return Err(RedisError::InvalidField);
         }
-        response_bytes = add_response_part(response_bytes, field_value.len(), config)?;
-        let Some(value) = values.next() else {
-            return Err(RedisError::Transport(RedisTransportErrorKind::Protocol));
-        };
-        response_bytes = commands::add_response_bytes(response_bytes, &value, config)?;
-        entries.push((field_value, value));
+        response_bytes = add_response_part(response_bytes, field.len(), config)?;
+        response_bytes = commands::add_response_bytes(response_bytes, value, config)?;
     }
     Ok(entries)
 }

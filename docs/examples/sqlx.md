@@ -6,14 +6,14 @@ SQLx 能力按实际数据库 driver 选择。只启用一个 driver 可减少�
 ```toml
 [dependencies]
 # 三选一：sqlx-postgres、sqlx-mysql 或 sqlx-sqlite
-axutils = { version = "2.0", features = ["sqlx-postgres"] }
+axutils = { version = "2.1", features = ["sqlx-postgres"] }
 ```
 
 使用全部 driver 时：
 
 ```toml
 [dependencies]
-axutils = { version = "2.0", features = ["sqlx"] }
+axutils = { version = "2.1", features = ["sqlx"] }
 ```
 
 `SqlxConfig` 可在本地解析 PostgreSQL、MySQL/MariaDB 与 SQLite URL scheme；这不代表每种连接都
@@ -43,9 +43,9 @@ async fn connect() -> Result<SqlxClient, SqlxError> {
 `axutils::sqlx` tracing 事件仍记录固定操作、耗时和错误分类。应用自行创建的 SQLx 连接及 SQLx
 其他底层诊断不在这项语句日志设置的控制范围内。
 
-内存 SQLite 使用唯一连接，并禁用本库池的自动空闲淘汰、最大寿命淘汰和 acquire 前 ping，
-避免正常复用期间因这些回收策略或 ping 取消而丢失数据库。普通数据库继续使用 SQLx 的默认
-连接回收及健康检查策略；内存数据库仍不提供持久化保证，真实连接丢失和显式关闭会释放其状态。
+SQLite 内存库和空文件名临时库（如 `sqlite:`）使用唯一连接，并禁用自动空闲淘汰、最大寿命
+淘汰和 acquire 前 ping，避免正常复用期间丢失数据库。关闭池后再打开 `sqlite:` 会得到新的空库。
+具名文件库（如 `sqlite://file.db`）继续使用 SQLx 的默认连接回收及健康检查策略。
 
 首次 `connect` 会安装进程级 SQLx Any 默认 drivers；如果应用已经用 SQLx 自定义注册器安装过
 Any drivers，当前实现可能 panic，因此本版本要求 axutils 是进程中唯一的 Any driver 注册方。

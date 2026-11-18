@@ -136,10 +136,12 @@ impl RedisClient {
         &self,
         key_value: K,
     ) -> Result<Vec<(Vec<u8>, Vec<u8>)>, RedisError> {
+        // 先本地校验 key，再请求整组 field/value。
         let key_value = commands::key(key_value, &self.inner.config)?;
         let command = commands::command("HGETALL", [key_value]);
-        let flat: Vec<Vec<u8>> = self.execute_async(&command).await?;
-        decode::decode_hash_entries(flat, &self.inner.config)
+        // 在执行层严格解码协议回复，再对整批二进制数据应用本地预算。
+        let decode::HashReply(entries) = self.execute_async(&command).await?;
+        decode::check_hash_entries(entries, &self.inner.config)
     }
 
     /// 异步删除一个 Hash field。

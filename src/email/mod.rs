@@ -4,6 +4,8 @@
 //! 要求启用 `email-async` feature。构造客户端不要求 Tokio runtime；首次异步发送必须在调用
 //! 方已有的 Tokio runtime 中执行，且本模块不会替调用方创建 runtime。
 
+#[cfg(feature = "email-async")]
+mod async_smtp;
 mod client;
 mod config;
 mod error;

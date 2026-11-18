@@ -4,6 +4,23 @@
 重大重构同时提供简短的结构与维护摘要；检查结果由实际验收交付说明，不将未执行的测试记为通过。
 每次修改或增加功能时，先读取 `Cargo.toml` 中的 `[package].version`，再在对应版本条目中补充记录。
 
+## [2.1.0]
+
+### Compatibility
+
+- 使用 `panic = "abort"` 的调度器宿主需迁移到 `Scheduler::with_time_runtime`，并用同一个调度器实例注册任务。原先自行创建的 runtime 即使启用了时间，也会返回 `RuntimeRequired`。这是为了避免在缺少计时驱动时探测导致进程终止。`panic = "unwind"` 的宿主可继续使用现有计时 runtime。
+
+### Fixed
+
+- Axum 捕获 panic 时仅记录固定错误分类，500 响应和中间件日志均不回显 panic 消息。仅启用 `axum-tower-http` 时也保留原有的错误事件。
+- 异步 SMTP 将配置时限应用于整次传输。等待最终回复超时或取消时直接释放在途连接，不自动重发。同步和异步发送都要求 DATA 的最终回复为 2xx；同步 SMTP 继续使用各次命令的 I/O 时限。
+- HTTP 合并请求头时先排除被覆盖的默认项，再检查最终集合的容量和敏感头唯一性。响应仍可包含多个 `Set-Cookie`。完成缓存逐出队首时直接更新索引和正文计数。
+- 无类型 JSON 在下游启用 `serde_json/arbitrary_precision` 时仍区分小数与普通对象，超出 `i64` 的整数字面量返回范围错误。JSON/YAML 数组借用字段名，dotenv 注释和行号支持 CR、LF 与 CRLF。
+- JWT 按通过预算检查的原始 JSON 签发。验签后，标准声明和业务字段读取同一份 payload，保留 `u128`、`i128` 精度。下游启用 `serde_json/arbitrary_precision` 时，数字仍按标量计入嵌套预算。
+- AES-GCM 与 AES-CBC 在最终输出缓冲区内完成加密，随机 IV 容器格式与显式 IV 接口保持兼容。
+- SQLite 根据实际文件名识别临时库和内存库，包括 `sqlite:file:` 和 `sqlite:%3Amemory%3A`。这些数据库固定使用单连接，保留已提交的表直到连接关闭。
+- Redis `HGETALL` 的同步和异步入口接受 RESP2 扁平数组及带可选属性的 RESP3 map，保留字段顺序与二进制值，拒绝畸形回复。失效队列只在需要等待时查找下次到期时间。
+
 ## [2.0.0]
 
 ### Compatibility

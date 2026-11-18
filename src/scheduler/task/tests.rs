@@ -1,4 +1,5 @@
 use super::*;
+use std::time::Duration;
 use tokio::runtime::Builder as RuntimeBuilder;
 
 #[test]
