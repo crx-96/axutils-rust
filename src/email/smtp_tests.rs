@@ -147,8 +147,6 @@ fn sync_checks_final_data_reply() {
         let (client, server) = fixture(EmailSecurity::ImplicitTls, WAIT, move |s| {
             receive_data(s);
             reply(s, response);
-            command(s, "QUIT\r\n");
-            reply(s, b"221 bye\r\n");
         });
         let result = client.send(message());
         if success {

@@ -1,10 +1,8 @@
 //! AES-GCM 加解密原语。
 
 use ::aes::{Aes128, Aes192, Aes256};
-use ::aes_gcm::{
-    aead::{array::typenum::U12, AeadInOut, KeyInit},
-    AesGcm, Key as GcmKey, Nonce as GcmNonce, Tag as GcmTag,
-};
+use ::aes_gcm::aead::consts::U12;
+use ::aes_gcm::{AeadInOut, AesGcm, Key as GcmKey, KeyInit, Nonce as GcmNonce, Tag as GcmTag};
 use ::zeroize::Zeroize;
 
 use crate::crypto::CryptoError;
