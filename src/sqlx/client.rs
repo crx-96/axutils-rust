@@ -93,7 +93,7 @@ impl SqlxClient {
 
     /// 开启原生 SQLx Any 事务。
     ///
-    /// 调用方必须显式 `commit` 或 `rollback`；drop 只作为回滚兜底。SQLx 0.9.0 没有为
+    /// 调用方必须显式 `commit` 或 `rollback`；drop 只作为回滚兜底。SQLx 0.9 没有为
     /// `Transaction` 直接实现 `Executor`，事务内执行应使用 `&mut *tx`。该返回值暴露 SQLx
     /// 原生事务和原生错误语义，因此调用方需要直接依赖匹配的 SQLx 版本并导入所需 trait。
     ///
@@ -245,6 +245,11 @@ mod tests {
             "sqlite:%3Amemory%3A",
             "sqlite:file::memory:",
             "sqlite:file:axutils-db%3Fmode=memory",
+            "sqlite://axutils-memdb?vfs=memdb",
+            "sqlite://axutils-memdb?vfs=other&vfs=m%65mdb",
+            "sqlite:file:axutils-memdb%3Fvfs=other%26vfs=memdb%26mode=rw",
+            "sqlite:file:axutils-memdb%3Fvfs=memdb%2500%25FF",
+            "sqlite:file:axutils-memdb%3Fvfs=other?vfs=memdb",
             "sqlite:file:axutils-db#fragment?mode=memory",
             "sqlite:file://localhost",
         ] {
@@ -299,6 +304,10 @@ mod tests {
             "sqlite://file.db?mode=rwc",
             "sqlite:file:named.db",
             "sqlite:file:?immutable=true",
+            "sqlite:db?vfs=memdb&vfs=other",
+            "sqlite:file:db%3Fvfs=memdb%26vfs=other",
+            "sqlite:file:db%3Fvfs=memdb?vfs=other",
+            "sqlite:file:db%3Fvfs=memdb?immutable=true",
             "sqlite:file:db%253Fmode=memory",
             "sqlite:///dir/:memory:",
             "sqlite://file.db/:memory:",

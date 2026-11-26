@@ -73,6 +73,24 @@ fn public_paths_and_config_boundaries_are_stable() {
         .is_err());
 }
 
+#[cfg(unix)]
+#[test]
+fn shutdown_without_runtime_returns_an_error_on_first_poll() {
+    use std::{
+        future::Future,
+        pin::pin,
+        task::{Context, Poll, Waker},
+    };
+
+    let mut future = pin!(TokioUtils::wait_for_shutdown());
+    assert!(matches!(
+        future
+            .as_mut()
+            .poll(&mut Context::from_waker(Waker::noop())),
+        Poll::Ready(Err(TokioError::RuntimeRequired))
+    ));
+}
+
 #[test]
 fn run_returns_value_rejects_nested_runtime_and_resumes_panic() {
     assert!(!TokioUtils::has_runtime());

@@ -139,6 +139,28 @@ fn receive_data(session: &mut Session) {
 }
 
 #[test]
+fn sync_send_times_out_waiting_for_smtp_greeting() {
+    // 回环监听套接字允许 TCP 建连，但不发送 SMTP 问候，让阻塞读取耗尽预算。
+    let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+    let mut config = config(
+        listener.local_addr().unwrap().port(),
+        EmailSecurity::StartTls,
+    )
+    .with_timeout(Duration::from_secs(1))
+    .unwrap();
+    config.host = Ipv4Addr::LOCALHOST.to_string();
+    let client = EmailClient::new(config).unwrap();
+    let result = client.send(message());
+    assert!(
+        matches!(
+            result,
+            Err(EmailError::Transport(EmailTransportErrorKind::Timeout))
+        ),
+        "{result:?}"
+    );
+}
+
+#[test]
 fn sync_checks_final_data_reply() {
     for (response, success) in [
         (b"250 accepted\r\n".as_slice(), true),

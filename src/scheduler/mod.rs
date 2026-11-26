@@ -108,7 +108,7 @@ impl Scheduler {
         self.shared.register(schedule, callback)
     }
 
-    /// 移除活动任务并发出取消请求；未知或已完成任务返回 `Ok(false)`。
+    /// 移除活动任务并发出取消请求。其他实例签发的标识、未知或已完成的任务均返回 `Ok(false)`。
     ///
     /// # Errors
     ///

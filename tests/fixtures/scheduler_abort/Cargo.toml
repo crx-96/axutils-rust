@@ -13,4 +13,4 @@ panic = "abort"
 
 [dependencies]
 axutils = { path = "../../..", default-features = false, features = ["scheduler"] }
-tokio = { version = "1.53.1", default-features = false, features = ["rt", "time", "sync"] }
+tokio = { version = "1.54.1", default-features = false, features = ["rt", "time", "sync"] }

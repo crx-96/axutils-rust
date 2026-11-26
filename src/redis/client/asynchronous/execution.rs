@@ -1,6 +1,8 @@
+use std::sync::Arc;
+
 use ::redis::{
     aio::{ConnectionManager, ConnectionManagerConfig},
-    AsyncConnectionConfig,
+    AsyncConnectionConfig, Client as UpstreamClient,
 };
 #[cfg(feature = "redis-cluster-async")]
 use ::redis::{cluster::ClusterConfig, cluster_async::ClusterConnection};
@@ -83,6 +85,7 @@ impl RedisClient {
     }
 
     #[cfg(feature = "redis-async")]
+    /// 同批普通命令共享一次首连结果，后续命令可重试失败或复用已连接的 manager。
     async fn async_single_connection(&self) -> Result<ConnectionManager, RedisError> {
         #[cfg(all(not(test), not(feature = "redis-cluster")))]
         let AsyncBackend::Single {
@@ -95,10 +98,29 @@ impl RedisClient {
         else {
             return Err(RedisError::UnsupportedMode);
         };
-        let mut guard = manager.lock().await;
-        if let Some(connection) = guard.as_ref() {
-            return Ok(connection.clone());
-        }
+        // 锁只保护轮次选择。已登记的调用持有旧轮的 Arc，返回失败时无需再修改槽。
+        let attempt = {
+            let mut current = manager.lock().await;
+            match current.get() {
+                Some(Ok(connection)) => return Ok(connection.clone()),
+                Some(Err(_)) => *current = Arc::default(),
+                None => {}
+            }
+            Arc::clone(&current)
+        };
+        // 由等待者驱动握手。初始化者被取消时 OnceCell 允许其他等待者接手；
+        // 所有调用取消后，没有独立的首连任务继续重试。
+        attempt
+            .get_or_init(|| self.connect_single_manager(client))
+            .await
+            .clone()
+    }
+
+    /// 在本轮初始化者的 future 内按配置建立单机 manager，记录实际握手的结果。
+    async fn connect_single_manager(
+        &self,
+        client: &UpstreamClient,
+    ) -> Result<ConnectionManager, RedisError> {
         let config = ConnectionManagerConfig::new()
             .set_number_of_retries(ASYNC_RECONNECT_RETRIES)
             .set_max_delay(ASYNC_RECONNECT_MAX_DELAY)
@@ -107,7 +129,8 @@ impl RedisClient {
         #[cfg(feature = "tracing")]
         let started = std::time::Instant::now();
         let connection_result = client
-            .get_connection_manager_lazy(config)
+            .get_connection_manager_with_config(config)
+            .await
             .map_err(|error| RedisError::from_upstream(&error));
         #[cfg(feature = "tracing")]
         match &connection_result {
@@ -126,10 +149,7 @@ impl RedisClient {
                 started,
             ),
         }
-        let connection = connection_result;
-        let connection = connection?;
-        *guard = Some(connection.clone());
-        Ok(connection)
+        connection_result
     }
 
     #[cfg(feature = "redis-cluster-async")]
@@ -255,7 +275,7 @@ impl RedisClient {
                 if !backend::should_discard_multiplexed_transaction_connection(&error) {
                     *slot.lock().await = Some(connection);
                 }
-                Err(RedisError::transaction_failure(&error))
+                Err(RedisError::transaction_failure(error))
             }
         }
     }

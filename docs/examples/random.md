@@ -8,7 +8,7 @@
 
 ```toml
 [dependencies]
-axutils = { version = "2.1", features = ["rand"] }
+axutils = { version = "3.0", features = ["rand"] }
 ```
 
 ```rust

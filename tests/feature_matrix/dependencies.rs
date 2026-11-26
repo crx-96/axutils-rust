@@ -310,21 +310,6 @@ pub(super) fn retained_features() {
     assert_tree_cache_budget();
 }
 
-pub(super) fn tree_cache_key_normalization_smoke() {
-    // This covers the normalizer without starting Cargo from the non-ignored test suite.
-    let first = normalized_feature_csv_for_test("tokio,axum,tokio");
-    let second = normalized_feature_csv_for_test("axum,tokio");
-    assert_eq!(first, second);
-    assert_eq!(first, "axum,tokio");
-}
-
-fn normalized_feature_csv_for_test(features: &str) -> String {
-    let mut values = features.split(',').collect::<Vec<_>>();
-    values.sort_unstable();
-    values.dedup();
-    values.join(",")
-}
-
 fn assert_has(tree: &str, package: &str, feature: &str) {
     assert!(
         has_package(tree, package),

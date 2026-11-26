@@ -159,7 +159,7 @@ impl EmailClient {
             let reply = self
                 .transport
                 .send(&message)
-                .map_err(|error| EmailError::from_smtp(&error))?;
+                .map_err(|error| EmailError::from_sync_smtp(&error))?;
             require_completion(&reply)
         });
         // 观测只记录稳定分类及耗时，不改变发送结果。

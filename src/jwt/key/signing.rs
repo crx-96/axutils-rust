@@ -70,9 +70,11 @@ impl JwtSigningKey {
                 kind: "hmac_secret",
             });
         }
+        let backend = EncodingKey::from_secret(bytes)
+            .map_err(|error| map_backend_key_error(&error, "hmac_secret"))?;
         Ok(Self {
             family: KeyFamily::Hmac,
-            backend: EncodingKey::from_secret(bytes),
+            backend,
             rsa_modulus_bits: None,
             ec_curve: None,
             rsa_der_kind: RsaDerKind::Unknown,

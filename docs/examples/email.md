@@ -5,7 +5,7 @@
 
 ```toml
 [dependencies]
-axutils = { version = "2.1", features = ["email"] }
+axutils = { version = "3.0", features = ["email"] }
 ```
 
 ## 实例 API
@@ -66,7 +66,7 @@ SMTP 认证拒绝归为 `Authentication`，其他已解析的 4xx/5xx 拒绝归�
 
 ```toml
 [dependencies]
-axutils = { version = "2.1", features = ["email-async"] }
+axutils = { version = "3.0", features = ["email-async"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 ```
 

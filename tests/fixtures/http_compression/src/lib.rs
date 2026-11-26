@@ -15,14 +15,12 @@ mod tests {
 
     const PLAIN: &[u8] = b"payload";
     // 固定有效压缩帧；测试不依赖额外编码库生成输入。
+    const GZIP: &[u8] = &[
+        31, 139, 8, 0, 0, 0, 0, 0, 2, 10, 43, 72, 172, 204, 201, 79, 76, 1, 0, 21, 106, 44, 66, 7,
+        0, 0, 0,
+    ];
     const ENCODED: &[(&str, &[u8])] = &[
-        (
-            "gzip",
-            &[
-                31, 139, 8, 0, 0, 0, 0, 0, 2, 10, 43, 72, 172, 204, 201, 79, 76, 1, 0, 21, 106, 44,
-                66, 7, 0, 0, 0,
-            ],
-        ),
+        ("gzip", GZIP),
         (
             "br",
             &[
@@ -39,6 +37,14 @@ mod tests {
     ];
 
     fn server(encoding: &'static str, body: &'static [u8]) -> (String, thread::JoinHandle<String>) {
+        server_with_length(encoding, body, body.len())
+    }
+
+    fn server_with_length(
+        encoding: &'static str,
+        body: &'static [u8],
+        declared_length: usize,
+    ) -> (String, thread::JoinHandle<String>) {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         listener.set_nonblocking(true).unwrap();
         let url = format!("http://{}/", listener.local_addr().unwrap());
@@ -69,7 +75,7 @@ mod tests {
                 request.push(byte[0]);
             }
             // 一次写入完整响应，避免客户端拒绝超大 Content-Length 时与分段写入竞争。
-            let mut response = format!("HTTP/1.1 200 OK\r\nContent-Encoding: {encoding}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len()).into_bytes();
+            let mut response = format!("HTTP/1.1 200 OK\r\nContent-Encoding: {encoding}\r\nContent-Length: {declared_length}\r\nConnection: close\r\n\r\n").into_bytes();
             response.extend_from_slice(body);
             stream.write_all(&response).unwrap();
             stream.flush().unwrap();
@@ -133,6 +139,41 @@ mod tests {
                 .to_ascii_lowercase()
                 .contains("accept-encoding:"));
         }
+    }
+
+    #[test]
+    fn sync_classifies_corrupt_gzip_and_early_disconnect() {
+        use axutils::http::HttpTransportErrorKind::{Connection, Other};
+
+        let client = client();
+        let corrupt = b"not a gzip stream";
+        let (url, handle) = server("gzip", corrupt);
+        let result = client.execute(HttpRequest::new(HttpMethod::Get, url).unwrap());
+        handle.join().unwrap();
+        if cfg!(feature = "compression") {
+            assert!(matches!(
+                result,
+                Err(HttpError::Transport { kind: Other, .. })
+            ));
+        } else {
+            assert_eq!(result.unwrap().body(), corrupt);
+        }
+
+        // 在同一个有效 gzip 帧的尾部断开连接，Content-Length 仍声明整帧长度。
+        let (url, handle) = server_with_length("gzip", &GZIP[..GZIP.len() - 1], GZIP.len());
+        let error = client
+            .execute(HttpRequest::new(HttpMethod::Get, url).unwrap())
+            .unwrap_err();
+        handle.join().unwrap();
+        let expected = if cfg!(feature = "compression") {
+            Other
+        } else {
+            Connection
+        };
+        assert!(
+            matches!(error, HttpError::Transport { kind, .. } if kind == expected),
+            "{error:?}"
+        );
     }
 
     #[test]

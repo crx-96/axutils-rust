@@ -48,7 +48,7 @@ MSRV 自动读取 manifest 的 `package.rust-version`，不在工作流另存版
 要求预先存在锁文件的 `--locked`。更新依赖或 Rust stable 后出现失败，应按实际诊断处理。
 
 Feature matrix 和 Markdown runner 会在临时 crate 中执行 `cargo --offline`，因此 CI 先执行
-`cargo fetch`；HTTP 压缩契约还会单独 fetch 对应 fixture 的 manifest。全量 ignored 仅针对
+`cargo fetch`，并按 HTTP 压缩、Config/JWT 两个下游 fixture 的 manifest 预取额外依赖。全量 ignored 仅针对
 `feature_matrix` 和 `docs_examples` 两个测试目标，不开启 SMTP、Redis 单机或 Cluster 的 live
 用例，也不需要 `config/` 或服务凭据。Markdown 编译通过的含义仍见下方 harness 说明。
 
@@ -99,6 +99,7 @@ cargo check --no-default-features --features config-yaml
 cargo check --no-default-features --features config-toml
 cargo check --no-default-features --features config-ini
 cargo test --no-default-features --features config-async,config-yaml,config-toml,config-ini --test config
+cargo fetch --manifest-path tests/fixtures/config/arbitrary_precision/Cargo.toml
 cargo test --no-default-features --test feature_matrix config_and_jwt_downstream_arbitrary_precision_contract -- --ignored
 ```
 
@@ -208,14 +209,24 @@ cargo test --doc --all-features -- --test-threads=4
 cargo test --no-default-features --test feature_matrix
 ```
 
-完整 ignored 矩阵：
+完整 ignored 矩阵首次运行时，先准备根包和下游 fixture 依赖：
 
 ```bash
+cargo fetch
+cargo fetch --manifest-path tests/fixtures/http_compression/Cargo.toml
+cargo fetch --manifest-path tests/fixtures/config/arbitrary_precision/Cargo.toml
 cargo test --no-default-features --test feature_matrix -- --ignored --test-threads=1 --nocapture
 ```
 
-矩阵由 `tests/feature_matrix/` 的声明式 case 和共享 runner 组织，使用统一 scratch fixture，
-复用相同 feature/edge/invert 的 `cargo tree` 结果；正向场景尽量批量，负向场景保留独立诊断。
+Windows x64 缺少 NASM 时，可为本次测试进程设置 `AWS_LC_SYS_PREBUILT_NASM=1`，让 AWS-LC 使用其随包提供的预编译对象。
+
+`tests/feature_matrix/` 中的 14 个语义组和 3 个下游契约 fixture 共用
+`CARGO_TARGET_TMPDIR/feature-matrix` 构建缓存。每组使用私有源码副本、manifest 和
+`Cargo.lock`，结束时清理副本，保留编译产物供后续组和后续运行复用。缓存随外层
+`--target-dir` 定位，使用相同目标目录运行 `cargo clean` 即可清理。
+
+相同 feature/edge/invert 的 `cargo tree` 查询在本次运行中复用结果。负向 API 用例逐项检查
+编译器诊断，已移除的 provider feature 则核对 Cargo 解析错误中的完整 feature 名称。
 覆盖范围包括：
 
 - 默认正常依赖为空；
@@ -249,7 +260,7 @@ cargo test --no-default-features --test docs_examples
 cargo test --no-default-features --test docs_examples -- --ignored --test-threads=1 --nocapture
 ```
 
-局部排查可设置：
+局部排查可按文档路径或代码块编号过滤。过滤条件未匹配任何代码块时，测试会报错。
 
 ```bash
 AXUTILS_DOCS_EXAMPLE_FILTER=docs/examples/http.md \
@@ -266,7 +277,8 @@ Remove-Item Env:AXUTILS_DOCS_EXAMPLE_FILTER
 
 Markdown harness 用“文档默认 feature/直接依赖 + 邻接 fence override”描述示例配置。
 正向代码块按“axutils feature + 完整直接依赖语义”分组，一个 scratch crate 使用多个 bin 一次
-检查；组失败后才逐 bin 回退。`compile_fail` 用例保持独立并匹配稳定诊断。新增 fence 纳入双向
+检查；组失败后才逐 bin 回退。各次运行保留独立的源码和 manifest，正向编译共用外层目标目录下的
+`tmp/docs-examples` 缓存；正向 bin 名包含文档路径、代码块编号和源码的摘要，避免并行过滤时复用其他示例的产物。`compile_fail` 用例保持独立并匹配稳定诊断。新增 fence 纳入双向
 枚举；未闭合 fence、未声明的活动 `cfg` 和敏感值作为 harness 失败处理。
 
 此 harness 提供编译证据，`compiled` 不表示执行了示例。需要验证示例行为时使用 Rustdoc 或等价

@@ -8,11 +8,13 @@ publish = false
 
 [features]
 jwt = ["axutils/jwt", "dep:serde"]
+jwt-dual-provider = ["jwt", "dep:jsonwebtoken"]
 
 [dependencies]
 axutils = { path = "../../../..", default-features = false, features = ["config"] }
-serde = { version = "1", features = ["derive"], optional = true }
-serde_json = { version = "1", features = ["arbitrary_precision"] }
+jsonwebtoken = { version = "12", default-features = false, features = ["aws_lc_rs"], optional = true }
+serde = { version = "1.0.229", features = ["derive"], optional = true }
+serde_json = { version = "1.0.154", features = ["arbitrary_precision"] }
 
 [[test]]
 name = "untyped_json"

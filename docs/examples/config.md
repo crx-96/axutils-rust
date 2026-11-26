@@ -13,7 +13,7 @@
 
 ```toml
 [dependencies]
-axutils = { version = "2.1", default-features = false, features = [
+axutils = { version = "3.0", default-features = false, features = [
     "config",       # JSON 与 .env
     "config-yaml",  # 同时包含 config
     "config-toml",  # 同时包含 config
@@ -141,6 +141,20 @@ assert_eq!(value.get("server.port").and_then(|value| value.as_i64()), Some(8080)
 无类型 JSON 将小数和指数解析为 `Float`，超出 `i64` 范围的整数字面量返回
 `ConfigError::ValueOutOfRange`。下游启用 `serde_json/arbitrary_precision` 时仍遵循这些规则。
 对象键即使与 `serde_json` 的私有标记同名，也按普通字段保留并检查重复。
+
+**YAML 空集合迁移。** 使用当前 `serde-saphyr 2.2.0` 后端时，若 `Vec<T>` 字段需要空列表，
+把原来的 `items:` 或 `items: null` 改为 `items: []`。空映射写作 `settings: {}`。
+非 `Option` 的序列、映射或按映射读取的结构体遇到 null 时返回 `ConfigError::Parse`。
+对于可选集合字段，字段值留空、`null` 和 `~` 都得到 `None`，显式 `[]` 或 `{}` 则得到包含
+相应空集合的 `Some`。无类型读取将 null 保留为 `ConfigValue::Null`。
+
+**YAML 十六进制数迁移。** `parse_value` 和 `load_value` 会把未加引号、未指定标签的 `0X1F`
+读为字符串 `"0X1F"`。若配置值应为整数 31，可将前缀改为小写 `0x1F`，或显式写作
+`!!int 0X1F`。反序列化到 `i64` 等整数类型时，`0X1F` 仍读为 31。
+
+YAML 的块式集合和流式集合（`[]`、`{}`）共用 `with_max_depth` 的预算，根集合计一层。
+设为 256 时，恰好 256 层仍在预算内，超限返回 `ConfigError::DepthLimitExceeded { limit: 256 }`。
+Serde 递归读取嵌套值会占用调用线程的栈；提高预算时也需考虑线程栈大小。
 
 TOML 日期时间保留为字符串，按标量处理，不额外占用表/数组的深度预算。普通用户键即使与
 后端日期标记 `$__toml_private_datetime` 同名，或在 TOML 中使用转义拼写，也按普通字段保留。

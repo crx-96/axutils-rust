@@ -1,5 +1,7 @@
 use std::fmt;
 
+use ::redis::{ErrorKind, RedisError as UpstreamRedisError, ServerErrorKind};
+
 /// Redis 传输失败的稳定分类。
 ///
 /// 该枚举不保存 Redis 服务端原始响应、连接地址、认证信息或命令参数，适合记录到应用
@@ -108,15 +110,15 @@ impl RedisError {
         Self::InvalidConfig { field }
     }
 
-    pub(crate) fn from_upstream(error: &::redis::RedisError) -> Self {
-        if is_cross_slot(error) {
+    /// 将单条命令或建连错误映射为脱敏的固定分类。
+    pub(crate) fn from_upstream(error: &UpstreamRedisError) -> Self {
+        if error.code().is_some_and(is_cross_slot_code) {
             return Self::CrossSlot;
         }
         if error.is_timeout() {
             return Self::Transport(RedisTransportErrorKind::Timeout);
         }
 
-        use ::redis::ErrorKind;
         match error.kind() {
             ErrorKind::AuthenticationFailed => {
                 Self::Transport(RedisTransportErrorKind::Authentication)
@@ -146,8 +148,17 @@ impl RedisError {
         }
     }
 
-    pub(crate) fn transaction_failure(error: &::redis::RedisError) -> Self {
-        if is_cross_slot(error) {
+    /// 识别直接返回或导致事务中止的跨槽错误，其余失败统一保留事务分类。
+    pub(crate) fn transaction_failure(error: UpstreamRedisError) -> Self {
+        if error.code().is_some_and(is_cross_slot_code) {
+            return Self::CrossSlot;
+        }
+        // 驱动将入队失败包装为 EXECABORT，具体命令的错误码仅保存在子错误列表中。
+        if error.kind() == ErrorKind::Server(ServerErrorKind::ExecAbort)
+            && error
+                .into_server_errors()
+                .is_some_and(|errors| errors.iter().any(|(_, err)| is_cross_slot_code(err.code())))
+        {
             Self::CrossSlot
         } else {
             Self::TransactionFailed
@@ -155,13 +166,9 @@ impl RedisError {
     }
 }
 
-fn is_cross_slot(error: &::redis::RedisError) -> bool {
-    error
-        .code()
-        .is_some_and(|code| code.eq_ignore_ascii_case("CROSSSLOT"))
-        || error
-            .detail()
-            .is_some_and(|detail| detail.to_ascii_uppercase().contains("CROSSSLOT"))
+/// 按 ASCII 忽略大小写匹配完整服务端错误码，错误正文不参与分类。
+fn is_cross_slot_code(code: &str) -> bool {
+    code.eq_ignore_ascii_case("CROSSSLOT")
 }
 
 impl fmt::Display for RedisError {
@@ -234,15 +241,35 @@ mod tests {
 
     #[test]
     fn maps_cross_slot_from_upstream_error_code() {
+        for upstream in [
+            UpstreamRedisError::from((
+                ErrorKind::Server(ServerErrorKind::CrossSlot),
+                "server error",
+            )),
+            ::redis::make_extension_error("CrossSlot".to_owned(), None),
+        ] {
+            assert_eq!(RedisError::from_upstream(&upstream), RedisError::CrossSlot);
+            assert_eq!(
+                RedisError::transaction_failure(upstream),
+                RedisError::CrossSlot
+            );
+        }
+    }
+
+    #[test]
+    fn err_mentioning_cross_slot_keeps_its_server_error_classification() {
         let upstream = UpstreamRedisError::from((
-            ErrorKind::Server(ServerErrorKind::CrossSlot),
+            ErrorKind::Server(ServerErrorKind::ResponseError),
             "server error",
-            "keys do not hash to the same slot".to_owned(),
+            "script mentions CROSSSLOT".to_owned(),
         ));
-        assert_eq!(RedisError::from_upstream(&upstream), RedisError::CrossSlot);
         assert_eq!(
-            RedisError::transaction_failure(&upstream),
-            RedisError::CrossSlot
+            RedisError::from_upstream(&upstream),
+            RedisError::Transport(RedisTransportErrorKind::Server)
+        );
+        assert_eq!(
+            RedisError::transaction_failure(upstream),
+            RedisError::TransactionFailed
         );
     }
 

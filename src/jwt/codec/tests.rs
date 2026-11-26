@@ -62,7 +62,7 @@ fn wide_integer_claims_keep_the_exact_signed_json_and_typed_values() {
     let expected = jsonwebtoken::encode(
         &BackendHeader::new(BackendAlgorithm::HS256),
         &claims,
-        &BackendEncodingKey::from_secret(&[0x11; 32]),
+        &BackendEncodingKey::from_secret(&[0x11; 32]).unwrap(),
     )
     .unwrap();
     assert!(codec.encode(&claims).unwrap() == expected);
@@ -87,7 +87,7 @@ fn wide_numeric_date_is_rejected_after_signature_before_typed_claims() {
     let wrong_key_token = jsonwebtoken::encode(
         &BackendHeader::new(BackendAlgorithm::HS256),
         &claims,
-        &BackendEncodingKey::from_secret(&[0x22; 32]),
+        &BackendEncodingKey::from_secret(&[0x22; 32]).unwrap(),
     )
     .unwrap();
     assert!(matches!(
@@ -512,7 +512,7 @@ fn claims_resource_limits_accept_boundary_and_reject_overflow() {
         jsonwebtoken::encode(
             &BackendHeader::new(BackendAlgorithm::HS256),
             value,
-            &BackendEncodingKey::from_secret(&[0x11; 64]),
+            &BackendEncodingKey::from_secret(&[0x11; 64]).unwrap(),
         )
         .unwrap()
     };

@@ -2,8 +2,7 @@ use jsonwebtoken::Validation as BackendValidation;
 use serde::de::{DeserializeOwned, IgnoredAny};
 
 use super::super::{claims, clock, header};
-use super::error_map;
-use super::{JwtCodec, MAX_TOKEN_BYTES};
+use super::{ensure_crypto_provider, error_map, JwtCodec, MAX_TOKEN_BYTES};
 use crate::jwt::JwtError;
 
 impl JwtCodec {
@@ -12,7 +11,7 @@ impl JwtCodec {
     /// 执行顺序固定为 token/Header/claims 预检、签名验证、标准 claims 检查和泛型反序列化。
     /// token 最多 64 KiB；未配置 verification key 时返回
     /// [`JwtError::MissingVerificationKey`]。启用 `exp` 或 `nbf` 校验时使用当前系统 Unix 时钟，
-    /// 本 API 不提供时钟注入。
+    /// 本 API 不提供时钟注入。验签时无法确定加密 provider 则返回 `InvalidConfig { field: "crypto_provider" }`。
     pub fn decode<T: DeserializeOwned>(&self, token: &str) -> Result<T, JwtError> {
         self.decode_inner(token, None)
     }
@@ -69,11 +68,14 @@ impl JwtCodec {
             .verification_key
             .as_ref()
             .ok_or(JwtError::MissingVerificationKey)?;
-        verification_key.validate_for_decode()?;
         let algorithm = self
             .algorithm
             .backend()
             .ok_or(JwtError::InvalidConfig { field: "algorithm" })?;
+        // 公钥格式只取决于实例配置；后续 token 复用结果，各自仍须通过签名验证。
+        (*self
+            .verification_key_format
+            .get_or_init(|| verification_key.validate_for_decode(algorithm)))?;
         let mut backend_validation = BackendValidation::new(algorithm);
         backend_validation.algorithms.clear();
         backend_validation.algorithms.push(algorithm);
@@ -86,6 +88,7 @@ impl JwtCodec {
         backend_validation.sub = None;
 
         // 忽略后端的 claims 返回值。验签成功后，两个读取方都使用预检过的 payload 字节。
+        ensure_crypto_provider()?;
         jsonwebtoken::decode::<IgnoredAny>(token, verification_key.backend(), &backend_validation)
             .map_err(|error| error_map::map_decode_error(&error, verification_key.family()))?;
         let now = if self.validation.validate_exp || self.validation.validate_nbf {

@@ -9,7 +9,7 @@
 
 ```toml
 [dependencies]
-axutils = { version = "2.1", features = ["template-minijinja"] }
+axutils = { version = "3.0", features = ["template-minijinja"] }
 serde = { version = "1", features = ["derive"] }
 ```
 
@@ -67,8 +67,15 @@ let rendered = FormatUtils::template(
 assert_eq!(rendered, Some("你好，小王".to_owned()));
 ```
 
-MiniJinja 采用严格未定义变量处理，变量值不会再次作为模板执行。`Strfmt` 只处理顶层变量；嵌套
-数据会按 JSON 值文本处理。
+MiniJinja 采用严格未定义变量处理，变量值不会再次作为模板执行。`axutils` 3.0 从 MiniJinja 2
+升级到 MiniJinja 3，直接插值 Rust 固定数组和元组时输出圆括号，例如
+`(1, 2)`。需要方括号输出时，可在上下文中使用 `Vec`。
+
+在 MiniJinja 2 中，`{{ 1 / 0 }}` 渲染为 `inf`。升级到 MiniJinja 3 后，同一表达式会使整个模板渲染失败。
+`FormatUtils::template` 在传入 `Some("无法计算")` 时返回 `Some("无法计算".to_owned())`，
+传入 `None` 时返回 `None`。
+
+`Strfmt` 只处理顶层变量，嵌套数据按 JSON 值文本处理。
 
 ## HTML 转义与字面标记替换
 

@@ -5,7 +5,7 @@
 
 ```toml
 [dependencies]
-axutils = { version = "2.1", features = ["logging"] }
+axutils = { version = "3.0", features = ["logging"] }
 tracing = "0.1"
 ```
 
@@ -34,6 +34,12 @@ fn handle_request(request_id: &str) {
     tracing::warn!(%request_id, "retry budget is low");
 }
 ```
+
+`LogConfig::with_directives("off,app=info,app::db=warn")` 默认关闭输出，为 `app` 启用 `info`
+及更严重的事件，为 `app::db` 启用 `warn` 及更严重的事件。级别支持 `trace`、`debug`、`info`、
+`warn`、`error`、`off`，忽略 ASCII 大小写。将裸 `warning` 改为 `warn`，将 `target=2` 改为
+`target=warn`。旧写法在初始化时返回 `LogError::InvalidConfig { field: "filter" }`。如果
+`warning` 是 target 名，写作 `warning=trace` 可启用该 target 的所有级别。
 
 `LogUtils::is_initialized()` 仅报告本 crate 是否成功安装了自己的 subscriber；外部 subscriber
 不会被误报。文件输出可用 `LogFileConfig` 配置，但路径校验、目录创建与 appender 构造会访问文件系统；

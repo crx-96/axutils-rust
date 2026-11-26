@@ -282,6 +282,21 @@ async fn once_interval_capacity_cancel_and_shutdown_work() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn cancellation_only_matches_tasks_from_the_issuing_scheduler() {
+    let first = Scheduler::new(SchedulerConfig::default()).unwrap();
+    let second = Scheduler::new(SchedulerConfig::default()).unwrap();
+    let schedule = TaskSchedule::once(Duration::from_secs(60));
+    let first_id = first.register(schedule.clone(), || async {}).unwrap();
+    let second_id = second.register(schedule, || async {}).unwrap();
+
+    assert_eq!(second.cancel(first_id), Ok(false));
+    assert_eq!(first.cancel(second_id), Ok(false));
+    assert_ne!(first_id, second_id);
+    assert_eq!(first.cancel(first_id), Ok(true));
+    assert_eq!(second.cancel(second_id), Ok(true));
+}
+
+#[tokio::test(start_paused = true)]
 async fn slow_interval_callback_does_not_overlap() {
     let scheduler = Scheduler::new(SchedulerConfig::default()).unwrap();
     let running = Arc::new(AtomicUsize::new(0));

@@ -1,37 +1,43 @@
 //! `serde-saphyr` 后端：YAML 文本到 [`ConfigValue`] 或调用方类型的转换。
 //!
-//! 显式设置 `Budget::max_depth` 为调用方在 [`crate::config::ConfigLoader`] 上配置的深度上限
-//! （无类型与有类型读取共用同一预算，YAML 是唯一能对两条路径都做到精确、原生深度限制的后端）；
-//! 显式设置重复键策略为拒绝；显式关闭 `with_snippet`，避免上游错误渲染携带源码片段。
+//! 有类型和无类型读取共用 [`crate::config::ConfigLoader`] 的容器深度上限，流式集合
+//! （`[]`、`{}`）的扫描和后续结构解析均受此上限约束。拒绝重复键，解析错误省略源码片段。
 //! 别名回放预算固定为总计最多 1,000,000 个事件、单个 anchor 最多展开 10,000 次，且回放栈
 //! 深度不超过加载器的嵌套深度上限。
 
 use serde::de::DeserializeOwned;
 use serde_saphyr::{
-    self as yaml, budget::BudgetBreach, options::DuplicateKeyPolicy, Budget, Error as YamlError,
-    Options,
+    self as yaml, budget::BudgetBreach, granit_parser::ErrorKind, options::DuplicateKeyPolicy,
+    Budget, Error as YamlError, ExternalMessageSource, Options,
 };
 
 use super::value as config_value;
 use super::{error::ConfigError, value::ErrorMarker, ConfigValue};
 
+/// 单次解析允许回放的别名事件总数。
 const MAX_ALIAS_REPLAYED_EVENTS: usize = 1_000_000;
+/// 单个 anchor 在一次解析中允许展开的次数。
 const MAX_ALIAS_EXPANSIONS_PER_ANCHOR: usize = 10_000;
 
+/// 使用与有类型入口相同的 YAML 预算构建配置值树。
 pub(crate) fn parse_value(text: &str, max_depth: usize) -> Result<ConfigValue, ConfigError> {
-    yaml::from_str_with_options::<ConfigValue>(text, build_options(max_depth))
-        .map_err(|error| map_error(&error, max_depth))
+    parse(text, max_depth)
 }
 
+/// 使用 loader 的资源预算反序列化 YAML，并将后端错误映射为公开分类。
 pub(crate) fn parse<T: DeserializeOwned>(text: &str, max_depth: usize) -> Result<T, ConfigError> {
     yaml::from_str_with_options::<T>(text, build_options(max_depth))
         .map_err(|error| map_error(&error, max_depth))
 }
 
+/// 将 loader 的深度和别名限制叠加到后端的默认资源预算。
 fn build_options(max_depth: usize) -> Options {
+    // flow 扫描有独立预算，默认 255；两阶段均使用已校验的 loader 上限。
     let mut budget = Budget::default();
     budget.max_depth = max_depth;
+    budget.flow_nesting_limit = max_depth;
 
+    // 别名回放单独计费，重复键和错误片段沿用库的拒绝与脱敏策略。
     let mut options = Options::default();
     options.budget = Some(budget);
     options.alias_limits = yaml::alias_limits! {
@@ -44,19 +50,38 @@ fn build_options(max_depth: usize) -> Options {
     options
 }
 
+/// 保留重复键、深度和数值范围分类，普通解析错误仅返回位置。
 fn map_error(error: &YamlError, max_depth: usize) -> ConfigError {
-    if let YamlError::DuplicateMappingKey { key: Some(key), .. } = error {
-        return ConfigError::DuplicateKey { key: key.clone() };
-    }
-    if let YamlError::Budget {
-        breach: BudgetBreach::Depth { .. },
-        ..
-    } = error
-    {
-        return ConfigError::DepthLimitExceeded { limit: max_depth };
+    // 别名包装记录引用位置。按内层原因分类，普通解析错误仍使用外层位置。
+    let mut cause = error;
+    while let YamlError::AliasError { error: inner, .. } = cause {
+        cause = inner;
     }
 
-    match config_value::classify_marker(&error.to_string()) {
+    let marker = match cause {
+        YamlError::DuplicateMappingKey { key: Some(key), .. } => ErrorMarker::DuplicateKey(key),
+        // 容器预算、别名回放栈和流式扫描器分别检查 loader 的同一深度上限。
+        YamlError::Budget {
+            breach: BudgetBreach::Depth { .. },
+            ..
+        }
+        | YamlError::AliasReplayStackDepthExceeded { .. } => ErrorMarker::DepthLimitExceeded,
+        YamlError::ExternalMessage { source, .. } => match source.as_ref() {
+            ExternalMessageSource::Parser(scan)
+                if scan.kind() == &ErrorKind::RecursionLimitExceeded =>
+            {
+                ErrorMarker::DepthLimitExceeded
+            }
+            _ => ErrorMarker::None,
+        },
+        // Display 会转义 NUL。只从 serde 自定义消息的原始字段读取完整标记。
+        YamlError::Message { msg, .. } if msg.starts_with('\0') && msg.ends_with('\0') => {
+            config_value::classify_marker(msg)
+        }
+        _ => ErrorMarker::None,
+    };
+
+    match marker {
         ErrorMarker::DepthLimitExceeded => ConfigError::DepthLimitExceeded { limit: max_depth },
         ErrorMarker::DuplicateKey(key) => ConfigError::DuplicateKey {
             key: key.to_owned(),
@@ -81,9 +106,11 @@ fn map_error(error: &YamlError, max_depth: usize) -> ConfigError {
 
 #[cfg(test)]
 mod tests {
+    use std::{collections::BTreeMap, fmt::Debug, thread};
+
     use super::{self as yaml_config, MAX_ALIAS_EXPANSIONS_PER_ANCHOR};
-    use crate::config::ConfigError;
-    use serde::Deserialize;
+    use crate::config::{ConfigError, ConfigFormat, ConfigLoader, ConfigValue};
+    use serde::{de::DeserializeOwned, Deserialize};
 
     #[test]
     fn parses_typed_and_untyped_yaml() {
@@ -109,6 +136,42 @@ mod tests {
     }
 
     #[test]
+    fn untyped_integer_out_of_range_reports_only_the_key() {
+        let error = ConfigLoader::new()
+            .parse_value("count: 9223372036854775808", ConfigFormat::Yaml)
+            .unwrap_err();
+        assert!(matches!(&error, ConfigError::ValueOutOfRange { key } if key == "count"));
+        assert!(!error.to_string().contains("9223372036854775808"));
+    }
+
+    #[test]
+    fn alias_at_a_deeper_use_site_reports_the_loader_depth_limit() {
+        let text = "base: &base [1]\nnested:\n  items: *base";
+        let loader = ConfigLoader::new().with_max_depth(2).unwrap();
+        assert!(matches!(
+            loader.parse_value(text, ConfigFormat::Yaml),
+            Err(ConfigError::DepthLimitExceeded { limit: 2 })
+        ));
+    }
+
+    #[test]
+    fn uppercase_hex_prefix_is_text_unless_an_integer_is_requested() {
+        let loader = ConfigLoader::new();
+        let format = ConfigFormat::Yaml;
+        assert_eq!(
+            loader.parse_value("0X1F", format).unwrap().as_str(),
+            Some("0X1F")
+        );
+        for scalar in ["0x1F", "!!int 0X1F"] {
+            assert_eq!(
+                loader.parse_value(scalar, format).unwrap().as_i64(),
+                Some(31)
+            );
+        }
+        assert_eq!(loader.parse::<i64>("0X1F", format).unwrap(), 31);
+    }
+
+    #[test]
     fn rejects_invalid_syntax_with_location_and_no_snippet() {
         let secret = "s3cr3t-should-not-leak";
         let text = format!("password: \"{secret}\"\n  bad indent: [\n");
@@ -118,7 +181,73 @@ mod tests {
     }
 
     #[test]
-    fn empty_document_parses_to_empty_table() {
+    fn typed_collections_distinguish_empty_collections_from_null() {
+        #[derive(Debug, Deserialize)]
+        struct Field<T> {
+            value: T,
+        }
+
+        fn check<T: DeserializeOwned + Default + Debug + PartialEq>(empty: &str) {
+            let loader = ConfigLoader::new();
+            let format = ConfigFormat::Yaml;
+            let text = format!("value: {empty}");
+            let required = loader.parse::<Field<T>>(&text, format).unwrap();
+            let optional = loader.parse::<Field<Option<T>>>(&text, format).unwrap();
+            assert_eq!(required.value, T::default());
+            assert_eq!(optional.value, Some(T::default()));
+
+            for text in ["value: null", "value:", "value: ~"] {
+                let error = loader.parse::<Field<T>>(text, format).unwrap_err();
+                assert!(matches!(error, ConfigError::Parse { format: "yaml", .. }));
+                let optional = loader.parse::<Field<Option<T>>>(text, format).unwrap();
+                assert_eq!(optional.value, None);
+                let untyped = loader.parse_value(text, format).unwrap();
+                assert_eq!(untyped.get("value"), Some(&ConfigValue::Null));
+            }
+        }
+
+        #[derive(Debug, Default, Deserialize, PartialEq)]
+        struct Settings {
+            retries: Option<u8>,
+        }
+
+        check::<Vec<u8>>("[]");
+        check::<BTreeMap<String, u8>>("{}");
+        check::<Settings>("{}");
+    }
+
+    #[test]
+    fn flow_sequences_respect_the_maximum_loader_depth() {
+        // 为调试构建的递归 serde 访问器预留栈空间，输入只取公开预算的相邻边界。
+        thread::Builder::new()
+            .stack_size(32 * 1024 * 1024)
+            .spawn(|| {
+                let loader = ConfigLoader::new().with_max_depth(256).unwrap();
+                let format = ConfigFormat::Yaml;
+                for depth in [255, 256, 257] {
+                    let text = format!("{}0{}", "[".repeat(depth), "]".repeat(depth));
+                    let untyped = loader.parse_value(&text, format);
+                    let typed = loader.parse::<Vec<ConfigValue>>(&text, format);
+                    if depth <= 256 {
+                        untyped.expect("flow sequence within loader depth");
+                        typed.expect("typed flow sequence within loader depth");
+                    } else {
+                        for error in [untyped.unwrap_err(), typed.unwrap_err()] {
+                            assert!(matches!(
+                                error,
+                                ConfigError::DepthLimitExceeded { limit: 256 }
+                            ));
+                        }
+                    }
+                }
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
+    #[test]
+    fn explicit_empty_mapping_parses_to_empty_table() {
         let value = yaml_config::parse_value("{}", 64).expect("parse empty mapping");
         assert_eq!(value.as_table().map(|table| table.len()), Some(0));
     }

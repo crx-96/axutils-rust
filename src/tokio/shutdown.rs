@@ -29,7 +29,12 @@ pub enum TokioShutdownReason {
     SigTerm,
 }
 
-/// 等待 Ctrl+C，Unix 同时等待 SIGTERM；注册失败返回 Signal。
+/// 等待 Ctrl+C，Unix 同时等待 SIGTERM。信号注册失败返回 [`TokioError::Signal`]。
+/// Unix 下首次 poll 时缺少 runtime 会返回 [`TokioError::RuntimeRequired`]。
+///
+/// # Panics
+///
+/// 在 Unix 下使用自行构建的 Tokio runtime 时，必须启用 I/O driver，否则 Tokio 注册信号时会 panic。
 ///
 /// # Examples
 /// ```rust,no_run
@@ -43,6 +48,7 @@ pub async fn wait_for_shutdown() -> Result<TokioShutdownReason, TokioError> {
     #[cfg(unix)]
     {
         use ::tokio::signal::unix::{signal, SignalKind};
+        super::facade::TokioUtils::try_current_handle()?;
         let mut term = signal(SignalKind::terminate()).map_err(TokioError::Signal)?;
         let ctrl_c = signal::ctrl_c();
         let mut ctrl_c = pin!(ctrl_c);

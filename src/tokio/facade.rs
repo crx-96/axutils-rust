@@ -103,7 +103,7 @@ impl TokioUtils {
         }
     }
 
-    /// 等待 Ctrl+C，Unix 同时等待 SIGTERM；注册失败返回 Signal。
+    /// 等待操作系统关闭信号，平台行为和 runtime 要求见 [`wait_for_shutdown`]。
     pub async fn wait_for_shutdown() -> Result<TokioShutdownReason, TokioError> {
         wait_for_shutdown().await
     }

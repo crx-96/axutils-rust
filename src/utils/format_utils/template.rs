@@ -1,4 +1,6 @@
 #[cfg(feature = "template-minijinja")]
+use minijinja::value::Serde as MiniJinjaSerde;
+#[cfg(feature = "template-minijinja")]
 use minijinja::{AutoEscape, Environment, UndefinedBehavior};
 #[cfg(any(feature = "template-strfmt", feature = "template-minijinja"))]
 use serde::Serialize;
@@ -93,6 +95,7 @@ fn strfmt_render<T: Serialize>(
         .or_else(|| default.map(str::to_owned))
 }
 
+/// 编译并渲染 MiniJinja 模板，失败时返回调用方指定的默认值。
 #[cfg(feature = "template-minijinja")]
 fn minijinja_render<T: Serialize>(
     template: &str,
@@ -110,7 +113,7 @@ fn minijinja_render<T: Serialize>(
             environment
                 .get_template("runtime-template.txt")
                 .ok()
-                .and_then(|added_template| added_template.render(context).ok())
+                .and_then(|added_template| added_template.render(MiniJinjaSerde(context)).ok())
         })
         .or_else(|| default.map(str::to_owned))
 }
@@ -275,6 +278,42 @@ mod tests {
                     TemplateEngine::MiniJinja,
                 ),
                 Some("你好，小王（杭州）[Rust][模板]".to_owned()),
+            );
+        }
+
+        #[test]
+        fn tuple_and_array_interpolation_differs_from_list_interpolation() {
+            #[derive(Serialize)]
+            struct Context {
+                array: [i32; 2],
+                tuple: (i32, i32),
+                list: Vec<i32>,
+            }
+
+            let context = Context {
+                array: [1, 2],
+                tuple: (1, 2),
+                list: vec![1, 2],
+            };
+            assert_eq!(
+                FormatUtils::template(
+                    "{{ array }} / {{ tuple }} / {{ list }} / {{ array == list }}",
+                    &context,
+                    None,
+                    TemplateEngine::MiniJinja,
+                ),
+                Some("(1, 2) / (1, 2) / [1, 2] / False".to_owned())
+            );
+        }
+
+        #[test]
+        fn division_by_zero_uses_the_render_fallback() {
+            let engine = TemplateEngine::MiniJinja;
+            let template = "商为 {{ 1 / 0 }}";
+            assert_eq!(FormatUtils::template(template, &(), None, engine), None);
+            assert_eq!(
+                FormatUtils::template(template, &(), Some("无法计算"), engine),
+                Some("无法计算".to_owned()),
             );
         }
 

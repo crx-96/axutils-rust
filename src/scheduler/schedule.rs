@@ -1,7 +1,10 @@
 //! 已校验调度的时间锚点与串行执行；不管理注册表或任务所有权。
 
 use super::{cron::CronSchedule, SchedulerError, TaskSchedule};
-use std::{future::Future, time::Duration};
+use std::{
+    future::Future,
+    time::{Duration, SystemTime},
+};
 use tokio::time::{self, Instant, MissedTickBehavior};
 
 /// 注册前已完成校验的调度参数，首次触发统一保存 monotonic deadline。
@@ -22,14 +25,13 @@ pub(super) enum ValidatedSchedule {
 /// 在发布任何后台任务前验证参数并确定首次 deadline。
 pub(super) fn validate(schedule: TaskSchedule) -> Result<ValidatedSchedule, SchedulerError> {
     // 在发布任务前校验并保存 deadline，避免后台再次做不受检的时间加法。
-    let now = Instant::now();
     match schedule {
-        TaskSchedule::Once(delay) => now
+        TaskSchedule::Once(delay) => Instant::now()
             .checked_add(delay)
             .map(ValidatedSchedule::Once)
             .ok_or(SchedulerError::InvalidSchedule),
         TaskSchedule::Interval(period) if period.is_zero() => Err(SchedulerError::InvalidSchedule),
-        TaskSchedule::Interval(period) => now
+        TaskSchedule::Interval(period) => Instant::now()
             .checked_add(period)
             .map(|start| ValidatedSchedule::Interval { start, period })
             .ok_or(SchedulerError::InvalidSchedule),
@@ -46,9 +48,11 @@ pub(super) fn validate(schedule: TaskSchedule) -> Result<ValidatedSchedule, Sche
 
 /// 将当前墙钟下的下一次 Cron 触发映射到 monotonic deadline，计算耗时不重新延长预算。
 fn cron_deadline(schedule: &CronSchedule) -> Result<Instant, SchedulerError> {
-    let now = Instant::now();
-    let delay = schedule.delay_from_now()?;
-    now.checked_add(delay).ok_or(SchedulerError::InvalidCron)
+    // 先采墙钟，再取等待起点。两次采样之间即使被抢占，也不会因此提前触发。
+    let wall_now = SystemTime::now();
+    let start = Instant::now();
+    let delay = schedule.delay_from(wall_now)?;
+    start.checked_add(delay).ok_or(SchedulerError::InvalidCron)
 }
 
 /// 按调度串行调用业务 future；取消由外层任务的 abort/Drop 处理。

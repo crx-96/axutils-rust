@@ -11,7 +11,7 @@ use ::redis::cluster_async::ClusterConnection as AsyncClusterConnection;
 use ::redis::Client as UpstreamClient;
 use r2d2::Pool;
 #[cfg(feature = "redis-async")]
-use tokio::sync::Mutex as AsyncMutex;
+use tokio::sync::{Mutex as AsyncMutex, OnceCell};
 
 use crate::redis::{RedisConfig, RedisError};
 
@@ -70,8 +70,8 @@ pub(super) enum AsyncBackend {
     Single {
         /// 只保存本地连接配置的上游客户端。
         client: UpstreamClient,
-        /// 普通命令 manager 的惰性初始化槽，建立后克隆共享。
-        manager: AsyncMutex<Option<ConnectionManager>>,
+        /// 普通命令共享当前轮的首连结果；新调用只替换已失败的一轮。
+        manager: AsyncMutex<Arc<OnceCell<Result<ConnectionManager, RedisError>>>>,
         /// 暂存上一笔可靠结束的事务连接；取出期间取消会丢弃连接。
         transaction: AsyncMutex<Option<MultiplexedConnection>>,
         /// 串行化事务获取、执行及归还，避免两个事务混用状态。
@@ -169,7 +169,7 @@ impl RedisClient {
                 UpstreamClient::open(url).map_err(|_| RedisError::invalid_config("url"))?;
             AsyncBackend::Single {
                 client,
-                manager: AsyncMutex::new(None),
+                manager: AsyncMutex::default(),
                 transaction: AsyncMutex::new(None),
                 transaction_lock: AsyncMutex::new(()),
             }

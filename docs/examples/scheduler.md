@@ -5,7 +5,7 @@
 
 ```toml
 [dependencies]
-axutils = { version = "2.1", features = ["scheduler"] }
+axutils = { version = "3.0", features = ["scheduler"] }
 tokio = { version = "1", features = ["rt-multi-thread", "time"] }
 ```
 
@@ -28,7 +28,7 @@ async fn schedule_once() -> Result<(), SchedulerError> {
 }
 ```
 
-Tokio 1.53.1 没有稳定的 time driver 查询接口。`panic = "unwind"` 宿主可以直接在已有的
+Tokio 1.x 当前没有稳定的 time driver 查询接口。`panic = "unwind"` 宿主可以直接在已有的
 计时 runtime 中注册。`panic = "abort"` 宿主使用 `with_time_runtime` 显式构建计时 runtime，
 然后照常调用该实例的 `register`。对于其他 runtime，即使调用方已启用时间，abort 构建也会在
 占用任务名额前返回 `RuntimeRequired`。多个调度器各自维护其作用域。
@@ -53,8 +53,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 所有调度的首次 deadline 都在注册阶段确定；后台任务首次 poll 的延迟不会重新开始等待预算。
 Cron 后续触发仍在回调结束后重新按墙钟和指定时区计算。一次与固定间隔任务无法表示的时间
 （如 `Duration::MAX`）在注册时返回 `SchedulerError::InvalidSchedule`，不会启动后台任务或占用名额。
-`TaskSchedule::interval` 还要求非零周期；`TaskSchedule::cron` 接收 cron 表达式和 IANA 时区。关闭后
-不能继续注册任务，`SchedulerError` 会保留该生命周期错误而非静默忽略。`cancel` 和 `shutdown`
+`TaskSchedule::interval` 还要求非零周期。
+
+`TaskSchedule::cron` 接收六段表达式（秒、分、时、日、月、周）和 IANA 时区。月和周字段支持
+大小写无关的三字母缩写，可用于范围、列表和步进，例如 `0 0 9 * * MON-FRI/2,SUN`。
+拼接的 `JANFEB` 或 `SUNMON` 在注册时返回 `SchedulerError::InvalidCron`。
+夏令时回拨后，同一墙钟时间的 cron 触发点只在第一次出现时运行。
+
+`TaskId` 只对注册任务的实例有效，将它传给另一实例的 `cancel` 会返回 `Ok(false)`，两边的任务都继续运行。
+关闭后不能继续注册任务，`SchedulerError` 会保留该生命周期错误。`cancel` 和 `shutdown`
 返回只表示已经发出 abort 请求并更新状态，不等待任务 future 的清理完成；清理由 Tokio 后续调度
 推进。业务若要求资源释放或工作完成确认，必须另建 acknowledgement/graceful shutdown 协议。
 

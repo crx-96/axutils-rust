@@ -128,7 +128,7 @@ negative-time-unsuffixed-all = ["time-all"]
 
 [dependencies]
 axutils = { path = "../../..", default-features = false }
-uuid = { version = "1.24.0", default-features = false, features = ["std"], optional = true }
+uuid = { version = "1.29.3", default-features = false, features = ["std"], optional = true }
 chrono = { version = "0.4.45", default-features = false, optional = true }
-time = { version = "0.3.36", default-features = false, optional = true }
-jiff = { version = "0.2.35", default-features = false, optional = true }
+time = { version = "0.3.55", default-features = false, optional = true }
+jiff = { version = "1.0.3", default-features = false, optional = true }

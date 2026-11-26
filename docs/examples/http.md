@@ -16,14 +16,14 @@ HTTP 是显式启用的客户端领域；类型和错误都从 `axutils::http` �
 
 ```toml
 [dependencies]
-axutils = { version = "2.1", features = ["http"] }
+axutils = { version = "3.0", features = ["http"] }
 ```
 
 异步 JSON 客户端：
 
 ```toml
 [dependencies]
-axutils = { version = "2.1", features = ["http-async", "http-json"] }
+axutils = { version = "3.0", features = ["http-async", "http-json"] }
 serde = { version = "1", features = ["derive"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
@@ -40,6 +40,10 @@ feature，也保留服务器返回的压缩字节与相关响应 Header。
 关闭解压的开关：下游启用 `ureq/gzip` 或 `ureq/brotli` 后，ureq 会解压相应响应并移除
 `Content-Encoding` 和 `Content-Length`；`max_response_body_bytes` 此时约束解压后的字节。
 设置空 `Accept-Encoding` 不会禁止这一行为。需要逐字节保留原始压缩响应时使用异步入口。
+
+同步读取正文时，裸 `UnexpectedEof` 归为 `HttpTransportErrorKind::Connection`。透明解压时，
+压缩内容损坏或连接提前结束都可能由 ureq 包装为 `ureq::Error::Decompress`，此时
+`HttpError::Transport` 的 `kind` 为 `Other`，调用方无法据此区分这两种原因。
 
 ## 导入与同步实例
 

@@ -255,12 +255,15 @@ impl LogConfig {
     /// 具体的 target directive 会覆盖默认级别。例如
     /// `lettre=off,rustls=off,tower_http=debug,sqlx::query=warn`。也可以显式传入裸级别 `off`
     /// 作为默认值，例如 `off,axutils=info,axutils::http=debug`，这样未匹配的 target 默认关闭。
-    /// 支持的级别是 `trace`、`debug`、`info`、`warn`、`error` 和 `off`；`warning` 不是合法写法。
+    /// 支持的级别为 `trace`、`debug`、`info`、`warn`、`error` 和 `off`，忽略 ASCII 大小写。
+    /// 裸 `warning` 或数字级别（如 `2`、`target=2`）会导致解析失败。若 target 名为
+    /// `warning`，请显式写出级别，如 `warning=trace`。
     ///
     /// 字符串会在 [`crate::utils::LogUtils::init`] 时解析；解析失败返回
     /// `LogError::InvalidConfig { field: "filter" }`。后一次调用会替换前一次配置；空白字符串
-    /// 表示不追加 target directive。逗号、等号两侧的空白会被规范化，directive 内部的空白
-    /// 会被拒绝。
+    /// 表示不追加 target directive。逗号和外层级别等号两侧可留空白，选择器和级别内部的
+    /// 空白会被拒绝。选择器可省略级别，此时使用 `trace`，例如 `app[work{count=2}]`；
+    /// 一旦写出外层等号，级别就不能为空。
     ///
     /// # Examples
     ///

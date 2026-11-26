@@ -4,7 +4,7 @@
 第三方正常依赖；网络、异步、数据库、配置后端、模板和加密后端均按需启用。
 
 - MSRV：Rust 1.95
-- 当前 crate 版本：`2.1.0`
+- 当前 crate 版本：`3.0.0`
 - Edition：2021
 - 默认 feature：`[]`
 
@@ -43,18 +43,16 @@ use axutils::{
 
 ```toml
 [dependencies]
-axutils = { version = "2.1", default-features = false }
+axutils = { version = "3.0", default-features = false }
 ```
 
 按能力组合：
 
 ```toml
-[dependencies]
-axutils = {
-    version = "2.1",
-    default-features = false,
-    features = ["config-yaml", "http-async", "http-json", "redis-async"]
-}
+[dependencies.axutils]
+version = "3.0"
+default-features = false
+features = ["config-yaml", "http-async", "http-json", "redis-async"]
 ```
 
 异步示例使用 `#[tokio::main]` 时，应用仍需直接依赖 Tokio 并启用宏/runtime feature。库的领域
@@ -178,7 +176,8 @@ assert!(HttpUtils::is_initialized());
 需要多个账号、多个连接池、测试隔离或可控销毁时，应直接创建领域实例，而不是使用全局入口。全局
 初始化成功后不可 reset 或 replace；初始化失败不得占用位置。
 
-JWT 也可完全绕过全局状态：
+直接持有 `JwtCodec` 即可绕过 `JwtUtils` 的全局初始化。每个实例独立持有密钥和验证规则，
+签发和验签共用 `jsonwebtoken` 的进程级加密 provider。
 
 ```rust
 use axutils::jwt::{

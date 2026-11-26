@@ -102,11 +102,12 @@ jobs:
         with:
           toolchain: stable
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-      # runner 强制离线；压缩 fixture 另有 provider feature 引入的依赖。
+      # runner 使用离线模式，先预取下游压缩和 JWT 双 provider 的额外依赖。
       - name: 准备离线矩阵依赖
         run: |
           cargo fetch
           cargo fetch --manifest-path tests/fixtures/http_compression/Cargo.toml
+          cargo fetch --manifest-path tests/fixtures/config/arbitrary_precision/Cargo.toml
       - name: 检查矩阵结构
         run: cargo test --no-default-features --test feature_matrix
       # 只开启指定测试目标的 ignored 用例，不开启 SMTP / Redis live 测试。

@@ -30,7 +30,8 @@ impl AxumServerBuilder {
     /// 配置时返回 `AxumError::InvalidConfig`。
     ///
     /// `AxumServer::serve*` 会注入 `ConnectInfo<SocketAddr>`，限流键只取真实 TCP peer 地址；
-    /// 缺少该扩展时响应脱敏的 500，超额时响应脱敏的 429 和 `Retry-After`。本方法本身不
+    /// 缺少该扩展时响应脱敏的 500，超额时响应脱敏的 429 和唯一的 `Retry-After`。
+    /// 提示秒数取上游截断秒数加一，比限流器计算的剩余等待最多多一秒。本方法本身不
     /// bind、不访问网络；处理请求时会维护内存限流状态。serve 每 60 秒清理 stale key，shutdown 时取消并等待任务；高基数来源仍应由部署边界限制。
     ///
     /// # Examples
@@ -81,7 +82,7 @@ impl AxumServerBuilder {
     ///
     /// 此模式无条件信任 `Forwarded`、`X-Forwarded-For` 和 `X-Real-IP`，不验证代理 CIDR；
     /// 只有可信入口代理会覆盖或清除客户端转发 header 时才可使用，否则客户端可伪造限流键。
-    /// 无法提取键时响应脱敏的 500，超额时响应脱敏的 429 和 `Retry-After`。本方法本身不
+    /// 无法提取键时响应脱敏的 500，超额时响应与 [`Self::with_governor_peer`] 相同的 429 和 `Retry-After`。本方法本身不
     /// bind、不访问网络；处理请求时维护内存限流状态，serve 每 60 秒清理 stale key。
     ///
     /// # Examples
@@ -144,12 +145,13 @@ fn validate(interval: Duration, burst: NonZeroU32) -> Result<(), AxumError> {
 }
 /// 把限流器错误转换为固定响应，仅从超额错误提取 Retry-After 秒数。
 fn sanitized_error(error: GovernorError) -> Response<Body> {
-    // 不把 extractor/provider 的原始诊断或请求来源写进响应 body。
+    // tower_governor 0.8 用同一个 as_secs() 结果填充 wait_time 和两个等待头。
+    // 小数部分已丢失，截断值加一给出保守上界；恰为整秒时会多等一秒。
     let (status, body, retry) = match error {
         GovernorError::TooManyRequests { wait_time, .. } => (
             StatusCode::TOO_MANY_REQUESTS,
             "rate limit exceeded",
-            Some(wait_time),
+            Some(wait_time.saturating_add(1)),
         ),
         GovernorError::UnableToExtractKey => (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -168,11 +170,11 @@ fn sanitized_error(error: GovernorError) -> Response<Body> {
     };
     let mut response = Response::new(Body::from(body));
     *response.status_mut() = status;
-    // 只在确有等待时间时设置 Retry-After；无法生成合法 header 时保留既有脱敏响应。
+    // 整数秒可直接转为合法的 header 值，其他错误不携带等待时间。
     if let Some(seconds) = retry {
-        if let Ok(value) = HeaderValue::from_str(&seconds.to_string()) {
-            response.headers_mut().insert(RETRY_AFTER, value);
-        }
+        response
+            .headers_mut()
+            .insert(RETRY_AFTER, HeaderValue::from(seconds));
     }
     response
 }
@@ -241,6 +243,46 @@ mod tests {
         Router,
     };
     use tower::ServiceExt;
+
+    #[tokio::test]
+    async fn fractional_peer_wait_returns_one_conservative_retry_after() {
+        use axum::extract::ConnectInfo;
+        use std::net::{Ipv4Addr, SocketAddr};
+
+        let request = || {
+            Request::builder()
+                .extension(ConnectInfo(SocketAddr::from((Ipv4Addr::LOCALHOST, 1234))))
+                .body(Body::empty())
+                .unwrap()
+        };
+        for (interval_ms, expected) in [(500, "1"), (1900, "2")] {
+            let router = AxumApp::from_router(Router::new().route("/", get(|| async { "ok" })))
+                .into_server_builder()
+                .with_governor_peer(Duration::from_millis(interval_ms), NonZeroU32::MIN)
+                .unwrap()
+                .router;
+            let first = router.clone().oneshot(request()).await.unwrap();
+            assert_eq!(first.status(), StatusCode::OK);
+            let second = router.oneshot(request()).await.unwrap();
+            assert_eq!(second.status(), StatusCode::TOO_MANY_REQUESTS);
+            assert_eq!(second.headers()[RETRY_AFTER], expected);
+            assert_eq!(second.headers().get_all(RETRY_AFTER).iter().count(), 1);
+            assert!(!second.headers().contains_key("x-ratelimit-after"));
+            assert_eq!(
+                body::to_bytes(second.into_body(), 1024).await.unwrap(),
+                "rate limit exceeded"
+            );
+        }
+    }
+
+    #[test]
+    fn retry_after_saturates_at_maximum_seconds() {
+        let response = sanitized_error(GovernorError::TooManyRequests {
+            wait_time: u64::MAX,
+            headers: None,
+        });
+        assert_eq!(response.headers()[RETRY_AFTER], HeaderValue::from(u64::MAX));
+    }
 
     #[tokio::test]
     async fn peer_mode_without_connect_info_returns_sanitized_500() {

@@ -2,7 +2,44 @@
 
 本文件记录 `axutils` 各版本的公共 API、运行时行为、错误与安全边界，以及面向使用者的兼容性变化。
 重大重构同时提供简短的结构与维护摘要；检查结果由实际验收交付说明，不将未执行的测试记为通过。
-每次修改或增加功能时，先读取 `Cargo.toml` 中的 `[package].version`，再在对应版本条目中补充记录。
+未发布的变更记入 `[Unreleased]`，发布时按 `Cargo.toml` 的 `[package].version` 归档。
+
+## [3.0.0]
+
+### Fixed
+
+- 严格邮箱校验接受大小写混合的 Punycode 顶级域名；严格国际手机号校验拒绝带多余国内拨号前缀的输入。
+- 同步 HTTP 读取正文时将裸 `UnexpectedEof` 归为连接中断；透明解压器只报告解压失败时仍归为 `Other`。同步 SMTP 识别 Unix 阻塞读写超时。
+- Axum 限流的 429 响应返回一个 `Retry-After` 头。秒数取上游截断值加一，避免客户端过早重试；剩余等待恰为整秒时会多提示一秒。
+- YAML 流式集合和别名展开遵循加载器设置的深度上限。无类型整数越界返回带键名的 `ValueOutOfRange`。
+- 日志过滤器拒绝裸 `warning`、数字级别和显式空级别；带字段条件的 span 选择器可以省略级别，也支持在级别分隔符两侧留空格。
+- Unix 下首次轮询 `wait_for_shutdown` 时，缺少 Tokio runtime 会返回 `RuntimeRequired`。自行构建 runtime 时须启用 I/O driver。
+- JWT 下游同时启用 `rust_crypto` 和 `aws_lc_rs` 时，宿主尚未选择 provider 会得到 `InvalidConfig { field: "crypto_provider" }`。显式选择后，原有 codec 可继续签发和验签。两种 provider 都将无效的 EC 公钥点归为 `UnsupportedKeyFormat`，有效公钥遇到不匹配的签名时返回 `InvalidToken`。
+- 调度器取消任务时校验任务所属实例。Cron 拒绝连写的月份和星期名称，并修正墙钟与单调时钟的采样顺序，避免过早触发回调。
+- Redis 异步单机客户端的并发调用共享同一次首连结果，下一次命令可在失败后重试。Cluster 按解码后的凭据比较节点。命令和事务按服务端错误码识别 `CROSSSLOT`，包括事务中止时驱动保留的子错误。
+- SQLite 的 `memdb` VFS 使用单连接内存库策略；驱动解码后含 NUL 的文件名在建立连接前返回配置错误。
+
+### Compatibility
+
+- `TimeUtils` 的 `_jiff` 方法参数类型升级为 `jiff` 1.x 的 `Date` 与 `DateTime`。直接构造并传入
+  这些日期类型的下游项目需把 `jiff` 依赖升级到 1.x。
+- MiniJinja 3 直接插值 Rust 固定数组和元组时使用圆括号，并在比较时区分元组与列表。需要沿用列表
+  表示或比较行为时，在传入的上下文中使用 `Vec`。模板中的除法遇到零除数时，`FormatUtils::template`
+  返回传入的默认文本；未提供默认文本时返回 `None`。
+- `config-yaml` 升级到 `serde-saphyr` 2.2 后，必填列表和映射的空值请写作 `[]` 和 `{}`。显式 `null` 或空字段仍可读入 `Option`，结果为 `None`。无类型读取时，`0X1F` 会保留为字符串，需要整数时可写作 `0x1F`。
+
+### Dependencies
+
+- 更新以下直接依赖的版本下限：
+  - 跨主版本：`minijinja` 3.1、`serde-saphyr` 2.2、`jsonwebtoken` 12、`jiff` 1.0、`croner` 5.0.1。
+    保留调度器的单值步进语法和夏令时回拨不重放规则。
+  - 同主版本线：`uuid` 1.29.3、`time` 0.3.55、`tokio` 1.54.1、`tokio-util` 0.7.20、
+    `tower-http` 0.7.1、`sqlx` 0.9.1、`redis` 1.8.3、`ureq` 3.5.2、`reqwest` 0.13.5、
+    `lettre` 0.11.24、`toml` 1.2.3、`serde` 1.0.229、`serde_json` 1.0.154、`encoding_rs` 0.8.44、
+    `regex` 1.13.2、`aes` 0.9.4、`aes-gcm` 0.11.1、`rand` 0.10.4、`zeroize` 1.9.2、`itoa` 1.0.19、
+    `phonenumber` 0.3.10、`strfmt` 0.2.6、`url` 2.5.9、`futures-timer` 3.0.4。
+  - 开发依赖 `rustls` 的声明下限更新为 0.23.46。
+- 项目 MSRV 仍为 1.95；本机验证使用 Rust/Cargo 1.100.0。
 
 ## [2.1.0]
 

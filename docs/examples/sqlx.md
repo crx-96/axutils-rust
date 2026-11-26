@@ -6,14 +6,14 @@ SQLx 能力按实际数据库 driver 选择。只启用一个 driver 可减少�
 ```toml
 [dependencies]
 # 三选一：sqlx-postgres、sqlx-mysql 或 sqlx-sqlite
-axutils = { version = "2.1", features = ["sqlx-postgres"] }
+axutils = { version = "3.0", features = ["sqlx-postgres"] }
 ```
 
 使用全部 driver 时：
 
 ```toml
 [dependencies]
-axutils = { version = "2.1", features = ["sqlx"] }
+axutils = { version = "3.0", features = ["sqlx"] }
 ```
 
 `SqlxConfig` 可在本地解析 PostgreSQL、MySQL/MariaDB 与 SQLite URL scheme；这不代表每种连接都
@@ -45,12 +45,38 @@ async fn connect() -> Result<SqlxClient, SqlxError> {
 
 SQLite 内存库和空文件名临时库（如 `sqlite:`）使用唯一连接，并禁用自动空闲淘汰、最大寿命
 淘汰和 acquire 前 ping，避免正常复用期间丢失数据库。关闭池后再打开 `sqlite:` 会得到新的空库。
-具名文件库（如 `sqlite://file.db`）继续使用 SQLx 的默认连接回收及健康检查策略。
+最终生效的 `vfs=memdb` 也创建内存库，例如 `sqlite:orders?vfs=memdb` 和内嵌 URI
+`sqlite:file:orders%3Fvfs=memdb`。同一层重复指定 `vfs` 时以最后一个值为准。外层指定 `vfs`
+或启用 `immutable` 时，SQLx 将内嵌 URI 整体转义为文件名。
+具名文件库（如 `sqlite://file.db`）使用 SQLx 的默认连接回收及健康检查策略。SQLx 解码一层后
+含 NUL 的文件名在 `SqlxConfig::new` 返回 `InvalidConfig { field: "url" }`。
 
 首次 `connect` 会安装进程级 SQLx Any 默认 drivers；如果应用已经用 SQLx 自定义注册器安装过
 Any drivers，当前实现可能 panic，因此本版本要求 axutils 是进程中唯一的 Any driver 注册方。
 查询、bind、`FromRow`、row/result 和 transaction 的公共签名保留 SQLx 原生类型，调用方需要直接
 依赖兼容的 SQLx 0.9.x 才能使用这些原生扩展点。
+
+```rust,no_run
+use axutils::sqlx::SqlxClient;
+use sqlx::{
+    any::{AnyQueryResult, AnyRow},
+    Any, Row, Transaction,
+};
+
+async fn query(client: &SqlxClient) -> Result<(u64, i32), Box<dyn std::error::Error>> {
+    let mut tx: Transaction<'_, Any> = client.begin_async().await?;
+    sqlx::query::<Any>("SELECT 1").execute(&mut *tx).await?;
+    tx.commit().await?;
+
+    let result: AnyQueryResult = client
+        .execute_async(client.query("UPDATE items SET available = 1"))
+        .await?;
+    let row: AnyRow = client
+        .fetch_one_async(client.query("SELECT id FROM items ORDER BY id LIMIT 1"))
+        .await?;
+    Ok((result.rows_affected(), row.try_get("id")?))
+}
+```
 
 ## 进程级入口
 

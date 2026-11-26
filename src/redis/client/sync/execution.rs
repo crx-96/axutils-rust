@@ -50,7 +50,7 @@ impl RedisClient {
                 if backend::should_discard_transaction_connection(&error, connection.is_open()) {
                     connection.mark_broken();
                 }
-                Err(RedisError::transaction_failure(&error))
+                Err(RedisError::transaction_failure(error))
             }
         }
     }

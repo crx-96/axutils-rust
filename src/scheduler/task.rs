@@ -4,6 +4,7 @@ use super::{schedule, SchedulerConfig, SchedulerError, TaskSchedule};
 use std::{
     collections::{HashMap, HashSet},
     future::Future,
+    ops::RangeInclusive,
     sync::{Arc, Mutex, MutexGuard, Weak},
 };
 #[cfg(panic = "unwind")]
@@ -15,7 +16,10 @@ use tokio::{
     task::AbortHandle,
 };
 
-/// 单个 [`Scheduler`](super::Scheduler) 内不复用的任务标识。
+/// 每个 [`Scheduler`](super::Scheduler) 只领取一次实例标识，释放后也不复用。
+static SCHEDULER_IDS: Mutex<RangeInclusive<u64>> = Mutex::new(1..=u64::MAX);
+
+/// 仅在签发它的 [`Scheduler`](super::Scheduler) 中有效的任务标识。
 ///
 /// # Examples
 ///
@@ -27,13 +31,17 @@ use tokio::{
 /// # }
 /// ```
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub struct TaskId(
-    /// 调度器内单调递增的标识值，溢出时拒绝新登记而不复用。
-    u64,
-);
+pub struct TaskId {
+    /// 签发此标识的调度器，用于区分不同实例的相同序号。
+    scheduler_id: u64,
+    /// 实例内单调递增的任务序号，溢出时拒绝新登记。
+    sequence: u64,
+}
 
 /// 调度器所有登记操作共享的状态；不持有任务 callback。
 pub(crate) struct Shared {
+    /// 本实例的标识。实例标识耗尽时保留 None，注册任务时返回容量错误。
+    scheduler_id: Option<u64>,
     /// 只在短暂登记/移除阶段持有的注册表锁。
     state: Mutex<State>,
 }
@@ -55,7 +63,13 @@ struct State {
 impl Shared {
     /// 建立空注册表，不获取 runtime 或启动后台工作。
     pub(crate) fn new(config: SchedulerConfig) -> Self {
+        // 仅构造实例时共享分配器，后续登记和取消只需锁住本实例。
+        let scheduler_id = SCHEDULER_IDS
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .next();
         Self {
+            scheduler_id,
             state: Mutex::new(State {
                 shutdown: false,
                 max_tasks: config.max_tasks,
@@ -107,7 +121,10 @@ impl Shared {
         if state.tasks.len() >= state.max_tasks {
             return Err(SchedulerError::TaskLimitExceeded);
         }
-        let task_id = TaskId(state.next_task_id);
+        let task_id = TaskId {
+            scheduler_id: self.scheduler_id.ok_or(SchedulerError::TaskLimitExceeded)?,
+            sequence: state.next_task_id,
+        };
         state.next_task_id = state
             .next_task_id
             .checked_add(1)

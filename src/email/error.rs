@@ -1,6 +1,6 @@
 //! SMTP 错误的稳定分类和脱敏边界。
 
-use std::{error::Error as StdError, fmt};
+use std::{error::Error as StdError, fmt, io};
 
 use lettre::transport::smtp::Error as SmtpError;
 
@@ -90,6 +90,15 @@ impl EmailError {
         Self::InvalidMessage { field }
     }
 
+    /// Unix 阻塞套接字超时可报告 WouldBlock，异步传输由自身的时限处理。
+    pub(super) fn from_sync_smtp(error: &SmtpError) -> Self {
+        if has_io_kind(error, |kind| kind == io::ErrorKind::WouldBlock) {
+            Self::Transport(EmailTransportErrorKind::Timeout)
+        } else {
+            Self::from_smtp(error)
+        }
+    }
+
     /// 从 Lettre 错误中提取分类，不保留其服务端文本或错误链。
     pub(super) fn from_smtp(error: &SmtpError) -> Self {
         // 超时、TLS 与池关闭优先保留专门分类；真实 4xx/5xx 由 status() 判定。
@@ -106,7 +115,17 @@ impl EmailError {
             EmailTransportErrorKind::SmtpResponse
         } else if error.is_client() {
             EmailTransportErrorKind::Client
-        } else if is_connection_error(error) {
+        } else if has_io_kind(error, |kind| {
+            matches!(
+                kind,
+                io::ErrorKind::ConnectionRefused
+                    | io::ErrorKind::ConnectionAborted
+                    | io::ErrorKind::ConnectionReset
+                    | io::ErrorKind::NotConnected
+                    | io::ErrorKind::AddrNotAvailable
+                    | io::ErrorKind::AddrInUse
+            )
+        }) {
             EmailTransportErrorKind::Connection
         } else {
             EmailTransportErrorKind::Network
@@ -126,23 +145,12 @@ fn classify_response_status(status: Option<u16>) -> EmailTransportErrorKind {
 }
 
 /// 只检查错误链中的 I/O 类型，不读取或输出底层错误文本。
-fn is_connection_error(error: &SmtpError) -> bool {
-    // 遍历 provider 的包装层，保留能由标准 I/O 类型确认的连接失败语义。
+fn has_io_kind(error: &SmtpError, matches_kind: impl Fn(io::ErrorKind) -> bool) -> bool {
     let mut source = StdError::source(error);
     while let Some(current) = source {
         if current
-            .downcast_ref::<std::io::Error>()
-            .is_some_and(|io_error| {
-                matches!(
-                    io_error.kind(),
-                    std::io::ErrorKind::ConnectionRefused
-                        | std::io::ErrorKind::ConnectionAborted
-                        | std::io::ErrorKind::ConnectionReset
-                        | std::io::ErrorKind::NotConnected
-                        | std::io::ErrorKind::AddrNotAvailable
-                        | std::io::ErrorKind::AddrInUse
-                )
-            })
+            .downcast_ref::<io::Error>()
+            .is_some_and(|error| matches_kind(error.kind()))
         {
             return true;
         }

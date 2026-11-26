@@ -18,14 +18,14 @@ Redis 是显式分层的领域能力。客户端、配置、错误、事务与�
 
 ```toml
 [dependencies]
-axutils = { version = "2.1", features = ["redis"] }
+axutils = { version = "3.0", features = ["redis"] }
 ```
 
 异步 Cluster：
 
 ```toml
 [dependencies]
-axutils = { version = "2.1", features = ["redis-cluster-async"] }
+axutils = { version = "3.0", features = ["redis-cluster-async"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 serde = { version = "1", features = ["derive"] }
 ```
@@ -55,9 +55,11 @@ fn main() -> Result<(), RedisError> {
 }
 ```
 
-Cluster 需要 `redis-cluster`；配置节点时用户名、密码和 database 必须保持一致。客户端第一阶段只
-接受 `redis://`，不启用 TLS。Cluster 的多 key 操作必须位于同一 hash slot；否则在本地校验
-输入后、发送命令前返回 `RedisError::CrossSlot`。`DEL`、`MGET`、`MSET` 不会被隐式拆成跨 slot
+Cluster 需要 `redis-cluster`，所有节点的 database 都必须为 `0`。各节点的用户名和密码按驱动解码后
+的值比较，因此等价的百分号编码可以混用。若只有部分节点提供用户名或密码，配置会返回
+`InvalidConfig { field: "credentials" }`。客户端第一阶段只接受 `redis://`，不启用 TLS。
+Cluster 的多 key 操作必须位于同一 hash slot，否则在本地校验输入后、发送命令前返回 `RedisError::CrossSlot`。
+对于服务端响应，只有 `CROSSSLOT` 错误码会映射到此类别。`DEL`、`MGET`、`MSET` 不会被隐式拆成跨 slot
 子命令；可以通过相同的非空 `{hash-tag}` 归组 key，MSET 的 value 不参与 slot 判断。
 
 ```rust,no_run
@@ -145,6 +147,8 @@ fn main() -> Result<(), RedisError> {
 `redis-async` 增加带 `_async` 后缀的单机 API；`redis-cluster-async` 再增加异步 Cluster。异步 API
 必须在调用方 Tokio runtime 中调用，库不会隐式创建 runtime。`transaction_async` 和
 `try_lock_async` 保持与同步版本相同的事务、取消与锁边界。
+单机普通异步命令在首次使用时建立共享连接。首次连接或认证失败会返回给当前调用，
+故障解除后可在同一个 `RedisClient` 上再次发起命令。
 
 取消等待中的异步命令不意味着服务端从未接收该命令，因此不能把取消后的写入当作可安全重放的操作；
 应用应以业务幂等键、状态查询或补偿流程处理不确定结果。异步 guard 的 `Drop` 同样不发送释放命令，
@@ -219,7 +223,7 @@ async fn main() -> Result<(), RedisError> {
 
 ```toml
 [dependencies]
-axutils = { version = "2.1", default-features = false, features = ["redis-invalidation"] }
+axutils = { version = "3.0", default-features = false, features = ["redis-invalidation"] }
 tokio = { version = "1", default-features = false, features = ["macros", "rt-multi-thread", "time", "net"] }
 ```
 

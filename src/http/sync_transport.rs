@@ -334,11 +334,52 @@ fn map_ureq_error(error: &SyncError) -> HttpTransportErrorKind {
     }
 }
 
-/// 从正文 reader 的标准 I/O 包装中恢复 ureq 分类；未知包装保持 Other。
+/// 正文读取优先沿用包装的 ureq 分类，再按裸 I/O 错误识别超时与连接中断。
 fn map_sync_body_error(error: &Error) -> HttpTransportErrorKind {
-    error
+    // ureq 的 into_io 会解开 Io 变体，其他变体仍携带 TLS、协议或超时等具体原因。
+    if let Some(inner) = error
         .get_ref()
         .and_then(|inner| inner.downcast_ref::<SyncError>())
-        .map(map_ureq_error)
-        .unwrap_or(HttpTransportErrorKind::Other)
+    {
+        return map_ureq_error(inner);
+    }
+    // 提前 EOF 表示正文尚未收全。解码等其他 I/O 错误没有足够信息判定为连接失败。
+    match error.kind() {
+        ErrorKind::TimedOut | ErrorKind::WouldBlock => HttpTransportErrorKind::Timeout,
+        ErrorKind::UnexpectedEof
+        | ErrorKind::ConnectionAborted
+        | ErrorKind::ConnectionRefused
+        | ErrorKind::ConnectionReset
+        | ErrorKind::BrokenPipe
+        | ErrorKind::NotConnected => HttpTransportErrorKind::Connection,
+        _ => HttpTransportErrorKind::Other,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ureq::Timeout;
+
+    #[test]
+    fn body_reader_classifies_plain_io_and_preserves_wrapped_errors() {
+        for (error, expected) in [
+            (ErrorKind::TimedOut.into(), HttpTransportErrorKind::Timeout),
+            (
+                ErrorKind::ConnectionReset.into(),
+                HttpTransportErrorKind::Connection,
+            ),
+            (ErrorKind::InvalidData.into(), HttpTransportErrorKind::Other),
+            (
+                SyncError::Timeout(Timeout::RecvBody).into_io(),
+                HttpTransportErrorKind::Timeout,
+            ),
+            (
+                Error::new(ErrorKind::UnexpectedEof, SyncError::Tls("test")),
+                HttpTransportErrorKind::Tls,
+            ),
+        ] {
+            assert_eq!(map_sync_body_error(&error), expected);
+        }
+    }
 }

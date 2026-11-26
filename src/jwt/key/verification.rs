@@ -1,6 +1,6 @@
 use std::fmt;
 
-use jsonwebtoken::DecodingKey;
+use jsonwebtoken::{crypto::rust_crypto, Algorithm, DecodingKey};
 
 use super::{
     super::{EcCurve, JwtError, KeyFamily},
@@ -13,8 +13,9 @@ use super::{
 /// 拥有型 JWT 验证 key。
 ///
 /// 验证服务可以只持有公钥，不需要私钥。该类型不实现 `Clone` 或 key 读取 API，
-/// `Display`/`Debug` 只显示 key family。RSA 私钥 PEM、EC/Ed 私钥和不符合 Ed25519 32-byte raw 约束的
-/// key 会被拒绝；opaque DER 的结构错误会在 decode 阶段稳定返回 key 错误。
+/// `Display`/`Debug` 只显示 key family。构造时拒绝私钥 PEM，Ed25519 raw 公钥必须为 32 字节。
+/// 对延迟校验的输入，`decode` 将不符合 RSA 公钥结构或无法解析的 SEC1 公钥点归为
+/// `JwtError::UnsupportedKeyFormat { kind: "verification_key" }`。
 ///
 /// # Examples
 ///
@@ -68,9 +69,11 @@ impl JwtVerificationKey {
                 kind: "hmac_secret",
             });
         }
+        let backend = DecodingKey::from_secret(bytes)
+            .map_err(|error| map_backend_key_error(&error, "hmac_secret"))?;
         Ok(Self {
             family: KeyFamily::Hmac,
-            backend: DecodingKey::from_secret(bytes),
+            backend,
             rsa_modulus_bits: None,
             ec_curve: None,
             rsa_der_kind: RsaDerKind::Unknown,
@@ -166,8 +169,9 @@ impl JwtVerificationKey {
 
     /// 从 SEC1 encoded public-point bytes 构造 ECDSA 验证 key。
     ///
-    /// 这里的 DER 构造器名称保持与后端一致，但输入语义固定为 SEC1 public-point bytes；
-    /// 未被探针证明的 SubjectPublicKeyInfo DER 不在承诺范围内。结构错误延迟到 decode 阶段。
+    /// 输入为 SEC1 公钥点字节。`decode` 按配置曲线解析公钥点，点编码或坐标无效时返回
+    /// `JwtError::UnsupportedKeyFormat { kind: "verification_key" }`。公钥有效而签名不匹配时
+    /// 返回 `JwtError::InvalidToken { segment: "token" }`。SubjectPublicKeyInfo DER 不在支持范围内。
     ///
     /// # Examples
     ///
@@ -279,12 +283,23 @@ impl JwtVerificationKey {
         self.family == KeyFamily::Rsa && self.rsa_der_kind == RsaDerKind::Public
     }
 
-    pub(crate) fn validate_for_decode(&self) -> Result<(), JwtError> {
-        if self.family == KeyFamily::Rsa && self.rsa_der_kind != RsaDerKind::Public {
-            return Err(JwtError::UnsupportedKeyFormat {
-                kind: "verification_key",
-            });
+    /// 在 decode 的验签阶段检查公钥格式，区分配置的密钥错误和 token 签名错误。
+    pub(crate) fn validate_for_decode(&self, algorithm: Algorithm) -> Result<(), JwtError> {
+        match self.family {
+            // RSA 构造时已记录 PKCS#1 的角色和结构。
+            KeyFamily::Rsa if self.rsa_der_kind != RsaDerKind::Public => {
+                Err(JwtError::UnsupportedKeyFormat {
+                    kind: "verification_key",
+                })
+            }
+            // RustCrypto 在创建 verifier 时按算法解析 SEC1 点并验证坐标。这里只解析公钥，
+            // 实际验签仍由进程选择的 provider 执行，避免 AWS-LC 将解析失败合入签名错误。
+            KeyFamily::Ec => {
+                (rust_crypto::DEFAULT_PROVIDER.verifier_factory)(&algorithm, &self.backend)
+                    .map(|_| ())
+                    .map_err(|error| map_backend_key_error(&error, "verification_key"))
+            }
+            _ => Ok(()),
         }
-        Ok(())
     }
 }

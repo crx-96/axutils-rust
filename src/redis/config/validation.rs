@@ -35,15 +35,6 @@ pub(super) fn validate_database(endpoint: &str, cluster: bool) -> Result<(), Red
     Ok(())
 }
 
-#[cfg(feature = "redis-cluster")]
-pub(super) fn endpoint_credentials(endpoint: &str) -> Option<&str> {
-    let authority = endpoint["redis://".len()..]
-        .split(['/', '?', '#'])
-        .next()
-        .unwrap_or_default();
-    authority.rfind('@').map(|at| &authority[..at])
-}
-
 pub(super) fn bounded(
     value: usize,
     min: usize,

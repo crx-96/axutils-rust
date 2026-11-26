@@ -63,16 +63,27 @@ fn rejects_invalid_single_node_urls() {
 
 #[cfg(feature = "redis-cluster")]
 #[test]
-fn rejects_inconsistent_cluster_credentials() {
-    assert!(matches!(
-        RedisConfig::cluster([
-            "redis://user:one@127.0.0.1:7000/0",
-            "redis://user:two@127.0.0.1:7001/0",
-        ]),
-        Err(RedisError::InvalidConfig {
-            field: "credentials"
-        })
-    ));
+fn cluster_compares_decoded_credentials() {
+    let first = "redis://user:p%40ss@127.0.0.1:7000/0";
+    let equivalent = "redis://%75ser:%70%40ss@127.0.0.1:7001/0";
+    RedisClient::new(RedisConfig::cluster([first, equivalent]).unwrap()).unwrap();
+
+    for other in [
+        "redis://user:two@127.0.0.1:7001/0",
+        "redis://other:p%40ss@127.0.0.1:7001/0",
+        "redis://:p%40ss@127.0.0.1:7001/0",
+        "redis://user@127.0.0.1:7001/0",
+        "redis://127.0.0.1:7001/0",
+    ] {
+        for nodes in [[first, other], [other, first]] {
+            assert!(matches!(
+                RedisConfig::cluster(nodes),
+                Err(RedisError::InvalidConfig {
+                    field: "credentials"
+                })
+            ));
+        }
+    }
 }
 
 #[test]

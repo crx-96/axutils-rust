@@ -154,7 +154,7 @@ const DEP_TIME: DirectDependency = DirectDependency {
 const DEP_JIFF: DirectDependency = DirectDependency {
     name: "jiff",
     package: None,
-    version: "0.2",
+    version: "1",
     default_features: false,
     features: &[],
 };
@@ -169,7 +169,7 @@ const DEP_SERDE: DirectDependency = DirectDependency {
 const DEP_SQLX: DirectDependency = DirectDependency {
     name: "sqlx",
     package: None,
-    version: "0.9.0",
+    version: "0.9.1",
     default_features: false,
     features: &[],
 };
@@ -362,8 +362,9 @@ const DOCUMENT_METADATA: &[DocumentMetadata] = &[
         "docs/examples/sqlx.md",
         settings(&["sqlx-postgres"], NO_DEPS),
         &[
-            block(4, settings(&["sqlx-sqlite"], NO_DEPS)),
-            block(6, settings(&["sqlx-postgres"], &[DEP_SQLX])),
+            block(4, settings(&["sqlx-postgres"], &[DEP_SQLX])),
+            block(5, settings(&["sqlx-sqlite"], NO_DEPS)),
+            block(7, settings(&["sqlx-postgres"], &[DEP_SQLX])),
         ],
     ),
     document(

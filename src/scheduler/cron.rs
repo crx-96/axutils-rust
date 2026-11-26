@@ -1,6 +1,6 @@
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use chrono::{DateTime, LocalResult, TimeDelta, TimeZone, Timelike, Utc};
+use chrono::{DateTime, LocalResult, NaiveDateTime, TimeDelta, TimeZone, Timelike, Utc};
 use chrono_tz::Tz;
 use croner::{
     parser::{CronParser, Seconds, Year},
@@ -38,16 +38,14 @@ impl CronSchedule {
             .year(Year::Disallowed)
             .alternative_weekdays(false)
             .dom_and_dow(false)
+            .sloppy_ranges(true)
             .build()
             .parse(expression)
             .map_err(|_| SchedulerError::InvalidCron)?;
         Ok(Self { cron, timezone })
     }
 
-    pub(crate) fn delay_from_now(&self) -> Result<Duration, SchedulerError> {
-        self.delay_from(SystemTime::now())
-    }
-
+    /// 从采样的墙钟时刻计算到下一次有效触发的正延迟，保留采样的亚秒精度。
     pub(crate) fn delay_from(&self, now: SystemTime) -> Result<Duration, SchedulerError> {
         let elapsed = now
             .duration_since(UNIX_EPOCH)
@@ -63,8 +61,13 @@ impl CronSchedule {
             .cron
             .find_next_occurrence(&search_local, false)
             .map_err(|_| SchedulerError::InvalidCron)?;
-        if next_local.with_timezone(&Utc) <= now_utc {
-            next_local = self.next_after_repeated_hour(&search_local, &now_utc)?;
+        // Croner 也会返回回拨后第二次出现的间隔触发点，本库只保留第一次出现的触发点。
+        let next_wall_time = next_local.naive_local();
+        if matches!(
+            self.timezone.from_local_datetime(&next_wall_time),
+            LocalResult::Ambiguous(_, later) if next_local == later
+        ) {
+            next_local = self.next_after_repeated_range(next_wall_time)?;
         }
         if next_local.nanosecond() != 0 {
             return Err(SchedulerError::InvalidCron);
@@ -80,25 +83,15 @@ impl CronSchedule {
         Ok(delay)
     }
 
-    fn next_after_repeated_hour(
+    /// 从已知的重复墙钟时间起，找到重复区间结束后的第一个匹配时刻。
+    fn next_after_repeated_range(
         &self,
-        now_local: &DateTime<Tz>,
-        now_utc: &DateTime<Utc>,
+        repeated_wall_time: NaiveDateTime,
     ) -> Result<DateTime<Tz>, SchedulerError> {
-        let naive_now = now_local.naive_local();
-        let LocalResult::Ambiguous(_, later) = self.timezone.from_local_datetime(&naive_now) else {
-            return Err(SchedulerError::InvalidCron);
-        };
-        if later.with_timezone(&Utc) > *now_utc {
-            return Err(SchedulerError::InvalidCron);
-        }
-
-        // Croner searches on naive wall-clock values and resolves ambiguous values to
-        // the earlier offset. Once the later copy of a repeated hour has begun, skip
-        // the remainder of that repeated wall-clock range so it cannot be replayed.
+        // 用指数步长找到区间外的探测点，再二分定位第一个不重复的秒，避免逐秒扫描。
         let mut upper = 1_i64;
         loop {
-            let probe = naive_now
+            let probe = repeated_wall_time
                 .checked_add_signed(TimeDelta::seconds(upper))
                 .ok_or(SchedulerError::InvalidCron)?;
             if !matches!(
@@ -116,7 +109,7 @@ impl CronSchedule {
         let mut lower = 0_i64;
         while lower + 1 < upper {
             let middle = lower + (upper - lower) / 2;
-            let probe = naive_now
+            let probe = repeated_wall_time
                 .checked_add_signed(TimeDelta::seconds(middle))
                 .ok_or(SchedulerError::InvalidCron)?;
             if matches!(
@@ -129,7 +122,7 @@ impl CronSchedule {
             }
         }
 
-        let boundary_naive = naive_now
+        let boundary_naive = repeated_wall_time
             .checked_add_signed(TimeDelta::seconds(upper))
             .ok_or(SchedulerError::InvalidCron)?;
         let boundary = self
@@ -150,28 +143,31 @@ impl CronSchedule {
     }
 }
 
+/// 在 Croner 替换名称前校验六段表达式及允许的名称，数值范围和步进由 Croner 解析。
 fn has_supported_fields(expression: &str) -> bool {
     let fields = expression.split_whitespace().collect::<Vec<_>>();
     if fields.len() != 6 {
         return false;
     }
     fields.iter().enumerate().all(|(index, field)| {
-        if field
-            .chars()
-            .any(|value| matches!(value, '#' | '+' | '?' | '@'))
+        // 单值步进保留历史写法 `5/10`，省略起点的 `/10` 仍属于无效输入。
+        if field.split(',').any(|item| item.starts_with('/'))
+            || field
+                .chars()
+                .any(|value| matches!(value, '#' | '+' | '?' | '@'))
         {
             return false;
         }
-        let mut normalized = field.to_ascii_uppercase();
         let names: &[&str] = match index {
             4 => &MONTH_NAMES,
             5 => &WEEKDAY_NAMES,
             _ => &[],
         };
-        for name in names {
-            normalized = normalized.replace(name, "");
-        }
-        !normalized.chars().any(|value| value.is_ascii_alphabetic())
+        // 列表、范围和步进分隔符界定完整名称，避免 JANFEB 被上游连续替换成 12。
+        field.split([',', '-', '/']).all(|token| {
+            !token.bytes().any(|byte| byte.is_ascii_alphabetic())
+                || names.iter().any(|name| token.eq_ignore_ascii_case(name))
+        })
     })
 }
 
@@ -220,12 +216,59 @@ mod tests {
             Duration::from_secs(24 * 60 * 60 + 20 * 60)
         );
 
-        let overlap_boundary = CronSchedule::parse("0 */10 * * * *", "America/New_York").unwrap();
+        let overlap_interval = CronSchedule::parse("0 */10 * * * *", "America/New_York").unwrap();
+        for (hour, minute, expected_delay_minutes) in [(5, 10, 10), (5, 50, 70), (6, 10, 50)] {
+            let now = Utc.with_ymd_and_hms(2025, 11, 2, hour, minute, 0).unwrap();
+            assert_eq!(
+                overlap_interval
+                    .delay_from(system_time(now.timestamp()))
+                    .unwrap(),
+                Duration::from_secs(expected_delay_minutes * 60),
+                "unexpected delay from {now}"
+            );
+        }
+    }
+
+    #[test]
+    fn dst_overlap_skips_a_half_hour_fold_and_resumes_on_the_next_match() {
+        let schedule = CronSchedule::parse("0 5-59/10 * * * *", "Australia/Lord_Howe").unwrap();
+        let before_fold = Utc.with_ymd_and_hms(2025, 4, 5, 14, 55, 0).unwrap();
+        let during_fold = Utc.with_ymd_and_hms(2025, 4, 5, 15, 15, 0).unwrap();
         assert_eq!(
-            overlap_boundary
-                .delay_from(system_time(second_hour.timestamp()))
+            schedule
+                .delay_from(system_time(before_fold.timestamp()))
                 .unwrap(),
-            Duration::from_secs(50 * 60)
+            Duration::from_secs(40 * 60)
+        );
+        assert_eq!(
+            schedule
+                .delay_from(system_time(during_fold.timestamp()))
+                .unwrap(),
+            Duration::from_secs(20 * 60)
+        );
+    }
+
+    #[test]
+    fn single_value_steps_keep_the_legacy_range_and_require_a_start() {
+        let schedule = CronSchedule::parse("0 5/10 * * * *", "UTC").unwrap();
+        let now = Utc.with_ymd_and_hms(2025, 1, 1, 0, 5, 0).unwrap();
+        assert_eq!(
+            schedule.delay_from(system_time(now.timestamp())).unwrap(),
+            Duration::from_secs(10 * 60)
+        );
+        assert!(CronSchedule::parse("0 /10 * * * *", "UTC").is_err());
+        assert!(CronSchedule::parse("0 5,/10 * * * *", "UTC").is_err());
+    }
+
+    #[test]
+    fn repeated_sunday_range_only_matches_sunday() {
+        let schedule = CronSchedule::parse("0 0 0 * * SUN-SUN", "UTC").unwrap();
+        let monday = Utc.with_ymd_and_hms(2025, 1, 6, 0, 0, 0).unwrap();
+        assert_eq!(
+            schedule
+                .delay_from(system_time(monday.timestamp()))
+                .unwrap(),
+            Duration::from_secs(6 * 24 * 60 * 60)
         );
     }
 
@@ -237,6 +280,49 @@ mod tests {
             schedule.delay_from(system_time(start.timestamp())).unwrap(),
             Duration::from_secs(2 * 24 * 60 * 60)
         );
+    }
+
+    #[test]
+    fn named_ranges_lists_and_steps_match_the_expected_dates() {
+        for (expression, start, next) in [
+            ("0 0 0 * jAn-MaY/2,SEP *", (1, 31), (3, 1)),
+            ("0 0 0 * jAn-MaY/2,SEP *", (5, 31), (9, 1)),
+            ("0 0 0 * JAN/2 *", (1, 31), (3, 1)),
+            ("0 0 0 * * MON/2", (1, 6), (1, 8)),
+            ("0 0 0 * * mOn-fRi/2,SUN", (1, 6), (1, 8)),
+            ("0 0 0 * * mOn-fRi/2,SUN", (1, 10), (1, 12)),
+        ] {
+            let schedule = CronSchedule::parse(expression, "UTC").unwrap();
+            let midnight = |(month, day)| {
+                let date = Utc.with_ymd_and_hms(2025, month, day, 0, 0, 0).unwrap();
+                system_time(date.timestamp())
+            };
+            let start = midnight(start);
+            assert_eq!(start + schedule.delay_from(start).unwrap(), midnight(next));
+        }
+    }
+
+    #[test]
+    fn names_must_be_complete_month_or_weekday_tokens() {
+        for expression in [
+            "0 0 0 * JANFEB *",
+            "0 0 0 * jan2 *",
+            "0 0 0 * 0JAN *",
+            "0 0 0 * JAN-MARAPR/2 *",
+            "0 0 0 * * SUNMON",
+            "0 0 0 * * sun1,FRI",
+            "0 0 0 * * 0MON",
+            "0 0 0 * MON *",
+            "0 0 0 * * JAN",
+        ] {
+            assert!(
+                matches!(
+                    CronSchedule::parse(expression, "UTC"),
+                    Err(super::SchedulerError::InvalidCron)
+                ),
+                "{expression}"
+            );
+        }
     }
 
     #[test]

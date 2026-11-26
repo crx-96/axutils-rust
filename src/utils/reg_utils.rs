@@ -159,7 +159,10 @@ impl RegUtils {
             return false;
         };
 
-        number.is_valid() && number.number_type(&DATABASE) == Type::Mobile
+        // 解析器可剥离国内拨号前缀，严格 E.164 输入必须与规范化后的号码相同。
+        number.is_valid()
+            && number.number_type(&DATABASE) == Type::Mobile
+            && number.to_string() == value
     }
 }
 
@@ -181,7 +184,8 @@ fn is_strict_email_domain(value: &str) -> bool {
             && (top_level_label
                 .bytes()
                 .all(|byte| byte.is_ascii_alphabetic())
-                || (top_level_label.starts_with("xn--") && top_level_label.len() > 4)))
+                || (top_level_label.len() > 4
+                    && top_level_label.as_bytes()[..4].eq_ignore_ascii_case(b"xn--"))))
 }
 
 fn is_strict_email_domain_label(label: &str) -> bool {
@@ -245,6 +249,7 @@ mod tests {
             "first.last+tag@example.co.uk",
             "customer/department=shipping@example.com",
             "user@sub.example.xn--fiqs8s",
+            "user@sub.example.Xn--FiQs8S",
         ];
 
         for value in valid_values {
@@ -362,6 +367,7 @@ mod tests {
             "+999123456789",
             "+86138123456789",
             "+441234567890",
+            "+4407911123456",
             "+14155552671",
         ];
 

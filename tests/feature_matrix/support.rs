@@ -1,6 +1,7 @@
 use std::{
     collections::BTreeMap,
-    env, fs,
+    fs,
+    io::ErrorKind,
     path::{Path, PathBuf},
     process::{Command, Output},
     sync::{
@@ -13,7 +14,22 @@ use std::{
 pub(super) struct FixtureCase {
     pub(super) feature: &'static str,
     pub(super) expected_success: bool,
-    pub(super) diagnostic_tokens: &'static [&'static str],
+    pub(super) diagnostics: &'static [ExpectedDiagnostic],
+}
+
+#[derive(Debug)]
+pub(super) enum ExpectedDiagnostic {
+    /// E0599 同时指出所属类型和缺失成员。
+    Member(&'static str, &'static str),
+    /// E0432 可在同一条主消息中逐项列出多个未解析的完整导入路径。
+    Import(&'static str),
+    /// 错误码、主消息指出的符号或约束，以及触发错误的 fixture 路径。
+    AtPath(&'static str, &'static str, &'static str),
+}
+
+// Cargo 按 feature、profile 和包身份区分产物，并用构建锁协调共享目录的并发写入。
+fn shared_build_target() -> PathBuf {
+    Path::new(env!("CARGO_TARGET_TMPDIR")).join("feature-matrix")
 }
 
 pub(super) fn run_fixture_cases(name: &str, cases: &[FixtureCase]) {
@@ -22,26 +38,28 @@ pub(super) fn run_fixture_cases(name: &str, cases: &[FixtureCase]) {
         .join("fixtures")
         .join("semantic_feature_matrix")
         .join("Cargo.toml");
-    let target = TemporaryTarget::new(&format!("axutils-{}-feature-matrix", name));
+    let target = shared_build_target();
     let (fixture, copied_manifest) = copy_fixture_to_temporary_directory(&manifest);
+    let source = fs::read_to_string(fixture.path().join("src/main.rs")).expect("read matrix probe");
     for case in cases {
         FIXTURE_CARGO_CALLS.fetch_add(1, Ordering::Relaxed);
-        let output = run_fixture(&copied_manifest, target.path(), case.feature);
+        let output = run_fixture(&copied_manifest, &target, case.feature);
         assert_eq!(
             output.status.success(),
             case.expected_success,
-            "fixture feature {:?} unexpected status: {}\nstdout: {}\nstderr: {}",
+            "fixture group {name}, feature {:?} unexpected status: {}\nstdout: {}\nstderr: {}",
             case.feature,
             output.status,
             String::from_utf8_lossy(&output.stdout),
             String::from_utf8_lossy(&output.stderr),
         );
         if !case.expected_success {
-            assert_expected_diagnostics(&output, case.feature, case.diagnostic_tokens);
+            let stderr =
+                std::str::from_utf8(&output.stderr).expect("cargo diagnostics must be UTF-8");
+            assert_expected_diagnostics(stderr, &source, case.feature, case.diagnostics);
         }
     }
     fixture.cleanup();
-    target.cleanup();
 }
 
 pub(super) fn run_downstream_contract(fixture_name: &str, subcommand: &str, feature_sets: &[&str]) {
@@ -49,7 +67,7 @@ pub(super) fn run_downstream_contract(fixture_name: &str, subcommand: &str, feat
         .join("tests/fixtures")
         .join(fixture_name)
         .join("Cargo.toml");
-    let target = TemporaryTarget::new("axutils-downstream-contract");
+    let target = shared_build_target();
     let (fixture, manifest) = copy_fixture_to_temporary_directory(&manifest);
     for &features in feature_sets {
         let mut command = Command::new("cargo");
@@ -58,7 +76,7 @@ pub(super) fn run_downstream_contract(fixture_name: &str, subcommand: &str, feat
             .arg("--manifest-path")
             .arg(&manifest)
             .arg("--target-dir")
-            .arg(target.path())
+            .arg(&target)
             .env("CARGO_TERM_COLOR", "never");
         if !features.is_empty() {
             command.arg("--features").arg(features);
@@ -76,7 +94,6 @@ pub(super) fn run_downstream_contract(fixture_name: &str, subcommand: &str, feat
         );
     }
     fixture.cleanup();
-    target.cleanup();
 }
 
 pub(super) fn assert_removed_provider_features(features: &[&str]) {
@@ -116,12 +133,13 @@ pub(super) fn assert_removed_provider_features(features: &[&str]) {
             "removed provider feature {} unexpectedly resolved",
             feature
         );
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let requested = format!("with feature `{feature}`");
         assert!(
-            String::from_utf8_lossy(&output.stderr).contains("axutils")
-                && String::from_utf8_lossy(&output.stderr).contains("does not have"),
-            "removed provider feature {} failed for an unexpected reason: {}",
-            feature,
-            String::from_utf8_lossy(&output.stderr)
+            stderr.lines().any(|line| {
+                line.contains(&requested) && line.contains("`axutils` does not have that feature")
+            }),
+            "removed provider feature {feature} failed for an unexpected reason: {stderr}"
         );
         probe.cleanup();
     }
@@ -133,15 +151,25 @@ struct TemporaryTarget(PathBuf);
 impl TemporaryTarget {
     fn new(prefix: &str) -> Self {
         static COUNTER: AtomicUsize = AtomicUsize::new(0);
-        for _ in 0..100 {
+        let parent = Path::new(env!("CARGO_TARGET_TMPDIR"));
+        fs::create_dir_all(parent).unwrap_or_else(|error| {
+            panic!(
+                "failed to create matrix directory {}: {error}",
+                parent.display()
+            )
+        });
+        loop {
             let counter = COUNTER.fetch_add(1, Ordering::Relaxed);
-            let path =
-                env::temp_dir().join(format!("{}-{}-{}", prefix, std::process::id(), counter));
-            if fs::create_dir(&path).is_ok() {
-                return Self(path);
+            let path = parent.join(format!("{prefix}-{}-{counter}", std::process::id()));
+            match fs::create_dir(&path) {
+                Ok(()) => return Self(path),
+                Err(error) if error.kind() == ErrorKind::AlreadyExists => continue,
+                Err(error) => panic!(
+                    "failed to create matrix directory {}: {error}",
+                    path.display()
+                ),
             }
         }
-        panic!("failed to allocate temporary target for {}", prefix);
     }
 
     fn path(&self) -> &Path {
@@ -168,8 +196,6 @@ impl Drop for TemporaryTarget {
 }
 
 fn run_fixture(manifest: &Path, target_dir: &Path, feature: &str) -> Output {
-    // The group owns one private copy. This keeps Windows artifact identity isolated while
-    // letting all feature cases reuse the group's Cargo target directory.
     let mut command = Command::new("cargo");
     command
         .arg("check")
@@ -179,7 +205,7 @@ fn run_fixture(manifest: &Path, target_dir: &Path, feature: &str) -> Output {
         .arg(target_dir)
         .arg("--no-default-features")
         .arg("--offline")
-        .arg("--message-format=json")
+        .arg("--message-format=short")
         .env("CARGO_TERM_COLOR", "never");
     if !feature.is_empty() {
         command.arg("--features").arg(feature);
@@ -253,49 +279,79 @@ fn copy_fixture_directory(source: &Path, destination: &Path) {
     }
 }
 
-fn assert_expected_diagnostics(output: &Output, feature: &str, tokens: &[&str]) {
-    let diagnostics = rust_error_diagnostics(output);
-    assert!(
-        !diagnostics.is_empty(),
-        "fixture {} did not emit a Rust API diagnostic",
-        feature
-    );
-    for token in tokens {
-        let token = normalize(token);
-        assert!(
-            diagnostics
-                .iter()
-                .any(|diagnostic| normalize(diagnostic).contains(&token)),
-            "fixture {} did not report {}\ndiagnostics: {diagnostics:#?}",
-            feature,
-            token,
-        );
+#[derive(Debug)]
+struct FixtureError<'a> {
+    code: &'a str,
+    message: &'a str,
+    source_line: &'a str,
+}
+
+impl<'a> FixtureError<'a> {
+    fn from_short_diagnostic(line: &'a str, source: &'a str) -> Option<Self> {
+        let (location, diagnostic) = line.split_once(": error[")?;
+        let (code, message) = diagnostic.split_once("]: ")?;
+        let (file_and_line, _) = location.rsplit_once(':')?;
+        let (file, line_number) = file_and_line.rsplit_once(':')?;
+        if Path::new(file) != Path::new("src/main.rs") {
+            return None;
+        }
+        let index = line_number.parse::<usize>().ok()?.checked_sub(1)?;
+        Some(Self {
+            code,
+            message,
+            source_line: source.lines().nth(index)?,
+        })
+    }
+
+    fn matches(&self, expected: &ExpectedDiagnostic) -> bool {
+        let mut quoted = self.message.split('`').skip(1).step_by(2);
+        match *expected {
+            ExpectedDiagnostic::Member(owner, name) => {
+                self.code == "E0599" && quoted.next() == Some(name) && quoted.next() == Some(owner)
+            }
+            ExpectedDiagnostic::Import(path) => {
+                // 短格式在主消息后附加 span 标签；只有主消息列出的导入确实未解析。
+                let imports = self.message.split(": ").next().unwrap();
+                self.code == "E0432"
+                    && imports
+                        .split('`')
+                        .skip(1)
+                        .step_by(2)
+                        .any(|item| item == path)
+            }
+            ExpectedDiagnostic::AtPath(code, subject, path) => {
+                // 模块可能先于成员报错，sealed bound 也可能与其他 trait 报在同一行。
+                self.code == code
+                    && quoted.next() == Some(subject)
+                    && self
+                        .source_line
+                        .split(|ch: char| !(ch.is_ascii_alphanumeric() || ch == '_' || ch == ':'))
+                        .any(|item| item.trim_end_matches("::") == path)
+            }
+        }
     }
 }
 
-fn rust_error_diagnostics(output: &Output) -> Vec<&str> {
-    const API_CODES: [&str; 7] = [
-        "E0277", "E0412", "E0425", "E0432", "E0433", "E0599", "E0603",
-    ];
-    std::str::from_utf8(&output.stdout)
-        .expect("cargo JSON output must be UTF-8")
+fn assert_expected_diagnostics(
+    stderr: &str,
+    source: &str,
+    feature: &str,
+    expected: &[ExpectedDiagnostic],
+) {
+    let diagnostics: Vec<_> = stderr
         .lines()
-        .filter(|line| {
-            line.contains(r#""reason":"compiler-message""#)
-                && line.contains(r#""level":"error""#)
-                && API_CODES
-                    .iter()
-                    .any(|code| line.contains(&format!(r#""code":"{code}""#)))
-        })
-        .collect()
-}
-
-fn normalize(value: &str) -> String {
-    value
-        .chars()
-        .filter(|character| character.is_alphanumeric())
-        .flat_map(char::to_lowercase)
-        .collect()
+        .filter_map(|line| FixtureError::from_short_diagnostic(line, source))
+        .collect();
+    assert!(
+        !diagnostics.is_empty(),
+        "fixture {feature} did not emit a Rust API diagnostic:\n{stderr}"
+    );
+    for item in expected {
+        assert!(
+            diagnostics.iter().any(|error| error.matches(item)),
+            "fixture {feature} did not report {item:?}\ndiagnostics: {diagnostics:#?}"
+        );
+    }
 }
 
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
@@ -306,8 +362,15 @@ struct TreeKey {
 }
 
 type TreeSlot = Arc<OnceLock<String>>;
-static TREE_CACHE: OnceLock<Mutex<BTreeMap<TreeKey, TreeSlot>>> = OnceLock::new();
-static TREE_CARGO_CALLS: AtomicUsize = AtomicUsize::new(0);
+struct TreeCache {
+    slots: BTreeMap<TreeKey, TreeSlot>,
+    cargo_calls: usize,
+}
+
+static TREE_CACHE: Mutex<TreeCache> = Mutex::new(TreeCache {
+    slots: BTreeMap::new(),
+    cargo_calls: 0,
+});
 static FIXTURE_CARGO_CALLS: AtomicUsize = AtomicUsize::new(0);
 const LEGACY_TREE_CALL_SITES: usize = 98;
 const MIN_TREE_CALL_REDUCTION_PERCENT: usize = 30;
@@ -323,9 +386,9 @@ pub(super) fn tree_with(features: &str, edges: &str, invert: Option<&str>) -> St
         invert: invert.map(str::to_owned),
     };
     let slot = {
-        let cache = TREE_CACHE.get_or_init(|| Mutex::new(BTreeMap::new()));
-        let mut cache = cache.lock().expect("TreeCache mutex poisoned");
+        let mut cache = TREE_CACHE.lock().expect("TreeCache mutex poisoned");
         cache
+            .slots
             .entry(key.clone())
             .or_insert_with(|| Arc::new(OnceLock::new()))
             .clone()
@@ -334,9 +397,10 @@ pub(super) fn tree_with(features: &str, edges: &str, invert: Option<&str>) -> St
 }
 
 pub(super) fn assert_tree_cache_budget() {
-    let cache = TREE_CACHE.get_or_init(|| Mutex::new(BTreeMap::new()));
-    let unique_keys = cache.lock().expect("TreeCache mutex poisoned").len();
-    let cargo_calls = TREE_CARGO_CALLS.load(Ordering::Relaxed);
+    let (unique_keys, cargo_calls) = {
+        let cache = TREE_CACHE.lock().expect("TreeCache mutex poisoned");
+        (cache.slots.len(), cache.cargo_calls)
+    };
     let fixture_calls = FIXTURE_CARGO_CALLS.load(Ordering::Relaxed);
     let saved_calls = LEGACY_TREE_CALL_SITES.saturating_sub(cargo_calls);
     let reduction_percent = saved_calls * 100 / LEGACY_TREE_CALL_SITES;
@@ -356,7 +420,6 @@ fn meets_tree_call_reduction(cargo_calls: usize) -> bool {
 }
 
 fn cargo_tree(key: &TreeKey) -> String {
-    TREE_CARGO_CALLS.fetch_add(1, Ordering::Relaxed);
     let target = TemporaryTarget::new("axutils-dependency-tree");
     let repository = Path::new(env!("CARGO_MANIFEST_DIR"))
         .to_string_lossy()
@@ -395,6 +458,10 @@ fn cargo_tree(key: &TreeKey) -> String {
     if let Some(package) = &key.invert {
         command.arg("--invert").arg(package);
     }
+    TREE_CACHE
+        .lock()
+        .expect("TreeCache mutex poisoned")
+        .cargo_calls += 1;
     let output = command.output().expect("failed to run cargo tree");
     assert!(
         output.status.success(),
@@ -407,7 +474,7 @@ fn cargo_tree(key: &TreeKey) -> String {
     tree
 }
 
-fn normalize_feature_csv(features: &str) -> String {
+pub(super) fn normalize_feature_csv(features: &str) -> String {
     let mut features = features
         .split(',')
         .filter(|feature| !feature.trim().is_empty())
@@ -427,6 +494,24 @@ pub(super) fn has_package(tree: &str, package: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::meets_tree_call_reduction;
+
+    #[test]
+    #[should_panic(expected = "did not report Member(\"TimeUtils\", \"format_date\")")]
+    fn remaining_format_datetime_error_does_not_cover_restored_format_date() {
+        use super::ExpectedDiagnostic::Member;
+        let source = "let _ = TimeUtils::format_date;\nlet _ = TimeUtils::format_datetime;";
+        let stderr = "src/main.rs:2:20: error[E0599]: no associated function named `format_datetime` found for struct `TimeUtils`: help: use `format_date`\n\
+                      src/main.rs:1:20: error[E0308]: mismatched types for `format_date` on `TimeUtils`";
+        super::assert_expected_diagnostics(
+            stderr,
+            source,
+            "time",
+            &[
+                Member("TimeUtils", "format_datetime"),
+                Member("TimeUtils", "format_date"),
+            ],
+        );
+    }
 
     #[test]
     fn tree_call_budget_matches_the_thirty_percent_contract() {

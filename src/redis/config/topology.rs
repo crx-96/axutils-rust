@@ -1,6 +1,6 @@
-#[cfg(feature = "redis-cluster")]
-use redis::cluster::ClusterClient;
 use redis::Client as UpstreamClient;
+#[cfg(feature = "redis-cluster")]
+use redis::{cluster::ClusterClient, ConnectionInfo};
 
 use super::validation;
 #[cfg(feature = "redis-cluster")]
@@ -37,8 +37,8 @@ impl RedisConfig {
     #[cfg(feature = "redis-cluster")]
     /// 创建并校验 Redis Cluster 初始节点配置。
     ///
-    /// 迭代器最多消费允许上限加一项；节点必须使用 `redis://`、数据库必须为 `0`。该方法
-    /// 不建立网络连接。
+    /// 迭代器最多消费允许上限加一项。节点必须使用 `redis://` 和数据库 `0`，驱动解码后的
+    /// 用户名和密码须分别在所有节点相同或均缺失。该方法不建立网络连接。
     ///
     /// # Examples
     ///
@@ -56,7 +56,7 @@ impl RedisConfig {
         S: Into<String>,
     {
         let mut collected = Vec::new();
-        let mut credentials: Option<Option<String>> = None;
+        let mut parsed_nodes: Vec<ConnectionInfo> = Vec::new();
         for node in nodes {
             if collected.len() >= MAX_CLUSTER_NODES {
                 return Err(RedisError::invalid_config("nodes"));
@@ -64,30 +64,30 @@ impl RedisConfig {
             let node = node.into();
             validation::validate_endpoint(&node)?;
             validation::validate_database(&node, true)?;
-            let node_credentials = validation::endpoint_credentials(&node).map(str::to_owned);
-            if let Some(expected) = credentials.as_ref() {
-                if expected.as_ref() != node_credentials.as_ref() {
+            // 复用驱动解析后的认证信息，保留用户名、密码各自的缺失状态。
+            let info: ConnectionInfo = node
+                .parse()
+                .map_err(|_| RedisError::invalid_config("nodes"))?;
+            if let Some(first) = parsed_nodes.first() {
+                let expected = first.redis_settings();
+                let current = info.redis_settings();
+                if expected.username() != current.username()
+                    || expected.password() != current.password()
+                {
                     return Err(RedisError::invalid_config("credentials"));
                 }
-            } else {
-                credentials = Some(node_credentials);
             }
+            parsed_nodes.push(info);
             collected.push(node);
         }
         if collected.is_empty() {
             return Err(RedisError::invalid_config("nodes"));
         }
 
-        ClusterClient::builder(collected.clone())
+        // 凭据已逐节点校验，用同一批连接信息交给驱动验证其余集群选项。
+        ClusterClient::builder(parsed_nodes)
             .build()
-            .map_err(|error| {
-                let detail = error.detail().unwrap_or_default().to_ascii_lowercase();
-                if detail.contains("password") || detail.contains("username") {
-                    RedisError::invalid_config("credentials")
-                } else {
-                    RedisError::invalid_config("nodes")
-                }
-            })?;
+            .map_err(|_| RedisError::invalid_config("nodes"))?;
         Ok(Self::defaults(RedisMode::Cluster(collected)))
     }
 

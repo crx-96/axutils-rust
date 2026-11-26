@@ -1,6 +1,6 @@
 [package]
 name = "axutils"
-version = "2.1.0"
+version = "3.0.0"
 edition = "2021"
 rust-version = "1.95"
 resolver = "3"
@@ -243,33 +243,36 @@ encoding_rs = ["dep:encoding_rs"]
 absolute_paths = "deny"
 
 [dependencies]
-itoa = { version = "1.0.18", optional = true, default-features = false }
+itoa = { version = "1.0.19", optional = true, default-features = false }
 ryu = { version = "1.0.23", optional = true, default-features = false }
 zmij = { version = "1.0.23", optional = true, default-features = false }
-uuid = { version = "1.24.0", optional = true, default-features = false, features = [
+uuid = { version = "1.29.3", optional = true, default-features = false, features = [
     "std",
 ] }
-jsonwebtoken = { version = "11.0.0", default-features = false, features = [
+jsonwebtoken = { version = "12.0.0", default-features = false, features = [
     "rust_crypto",
     "use_pem",
 ], optional = true }
-rand = { version = "0.10.2", optional = true }
+rand = { version = "0.10.4", optional = true }
 getrandom = { version = "0.4.3", optional = true, default-features = false }
-regex = { version = "1", optional = true }
-libphonenumber = { package = "phonenumber", version = "0.3", optional = true }
-serde = { version = "1", features = ["derive"], optional = true }
-serde_json = { version = "1", features = ["unbounded_depth"], optional = true }
+regex = { version = "1.13.2", optional = true }
+libphonenumber = { package = "phonenumber", version = "0.3.10", optional = true }
+serde = { version = "1.0.229", features = ["derive"], optional = true }
+serde_json = { version = "1.0.154", features = ["unbounded_depth"], optional = true }
 serde_urlencoded = { version = "0.7.1", optional = true }
-strfmt = { version = "0.2", optional = true }
-minijinja = { version = "2.24.0", default-features = false, features = [
+strfmt = { version = "0.2.6", optional = true }
+minijinja = { version = "3.1.0", default-features = false, features = [
     "serde",
 ], optional = true }
 chrono = { version = "0.4.45", default-features = false, optional = true }
 chrono_tz = { package = "chrono-tz", version = "0.10.4", default-features = false, optional = true }
-croner = { version = "3.0.1", default-features = false, optional = true }
-time = { version = "0.3.36", default-features = false, optional = true }
-jiff = { version = "0.2.35", default-features = false, optional = true }
-lettre = { version = "0.11.23", default-features = false, optional = true, features = [
+croner = { version = "5.0.1", default-features = false, features = [
+    "chrono",
+    "std",
+], optional = true }
+time = { version = "0.3.55", default-features = false, optional = true }
+jiff = { version = "1.0.3", default-features = false, optional = true }
+lettre = { version = "0.11.24", default-features = false, optional = true, features = [
     "builder",
     "smtp-transport",
     "pool",
@@ -277,37 +280,37 @@ lettre = { version = "0.11.23", default-features = false, optional = true, featu
     "ring",
     "webpki-roots",
 ] }
-ureq = { version = "3.4.0", default-features = false, features = [
+ureq = { version = "3.5.2", default-features = false, features = [
     "rustls",
 ], optional = true }
-reqwest = { version = "0.13.4", default-features = false, features = [
+reqwest = { version = "0.13.5", default-features = false, features = [
     "rustls",
 ], optional = true }
-redis = { version = "1.5.0", default-features = false, optional = true }
-sqlx = { version = "0.9.0", default-features = false, optional = true }
+redis = { version = "1.8.3", default-features = false, optional = true }
+sqlx = { version = "0.9.1", default-features = false, optional = true }
 futures-util = { version = "0.3.34", default-features = false, features = [
     "alloc",
 ], optional = true }
 r2d2 = { version = "0.8.10", optional = true }
 rmp-serde = { version = "1.3.1", optional = true }
-url = { version = "2.5.8", default-features = false, features = [
+url = { version = "2.5.9", default-features = false, features = [
     "std",
 ], optional = true }
-tokio = { version = "1.53.1", default-features = false, optional = true }
+tokio = { version = "1.54.1", default-features = false, optional = true }
 axum = { version = "0.8.9", default-features = false, optional = true }
-tokio-util = { version = "0.7.19", default-features = false, optional = true }
-futures-timer = { version = "3.0.3", default-features = false, optional = true }
+tokio-util = { version = "0.7.20", default-features = false, optional = true }
+futures-timer = { version = "3.0.4", default-features = false, optional = true }
 tower = { version = "0.5.3", default-features = false, optional = true }
-tower-http = { version = "0.7.0", default-features = false, optional = true }
+tower-http = { version = "0.7.1", default-features = false, optional = true }
 tower_governor = { version = "0.8.0", default-features = false, optional = true }
 tempfile = { version = "3.27", default-features = false, optional = true }
 async-tempfile = { version = "0.8", default-features = false, optional = true }
-toml = { version = "1.1.4", default-features = false, features = [
+toml = { version = "1.2.3", default-features = false, features = [
     "parse",
     "serde",
     "std",
 ], optional = true }
-serde-saphyr = { version = "1.0.1", default-features = false, features = [
+serde-saphyr = { version = "2.2.0", default-features = false, features = [
     "deserialize",
 ], optional = true }
 rust-ini = { version = "0.21.3", default-features = false, optional = true }
@@ -315,10 +318,10 @@ base64 = { version = "0.23.1", default-features = false, features = [
     "std",
 ], optional = true }
 md5 = { package = "md-5", version = "0.11.0", default-features = false, optional = true }
-aes = { version = "0.9.2", default-features = false, features = [
+aes = { version = "0.9.4", default-features = false, features = [
     "zeroize",
 ], optional = true }
-aes-gcm = { version = "0.11.0", default-features = false, features = [
+aes-gcm = { version = "0.11.1", default-features = false, features = [
     "aes",
     "alloc",
     "getrandom",
@@ -329,8 +332,8 @@ cbc = { version = "0.2.1", default-features = false, features = [
     "block-padding",
     "zeroize",
 ], optional = true }
-zeroize = { version = "1.9.0", default-features = false, optional = true }
-encoding_rs = { version = "0.8.35", default-features = false, features = [
+zeroize = { version = "1.9.2", default-features = false, optional = true }
+encoding_rs = { version = "0.8.44", default-features = false, features = [
     "alloc",
 ], optional = true }
 tracing = { version = "0.1.44", default-features = false, features = [
@@ -343,7 +346,7 @@ tracing-subscriber = { version = "0.3.23", default-features = false, features = 
 tracing-appender = { version = "0.2.5", default-features = false, optional = true }
 
 [dev-dependencies]
-tokio = { version = "1.53.1", default-features = false, features = [
+tokio = { version = "1.54.1", default-features = false, features = [
     "macros",
     "io-util",
     "rt-multi-thread",
@@ -351,7 +354,7 @@ tokio = { version = "1.53.1", default-features = false, features = [
     "test-util",
 ] }
 redis-test = "1.0.4"
-rustls = { version = "0.23.43", default-features = false, features = [
+rustls = { version = "0.23.46", default-features = false, features = [
     "ring",
     "std",
     "tls12",

@@ -5,8 +5,7 @@ use serde::Serialize;
 use serde_json::{value::RawValue, Serializer as JsonSerializer};
 
 use super::super::claims::{self, MAX_CLAIMS_BYTES};
-use super::error_map;
-use super::{JwtCodec, MAX_TOKEN_BYTES};
+use super::{ensure_crypto_provider, error_map, JwtCodec, MAX_TOKEN_BYTES};
 use crate::jwt::JwtError;
 
 impl JwtCodec {
@@ -15,7 +14,7 @@ impl JwtCodec {
     /// claims 必须是受限 JSON object：序列化结果最多 32 KiB，并经过重复键、深度、成员和数组
     /// 预算预检；生成的 token 最多 64 KiB。未配置 signing key 时返回
     /// [`JwtError::MissingSigningKey`]。返回的 token 不是加密内容，调用方不得在日志或错误中记录
-    /// 其中的敏感 claims。
+    /// 其中的敏感 claims。签发时无法确定加密 provider 则返回 `InvalidConfig { field: "crypto_provider" }`。
     pub fn encode<T: Serialize>(&self, claims: &T) -> Result<String, JwtError> {
         // 没有签名密钥时直接返回，避免执行调用方的序列化逻辑。
         let signing_key = self
@@ -46,6 +45,7 @@ impl JwtCodec {
             .backend()
             .ok_or(JwtError::InvalidConfig { field: "algorithm" })?;
         let header = BackendHeader::new(algorithm);
+        ensure_crypto_provider()?;
         let token = jsonwebtoken::encode(&header, &raw, signing_key.backend())
             .map_err(|error| error_map::map_encode_error(&error))?;
         if token.len() > MAX_TOKEN_BYTES {

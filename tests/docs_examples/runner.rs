@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 use std::env;
 use std::fmt::Write as _;
 use std::fs;
+use std::hash::{DefaultHasher, Hash, Hasher};
 use std::io;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -49,13 +50,12 @@ pub(super) fn compile_documents(documents: &[Document]) {
     let mut workspace = TempDir::new("axutils-docs-examples").unwrap_or_else(|error| {
         panic!("failed to create isolated docs-example workspace: {error}")
     });
-    let target_dir = workspace.path().join("target");
-    fs::create_dir_all(&target_dir)
-        .unwrap_or_else(|error| panic!("failed to create isolated CARGO_TARGET_DIR: {error}"));
+    let target_dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("docs-examples");
 
     let filter = env::var("AXUTILS_DOCS_EXAMPLE_FILTER").ok();
     let start = env::var("AXUTILS_DOCS_EXAMPLE_START").ok();
     let mut started = start.is_none();
+    let mut matched = false;
     let mut counts = Counts::default();
     let mut groups = BTreeMap::<GroupKey, Vec<CompileCase>>::new();
     let mut failures = Vec::new();
@@ -75,6 +75,7 @@ pub(super) fn compile_documents(documents: &[Document]) {
                 continue;
             }
 
+            matched = true;
             let primary = metadata_for(&document.path, block_number, fence)
                 .expect("metadata was validated above");
             collect_case(
@@ -92,6 +93,11 @@ pub(super) fn compile_documents(documents: &[Document]) {
         started,
         "AXUTILS_DOCS_EXAMPLE_START did not match any block: {:?}",
         start
+    );
+
+    assert!(
+        filter.is_none() || matched,
+        "AXUTILS_DOCS_EXAMPLE_FILTER did not match any block: {filter:?}"
     );
 
     let group_count = groups.len();
@@ -233,9 +239,9 @@ fn run_group(
     let manifest = group_dir.join("Cargo.toml");
     write_group_manifest(&manifest, group)
         .map_err(|error| format!("failed to write group manifest: {error}"))?;
-    for (index, case) in cases.iter().enumerate() {
+    for case in cases {
         fs::write(
-            source_dir.join(format!("{}.rs", bin_name(index))),
+            source_dir.join(format!("{}.rs", bin_name(&case.key, &case.source))),
             &case.source,
         )
         .map_err(|error| format!("{}: failed to write group source: {error}", case.key))?;
@@ -248,13 +254,13 @@ fn run_group(
     }
 
     let mut errors = Vec::new();
-    for (index, case) in cases.iter().enumerate() {
+    for case in cases {
         counts.cargo_processes += 1;
         let output = cargo_check(
             &manifest,
             target_dir,
             &group.axutils_features,
-            Some(&bin_name(index)),
+            Some(&bin_name(&case.key, &case.source)),
         )?;
         if !output.status.success() {
             errors.push(format!(
@@ -423,8 +429,10 @@ fn report_block(document: &Document, block_number: usize, metadata: &BlockMetada
     );
 }
 
-fn bin_name(index: usize) -> String {
-    format!("case_{:04}", index + 1)
+fn bin_name(key: &str, source: &str) -> String {
+    let mut hasher = DefaultHasher::new();
+    (key, source).hash(&mut hasher);
+    format!("case_{:016x}", hasher.finish())
 }
 
 fn quoted_list(items: &[&str]) -> String {
@@ -612,7 +620,8 @@ struct TempDir {
 
 impl TempDir {
     fn new(prefix: &str) -> io::Result<Self> {
-        let base = env::temp_dir();
+        let base = Path::new(env!("CARGO_TARGET_TMPDIR"));
+        fs::create_dir_all(base)?;
         for attempt in 0..100u32 {
             let nonce = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
@@ -673,7 +682,16 @@ impl Drop for TempDir {
 mod tests {
     use std::path::Path;
 
-    use super::{redact_diagnostic, referenced_cfg_features, validate_cfg_features, CompileCase};
+    use super::{
+        bin_name, redact_diagnostic, referenced_cfg_features, validate_cfg_features, CompileCase,
+    };
+
+    #[test]
+    fn shared_target_distinguishes_filtered_blocks_and_source_revisions() {
+        let first = bin_name("path.md#1", "fn main() {}");
+        assert_ne!(first, bin_name("tree.md#1", "fn main() {}"));
+        assert_ne!(first, bin_name("path.md#1", "fn main() { missing(); }"));
+    }
 
     #[test]
     fn inactive_cfg_feature_is_rejected() {

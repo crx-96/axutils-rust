@@ -44,6 +44,32 @@ fn sync_returns_http_errors_as_responses_and_retries_transient_statuses() {
 }
 
 #[test]
+fn sync_truncated_response_body_reports_connection_error() {
+    let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let address = format!("http://{}", listener.local_addr().unwrap());
+    let server = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        read_request(&mut stream).unwrap();
+        stream
+            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\nConnection: close\r\n\r\nab")
+            .unwrap();
+    });
+    let request = HttpRequest::new(HttpMethod::Get, "/")
+        .unwrap()
+        .with_retry_policy(RetryPolicy::new().with_max_retries(1).unwrap());
+    let error = client(&address).execute(request).unwrap_err();
+    assert_eq!(
+        error,
+        HttpError::Transport {
+            kind: HttpTransportErrorKind::Connection,
+            attempts: 1,
+            exhausted: true,
+        }
+    );
+    server.join().unwrap();
+}
+
+#[test]
 fn default_config_requires_absolute_urls_without_a_base_url() {
     let config = HttpConfig::builder().build().expect("default config");
     assert_eq!(config.base_url(), None);

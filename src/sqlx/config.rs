@@ -79,7 +79,8 @@ impl SqlxConfig {
     ///
     /// 支持 `postgres://`、`postgresql://`、`mysql://`、`mariadb://` 以及 `sqlite:`/`sqlite://`
     /// URL。首版不配置 TLS；可在 URL 中本地识别的显式 TLS 要求会被拒绝。该方法不会连接数据库，
-    /// SQLite 文件也只会在后续 [`crate::sqlx::SqlxClient::connect`] 时产生文件 I/O。
+    /// SQLite 文件名经驱动解码后含 NUL 时返回 `InvalidConfig { field: "url" }`，文件 I/O
+    /// 只会在后续 [`crate::sqlx::SqlxClient::connect`] 时发生。
     ///
     /// # Examples
     ///
@@ -116,7 +117,7 @@ impl SqlxConfig {
             return Err(SqlxError::InvalidConfig { field: "tls" });
         }
 
-        let lifetime = database_lifetime(&connect_options);
+        let lifetime = database_lifetime(&connect_options)?;
         let mut config = Self {
             connect_options,
             driver,
@@ -308,11 +309,11 @@ impl fmt::Debug for SqlxConfig {
     }
 }
 
-/// 按 SQLx 传给 SQLite 的文件名和打开模式分类；驱动专属参数仍由驱动在连接时校验。
-fn database_lifetime(options: &AnyConnectOptions) -> DatabaseLifetime {
+/// 校验 SQLx 解码后的 SQLite 文件名，并按最终文件名、打开模式和 VFS 判定数据库寿命。
+fn database_lifetime(options: &AnyConnectOptions) -> Result<DatabaseLifetime, SqlxError> {
     let url = &options.database_url;
     if url.scheme() != "sqlite" {
-        return DatabaseLifetime::Persistent;
+        return Ok(DatabaseLifetime::Persistent);
     }
 
     // SQLx 从序列化 URL 去掉 scheme（含可选的 //），所以 authority 也属于文件名。
@@ -322,14 +323,19 @@ fn database_lifetime(options: &AnyConnectOptions) -> DatabaseLifetime {
         .trim_start_matches("sqlite:");
     let (name, params) = database.split_once('?').unwrap_or((database, ""));
     let filename = decode_filename_part(name);
+    // SQLx 将文件名传给 C 接口；在任何 URI 重写或连接尝试前返回本地配置错误。
+    if filename.contains('\0') {
+        return Err(SqlxError::InvalidConfig { field: "url" });
+    }
+
     let mut memory = false;
     let mut immutable = false;
-    let mut vfs = false;
+    let mut vfs = None;
     for (key, value) in sqlite_params(params) {
         match key.as_ref() {
             "mode" if value == "memory" => memory = true,
             "immutable" => immutable = matches!(value.as_ref(), "1" | "true"),
-            "vfs" => vfs = true,
+            "vfs" => vfs = Some(value),
             _ => {}
         }
     }
@@ -337,7 +343,10 @@ fn database_lifetime(options: &AnyConnectOptions) -> DatabaseLifetime {
     // immutable/vfs 会使 SQLx 重新转义整个文件名，原有的 file: 此时只是文件名的一部分。
     let mut path = filename.as_ref();
     let uri_path;
-    if let Some(uri) = path.strip_prefix("file:").filter(|_| !immutable && !vfs) {
+    if let Some(uri) = path
+        .strip_prefix("file:")
+        .filter(|_| !immutable && vfs.is_none())
+    {
         // SQLite 的 file: URI 再解码一次；先分隔 fragment 和参数，避免把转义分隔符当语法。
         let uri = uri.split('#').next().unwrap_or_default();
         let (name, params) = uri.split_once('?').unwrap_or((uri, ""));
@@ -345,7 +354,7 @@ fn database_lifetime(options: &AnyConnectOptions) -> DatabaseLifetime {
             Some(authority_path) => {
                 let end = authority_path.find('/').unwrap_or(authority_path.len());
                 if !matches!(&authority_path[..end], "" | "localhost") {
-                    return DatabaseLifetime::Persistent;
+                    return Ok(DatabaseLifetime::Persistent);
                 }
                 &authority_path[end..]
             }
@@ -353,19 +362,25 @@ fn database_lifetime(options: &AnyConnectOptions) -> DatabaseLifetime {
         };
         uri_path = decode_filename_part(name);
         path = uri_path.split('\0').next().unwrap_or_default();
-        // 内嵌 URI 的 mode 由 SQLite 最后应用，按出现顺序覆盖 SQLx 的打开标志。
+        // SQLite 依次应用内嵌 URI 的 mode 和 vfs，%00 会截断当前键或值。
         for (key, value) in sqlite_params(params) {
-            if key.split('\0').next() == Some("mode") {
-                memory = value.split('\0').next() == Some("memory");
+            match key.split('\0').next() {
+                Some("mode") => memory = value.split('\0').next() == Some("memory"),
+                Some("vfs") => vfs = Some(value),
+                _ => {}
             }
         }
     }
-    match path {
+    // memdb VFS 本身即以内存保存数据，与 mode 打开标志相互独立。
+    let memdb = vfs
+        .as_deref()
+        .is_some_and(|name| name.split('\0').next() == Some("memdb"));
+    Ok(match path {
         ":memory:" => DatabaseLifetime::Memory,
-        _ if memory => DatabaseLifetime::Memory,
+        _ if memory || memdb => DatabaseLifetime::Memory,
         "" => DatabaseLifetime::Temporary,
         _ => DatabaseLifetime::Persistent,
-    }
+    })
 }
 
 /// 拆分两层参数中的键值，对决定生命周期的 ASCII 标记做百分号解码。
@@ -398,8 +413,11 @@ fn decode_filename_part(text: &str) -> Cow<'_, str> {
         bytes.push(b'%');
         bytes.extend_from_slice(part.as_bytes());
     }
-    // 无效 UTF-8 不是特殊库名；连接失败仍由 SQLx 分类。
-    String::from_utf8(bytes).map_or(Cow::Borrowed(text), Cow::Owned)
+    // 无效 UTF-8 不会匹配 ASCII 标记，保留其余已解码字节，以便按 SQLite 规则识别 NUL 边界。
+    Cow::Owned(
+        String::from_utf8(bytes)
+            .unwrap_or_else(|error| String::from_utf8_lossy(error.as_bytes()).into_owned()),
+    )
 }
 
 /// 检查可以本地识别的显式 TLS 要求；不把未知 URL 参数解释成安全保证。
@@ -440,6 +458,8 @@ mod tests {
             ("sqlite:%3Amemory%3A", true),
             ("sqlite:%66ile:%253Amemory%253A", true),
             ("sqlite:file:", false),
+            ("sqlite:db?vfs=memdb", true),
+            ("sqlite:file:db%3Fvfs=memdb", true),
         ] {
             let mut config = SqlxConfig::new(url).unwrap();
             assert_eq!(config.sqlite_memory(), memory, "{url}");
@@ -459,6 +479,24 @@ mod tests {
                 })
             ));
         }
+    }
+
+    #[test]
+    fn rejects_nul_in_driver_decoded_sqlite_filename() {
+        for url in [
+            "sqlite:db%00suffix",
+            "sqlite:file:db%00suffix",
+            "sqlite:db%00suffix?vfs=memdb",
+        ] {
+            assert!(matches!(
+                SqlxConfig::new(url),
+                Err(SqlxError::InvalidConfig { field: "url" })
+            ));
+        }
+        // SQLx 解码一层后仍是字面 %00，后续 file: URI 解码遵循 SQLite 的截断规则。
+        assert!(SqlxConfig::new("sqlite:file:%3Amemory%3A%2500suffix")
+            .unwrap()
+            .sqlite_memory());
     }
 
     #[test]

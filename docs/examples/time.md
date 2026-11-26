@@ -21,14 +21,15 @@ assert!(nanoseconds >= microseconds * 1_000);
 
 ## 启用日期后端
 
-日期类型位于公开签名中，因此应用必须直接声明自己使用的日期 crate：
+日期类型位于公开签名中，因此应用必须直接声明自己使用的日期 crate。`axutils` 3.0 的
+`TimeUtils` 使用 Jiff 1.x；从 `axutils` 2.1 迁移时，请同步升级应用直接依赖的 Jiff 0.2。
 
 ```toml
 [dependencies]
-axutils = { version = "2.1", features = ["chrono", "time", "jiff"] }
+axutils = { version = "3.0", features = ["chrono", "time", "jiff"] }
 chrono = { version = "0.4", default-features = false }
 time = { version = "0.3", default-features = false }
-jiff = { version = "0.2", default-features = false }
+jiff = { version = "1", default-features = false }
 ```
 
 统一模板 token 为 `yyyy`、`MM`、`dd`、`HH`、`mm`、`ss`、`SSS` 和偏移 token `XXX`。日期不支持
